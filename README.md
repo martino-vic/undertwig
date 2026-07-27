@@ -2,7 +2,7 @@
 
 Undertwig is a browser-based LaTeX workspace with a file explorer, source editor, and PDF preview.
 
-Local editing and conversion run in the browser: projects stay on the device by default, and conversion uses the SwiftLaTeX PdfTeX WebAssembly engine. Optional Google sign-in unlocks collaboration features.
+Local editing and conversion run in the browser with the SwiftLaTeX PdfTeX WebAssembly engine. Projects stay on the device by default. Optional Google sign-in unlocks collaboration and free Google Cloud project storage (Google Drive app data for your account).
 
 ## Features
 
@@ -14,6 +14,7 @@ Local editing and conversion run in the browser: projects stay on the device by 
 - Compiler log panel
 - Collaborate control (requires Google sign-in)
 - Google-only login page
+- Cloud project storage for signed-in users
 
 ## Try it
 
@@ -23,13 +24,16 @@ Use the live site: [undertwig.com](https://undertwig.com).
 
 Convert writes the current project into the SwiftLaTeX in-browser PdfTeX engine and renders the returned PDF in the preview pane. Compilation happens on the user's device. Package resolution may fetch TeX Live resources from the configured on-demand endpoint when needed.
 
-## Authentication
+## Authentication and cloud storage
 
 Sign-in is available at [`login.html`](login.html) and supports Google accounts only, via Google Identity Services.
 
 1. Create an OAuth 2.0 Web client ID in Google Cloud Console.
-2. Add authorized JavaScript origins for `https://undertwig.com` (and `http://localhost` for local testing).
-3. Put the client ID in [`auth-config.js`](auth-config.js). Never put a client secret in the repo.
+2. Add authorized JavaScript origins for `https://undertwig.com`, `https://www.undertwig.com`, and local origins as needed.
+3. On the OAuth consent screen, add the scope `https://www.googleapis.com/auth/drive.appdata` (Google Drive app data).
+4. Put the client ID in [`auth-config.js`](auth-config.js). Never put a client secret in the repo.
+
+While signed in, Undertwig stores the project JSON in the user's Google Drive **app data** folder via [`cloud-storage.js`](cloud-storage.js). Access tokens are kept in memory only. Logged-out use continues to rely on `localStorage`.
 
 Security/privacy controls in the current client:
 
@@ -39,14 +43,16 @@ Security/privacy controls in the current client:
 - Same-origin-only post-login redirects
 - Minimal profile stored locally; raw ID token is not persisted
 - Session cleared when the Google credential expires
-- Logout clears local state and best-effort revokes the Google grant
+- Logout clears local state and best-effort revokes Google grants
 
 Signed-in session details are stored in the browser under `undertwig-auth-v2`.
+
 ## Project layout
 
 - `index.html` — app UI and conversion workflow
 - `login.html` — Google sign-in page
 - `auth.js` / `auth-config.js` — client-side session helpers and Google client ID
+- `cloud-storage.js` — Google Drive app-data project sync
 - `privacy.html` — Privacy Policy
 - `terms.html` — Terms of Use
 - `vendor/swiftlatex/` — SwiftLaTeX PdfTeX WebAssembly engine

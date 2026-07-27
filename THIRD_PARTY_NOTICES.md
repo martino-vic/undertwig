@@ -26,7 +26,8 @@ and are not redistributed as part of this project.
 ## Google Identity Services
 
 - Loaded at runtime from: `https://accounts.google.com/gsi/client`
-- Used by: `login.html` for Google-only sign-in (and briefly on logout when revoking access)
+- Used by: `login.html` for Google-only sign-in, and by the editor when authorizing
+  or revoking Google Drive app-data access for cloud project storage
 - Token key discovery: `https://www.googleapis.com/oauth2/v3/certs`
 - License / terms: Google APIs Terms of Service and Google Identity Services terms
   (see https://developers.google.com/identity and https://policies.google.com/terms)
@@ -37,6 +38,18 @@ and are not redistributed as part of this project.
     in `localStorage` (`undertwig-auth-v2`). The raw ID token is not persisted.
   - Configure the OAuth 2.0 Web client ID in `auth-config.js`. Never ship a client secret
     in this static site.
+
+## Google Drive API (app data)
+
+- Runtime API: `https://www.googleapis.com/drive/v3` and upload endpoint
+- Used by: `cloud-storage.js` for signed-in project persistence
+- Scope: `https://www.googleapis.com/auth/drive.appdata`
+- License / terms: Google APIs Terms of Service
+- Notes:
+  - Project JSON is stored in the signed-in user's Drive application-data space.
+  - OAuth access tokens are held in memory only and revoked on logout when possible.
+  - Enable the Drive API and app-data scope on the OAuth consent screen in Google Cloud.
+
 ## Future dependency rules
 
 Before adding any dependency or hosted runtime asset, record:

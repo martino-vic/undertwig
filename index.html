@@ -457,8 +457,22 @@
         font-size: 12px;
       }
 
+      .statusbar a {
+        color: var(--brand-strong);
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .statusbar a:hover {
+        text-decoration: underline;
+      }
+
       .statusbar.error {
         color: var(--danger);
+      }
+
+      .statusbar.error a {
+        color: #f0b4b4;
       }
 
       .viewer {
@@ -640,6 +654,7 @@
 
     <script src="auth-config.js"></script>
     <script src="auth.js"></script>
+    <script src="cloud-storage.js"></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
       const DEFAULT_TEX = String.raw`\documentclass{article}
@@ -694,6 +709,8 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
       const accountMessage = document.getElementById("accountMessage");
       const accountLogout = document.getElementById("accountLogout");
       let dragSourcePath = null;
+      let cloudSaveTimer = null;
+      let cloudSaveInFlight = false;
 
       function closeHoverBoxes() {
         collaborateBox.classList.add("hidden");
@@ -708,7 +725,8 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
           loginButton.classList.add("hidden");
           accountWrap.classList.remove("hidden");
           accountLabel.textContent = session.name || session.email || "Account";
-          accountMessage.textContent = "Signed in as " + (session.email || session.name) + ".";
+          accountMessage.textContent =
+            "Signed in as " + (session.email || session.name) + ". Projects save to Google Cloud storage.";
           collaborateLoginLink.classList.add("hidden");
         } else {
           loginButton.classList.remove("hidden");
@@ -776,6 +794,7 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
       });
 
       refreshAuthUi();
+      initCloudProject();
 
       document.getElementById("collapseExplorer").addEventListener("click", () => {
         app.classList.toggle("explorer-collapsed");
@@ -830,8 +849,107 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
         };
       }
 
-      function persistProject() {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      function replaceProjectState(nextState) {
+        state.activeFile = nextState.activeFile || "";
+        state.folders = Array.isArray(nextState.folders) ? nextState.folders : [];
+        state.files = nextState.files || {};
+      }
+
+      async function initCloudProject() {
+        if (!UndertwigCloud.isAvailable()) {
+          return;
+        }
+
+        setStatus("Loading project from Google Cloud storage…");
+        try {
+          const cloudProject = await UndertwigCloud.loadProject();
+          if (cloudProject && cloudProject.files && Object.keys(cloudProject.files).length) {
+            replaceProjectState(cloudProject);
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            } catch (_error) {
+              // Local cache is optional when cloud storage is available.
+            }
+            render();
+            setStatus("Loaded project from Google Cloud storage.");
+            return;
+          }
+
+          // No cloud project yet: upload the current local project.
+          await UndertwigCloud.saveProject(state);
+          setStatus("Signed-in projects are saved to Google Cloud storage (free).");
+        } catch (error) {
+          setStatus(
+            `Could not load Google Cloud storage: ${error && error.message ? error.message : error}`,
+            true
+          );
+        }
+      }
+
+      function persistProject(options) {
+        const immediateCloud = Boolean(options && options.immediateCloud);
+        let localSaved = true;
+
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (error) {
+          localSaved = false;
+          if (!UndertwigAuth.isLoggedIn()) {
+            setStatusStorageFull();
+            return false;
+          }
+        }
+
+        if (UndertwigCloud.isAvailable()) {
+          scheduleCloudSave(immediateCloud);
+          if (!localSaved) {
+            setStatus("Browser storage is full. Saving to Google Cloud storage…");
+          }
+          return true;
+        }
+
+        if (!localSaved) {
+          setStatusStorageFull();
+          return false;
+        }
+
+        return true;
+      }
+
+      function scheduleCloudSave(immediate) {
+        if (cloudSaveTimer) {
+          clearTimeout(cloudSaveTimer);
+          cloudSaveTimer = null;
+        }
+
+        const run = async () => {
+          if (cloudSaveInFlight) {
+            scheduleCloudSave(false);
+            return;
+          }
+          cloudSaveInFlight = true;
+          try {
+            await UndertwigCloud.saveProject(state);
+          } catch (error) {
+            setStatus(
+              `Could not save to Google Cloud storage: ${error && error.message ? error.message : error}`,
+              true
+            );
+          } finally {
+            cloudSaveInFlight = false;
+          }
+        };
+
+        if (immediate) {
+          run();
+          return;
+        }
+
+        cloudSaveTimer = setTimeout(run, 1200);
+      }
+
+      function setStatusStorageFull() {
+        setStatus("The folder may be too large for browser storage.", true, { offerCloudLogin: true });
       }
 
       function render() {
@@ -940,7 +1058,7 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
           row.draggable = true;
           row.addEventListener("click", () => {
             state.activeFile = node.path;
-            persistProject();
+            persistProject({ immediateCloud: true });
             render();
           });
           row.addEventListener("dragstart", (event) => {
@@ -1055,7 +1173,7 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
           state.activeFile = destination;
         }
 
-        persistProject();
+        persistProject({ immediateCloud: true });
         render();
         setStatus(`Moved ${sourcePath} → ${destination}.`);
       }
@@ -1071,7 +1189,7 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
           state.activeFile = remaining.includes("main.tex") ? "main.tex" : (remaining[0] || "");
         }
 
-        persistProject();
+        persistProject({ immediateCloud: true });
         render();
         setStatus(`Deleted ${path}.`);
       }
@@ -1101,7 +1219,7 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
           state.activeFile = remaining.includes("main.tex") ? "main.tex" : (remaining[0] || "");
         }
 
-        persistProject();
+        persistProject({ immediateCloud: true });
         render();
         setStatus(`Deleted folder ${path}.`);
       }
@@ -1120,7 +1238,7 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
           binary: false
         };
         state.activeFile = path;
-        persistProject();
+        persistProject({ immediateCloud: true });
         render();
         setStatus(`Created ${path}.`);
       }
@@ -1129,7 +1247,7 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
         const path = normalizePath(prompt("New folder path", suggestedPath("sections")));
         if (!path) return;
         addFolder(path);
-        persistProject();
+        persistProject({ immediateCloud: true });
         renderTree();
         setStatus(`Created folder ${path}.`);
       }
@@ -1206,14 +1324,11 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
         }
 
         try {
-          persistProject();
+          if (!persistProject({ immediateCloud: true })) {
+            return;
+          }
         } catch (error) {
-          setStatus(
-            preserveFolders
-              ? "Folder contents were read, but could not be saved. The folder may be too large for browser storage."
-              : "Files were read, but could not be saved. Browser storage may be full.",
-            true
-          );
+          setStatusStorageFull();
           return;
         }
 
@@ -1381,9 +1496,21 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
         return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
       }
 
-      function setStatus(message, isError = false) {
-        status.textContent = message;
+      function setStatus(message, isError = false, options = {}) {
         status.classList.toggle("error", isError);
+        status.textContent = "";
+
+        if (options && options.offerCloudLogin && !UndertwigAuth.isLoggedIn()) {
+          status.appendChild(document.createTextNode(String(message || "") + " "));
+          const link = document.createElement("a");
+          link.href = UndertwigAuth.loginUrl("/");
+          link.textContent = "Log in";
+          status.appendChild(link);
+          status.appendChild(document.createTextNode(" to use Google Cloud storage (free)."));
+          return;
+        }
+
+        status.textContent = message;
       }
     </script>
   </body>

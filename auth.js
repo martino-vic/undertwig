@@ -330,6 +330,9 @@
     } catch (_error) {
       // Ignore.
     }
+    if (global.UndertwigCloud && typeof global.UndertwigCloud.clearToken === "function") {
+      global.UndertwigCloud.clearToken();
+    }
     if (global.google && global.google.accounts && global.google.accounts.id) {
       try {
         global.google.accounts.id.disableAutoSelect();
@@ -341,16 +344,38 @@
 
   function loadGoogleIdentityServices() {
     return new Promise((resolve, reject) => {
-      if (global.google && global.google.accounts && global.google.accounts.id) {
+      const ready = () =>
+        global.google &&
+        global.google.accounts &&
+        global.google.accounts.id &&
+        global.google.accounts.oauth2;
+
+      if (ready()) {
         resolve();
         return;
       }
       const existing = document.querySelector('script[data-undertwig-gsi="1"]');
       if (existing) {
-        existing.addEventListener("load", () => resolve(), { once: true });
-        existing.addEventListener("error", () => reject(new Error("Google sign-in failed to load.")), {
-          once: true,
-        });
+        const wait = setInterval(() => {
+          if (ready()) {
+            clearInterval(wait);
+            resolve();
+          }
+        }, 50);
+        existing.addEventListener(
+          "error",
+          () => {
+            clearInterval(wait);
+            reject(new Error("Google sign-in failed to load."));
+          },
+          { once: true }
+        );
+        setTimeout(() => {
+          if (ready()) {
+            clearInterval(wait);
+            resolve();
+          }
+        }, 10000);
         return;
       }
       const script = document.createElement("script");
@@ -358,7 +383,22 @@
       script.async = true;
       script.defer = true;
       script.dataset.undertwigGsi = "1";
-      script.addEventListener("load", () => resolve(), { once: true });
+      script.addEventListener(
+        "load",
+        () => {
+          const started = Date.now();
+          const wait = setInterval(() => {
+            if (ready()) {
+              clearInterval(wait);
+              resolve();
+            } else if (Date.now() - started > 10000) {
+              clearInterval(wait);
+              reject(new Error("Google authorization library failed to load."));
+            }
+          }, 50);
+        },
+        { once: true }
+      );
       script.addEventListener("error", () => reject(new Error("Google sign-in failed to load.")), {
         once: true,
       });
@@ -417,5 +457,6 @@
     logout,
     logoutAndRevoke,
     loginUrl,
+    loadGoogleIdentityServices,
   };
 })(window);

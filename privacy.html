@@ -128,9 +128,9 @@
       <h2>Summary</h2>
       <p>
         Undertwig is designed to run in your browser. Your project files are stored
-        on your device by default. Optional Google sign-in is available for features
-        such as collaboration. We do not intentionally collect the contents of your
-        documents for advertising or profiling.
+        on your device by default. Optional Google sign-in unlocks collaboration and
+        free Google Cloud project storage in your Google account. We do not intentionally
+        collect the contents of your documents for advertising or profiling.
       </p>
 
       <h2>Information stored on your device</h2>
@@ -164,10 +164,26 @@
         signing keys, checks issuer, audience, expiry, email verification, and a one-time
         nonce, then keeps only the minimal profile fields needed to show your signed-in
         state. Sign-in sessions expire when the Google credential expires. Logging out
-        clears the local session and attempts to revoke the Google sign-in grant for this
-        site. We do not offer other sign-in providers. Google’s handling of your account
-        is governed by
+        clears the local session and attempts to revoke Google grants for this site.
+        We do not offer other sign-in providers. Google’s handling of your account is
+        governed by
         <a href="https://policies.google.com/privacy">Google’s Privacy Policy</a>.
+      </p>
+
+      <h2>Google Cloud project storage</h2>
+      <p>
+        When you are signed in, Undertwig can store your LaTeX project (file names and
+        contents, including uploaded assets) in Google Drive application data associated
+        with your Google account. That data is stored by Google in a hidden app-data space
+        for Undertwig, not in Undertwig-operated servers. Access uses a Google OAuth token
+        with the Drive app data scope, requested in your browser after sign-in. Logging out
+        clears the local session and attempts to revoke the token. You can also remove app
+        access from your Google Account permissions page.
+      </p>
+      <p>
+        Local editing without signing in continues to use browser storage only. If browser
+        storage is too small for a project, Undertwig may prompt you to sign in to use
+        Google Cloud storage instead.
       </p>
 
       <h2>Information processed to provide the service</h2>
@@ -179,10 +195,11 @@
           server logs for security, reliability, and abuse prevention.
         </li>
         <li>
-          <strong>Google sign-in.</strong> The login page loads Google Identity Services.
-          During sign-in verification, the browser may request Google’s public signing
-          keys. Logging out may contact Google to revoke the site’s sign-in grant.
-          The editor itself does not load Google’s sign-in script on every visit.
+          <strong>Google sign-in and cloud storage.</strong> The login page loads Google
+          Identity Services. During sign-in verification, the browser may request Google’s
+          public signing keys. When cloud storage is used, the editor requests a Google
+          OAuth access token and reads/writes project data via the Google Drive API app-data
+          space. Logging out may contact Google to revoke grants for this site.
         </li>
         <li>
           <strong>Optional package fetching.</strong> When a document needs TeX packages
@@ -217,11 +234,11 @@
 
       <h2>Data retention</h2>
       <p>
-        Project data and local sign-in session data in local storage remain until you
-        clear them, log out (for the session), or your browser removes them. Hosting
-        provider logs are retained according to that provider’s practices. Undertwig
-        does not currently operate a separate server-side account database for the
-        public site.
+        Project data in local storage remains until you clear it, log out (for session
+        data), or your browser removes it. Cloud project data stored in Google Drive app
+        data remains until you delete it through Undertwig usage patterns, revoke app
+        access, or remove it via Google Account controls. Hosting provider logs are retained
+        according to that provider’s practices.
       </p>
 
       <h2>Children</h2>
