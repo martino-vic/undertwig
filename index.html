@@ -594,8 +594,8 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
       function render() {
         renderTree();
         const file = state.files[state.activeFile];
-        activeFileName.textContent = state.activeFile;
-        editor.disabled = Boolean(file && file.binary);
+        activeFileName.textContent = state.activeFile || "No file selected";
+        editor.disabled = !file || Boolean(file.binary);
         editor.value = file ? (file.binary ? "Binary asset selected. Uploads are available to LaTeX during conversion." : file.content) : "";
         updateMeta();
       }
