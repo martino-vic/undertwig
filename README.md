@@ -14,6 +14,7 @@ Local editing and conversion run in the browser with the SwiftLaTeX PdfTeX WebAs
 - Convert button with local PDF preview
 - Compiler log panel
 - Collaborate control (requires Google sign-in)
+- Email collaboration invites via the signed-in user's Gmail
 - Google-only login page
 - Cloud project storage for signed-in users
 
@@ -31,10 +32,13 @@ Sign-in is available at [`login.html`](login.html) and supports Google accounts 
 
 1. Create an OAuth 2.0 Web client ID in Google Cloud Console.
 2. Add authorized JavaScript origins for `https://undertwig.com`, `https://www.undertwig.com`, and local origins as needed.
-3. On the OAuth consent screen, add the scope `https://www.googleapis.com/auth/drive.appdata` (Google Drive app data).
-4. Put the client ID in [`auth-config.js`](auth-config.js). Never put a client secret in the repo.
+3. On the OAuth consent screen, add scopes:
+   - `https://www.googleapis.com/auth/drive.appdata` (Google Drive app data)
+   - `https://www.googleapis.com/auth/gmail.send` (collaboration invite emails)
+4. Enable the **Google Drive API** and **Gmail API** for the project.
+5. Put the client ID in [`auth-config.js`](auth-config.js). Never put a client secret in the repo.
 
-While signed in, Undertwig stores the project JSON in the user's Google Drive **app data** folder via [`cloud-storage.js`](cloud-storage.js). Access tokens are kept in memory only. Logged-out use continues to rely on `localStorage`.
+While signed in, Undertwig stores the project JSON in the user's Google Drive **app data** folder via [`cloud-storage.js`](cloud-storage.js). Collaboration invites are sent through the user's Gmail via [`invite.js`](invite.js). Access tokens are kept in memory only. Logged-out use continues to rely on `localStorage`.
 
 Security/privacy controls in the current client:
 
@@ -54,6 +58,7 @@ Signed-in session details are stored in the browser under `undertwig-auth-v2`.
 - `login.html` — Google sign-in page
 - `auth.js` / `auth-config.js` — client-side session helpers and Google client ID
 - `cloud-storage.js` — Google Drive app-data project sync
+- `invite.js` — Gmail-based collaboration invitations
 - `privacy.html` — Privacy Policy
 - `terms.html` — Terms of Use
 - `vendor/swiftlatex/` — SwiftLaTeX PdfTeX WebAssembly engine

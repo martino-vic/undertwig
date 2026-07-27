@@ -421,7 +421,7 @@
         top: calc(100% + 10px);
         right: 0;
         z-index: 40;
-        width: min(280px, calc(100vw - 32px));
+        width: min(300px, calc(100vw - 32px));
         padding: 14px 14px 12px;
         border: 1px solid var(--border);
         border-radius: 12px;
@@ -430,6 +430,62 @@
         color: var(--text);
         font-size: 13px;
         line-height: 1.45;
+      }
+
+      .invite-form {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .invite-form label {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .invite-form input[type="email"] {
+        width: 100%;
+        margin: 0;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+      }
+
+      .invite-form input[type="email"]:focus {
+        outline: none;
+        border-color: var(--brand);
+      }
+
+      .invite-form button[type="submit"] {
+        width: 100%;
+        padding: 8px 10px;
+        border-color: transparent;
+        background: var(--brand);
+        color: #fff;
+        font-weight: 600;
+      }
+
+      .invite-form button[type="submit"]:hover {
+        background: var(--brand-strong);
+        border-color: transparent;
+      }
+
+      .invite-status {
+        margin: 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .invite-status.is-error {
+        color: var(--danger);
+      }
+
+      .invite-status.is-success {
+        color: var(--brand-strong);
       }
 
       .hover-box::before {
@@ -643,7 +699,13 @@
               </button>
               <div class="hover-box hidden" id="collaborateBox" role="dialog" aria-label="Collaborate">
                 <p id="collaborateMessage">You need to log in to collaborate.</p>
-                <p class="hover-box-note">Undertwig is free.</p>
+                <form class="invite-form hidden" id="inviteForm" novalidate>
+                  <label for="inviteEmail">Invite by email</label>
+                  <input id="inviteEmail" name="email" type="email" autocomplete="email" placeholder="colleague@example.com" required>
+                  <button type="submit" id="inviteSubmit">Send invite</button>
+                  <p class="invite-status" id="inviteStatus" aria-live="polite"></p>
+                </form>
+                <p class="hover-box-note" id="collaborateNote">Undertwig is free.</p>
                 <a id="collaborateLoginLink" href="login.html?next=/">Log in</a>
               </div>
             </div>
@@ -694,6 +756,7 @@
     <script src="auth-config.js"></script>
     <script src="auth.js"></script>
     <script src="cloud-storage.js"></script>
+    <script src="invite.js"></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
       const DEMO_FIGURE_PNG_BASE64 =
@@ -875,7 +938,11 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const collaborateButton = document.getElementById("collaborate");
       const collaborateBox = document.getElementById("collaborateBox");
       const collaborateMessage = document.getElementById("collaborateMessage");
+      const collaborateNote = document.getElementById("collaborateNote");
       const collaborateLoginLink = document.getElementById("collaborateLoginLink");
+      const inviteForm = document.getElementById("inviteForm");
+      const inviteEmail = document.getElementById("inviteEmail");
+      const inviteStatus = document.getElementById("inviteStatus");
       const loginButton = document.getElementById("loginButton");
       const accountWrap = document.getElementById("accountWrap");
       const accountButton = document.getElementById("accountButton");
@@ -896,6 +963,52 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         accountButton.setAttribute("aria-expanded", "false");
       }
 
+      function setInviteStatus(message, kind) {
+        inviteStatus.textContent = message || "";
+        inviteStatus.classList.remove("is-error", "is-success");
+        if (kind === "error") {
+          inviteStatus.classList.add("is-error");
+        } else if (kind === "success") {
+          inviteStatus.classList.add("is-success");
+        }
+      }
+
+      function isValidInviteEmail(value) {
+        const email = String(value || "").trim();
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+      }
+
+      function buildInviteLoginUrl() {
+        return new URL(UndertwigAuth.loginUrl("/"), window.location.href).href;
+      }
+
+      function resetInviteForm() {
+        inviteForm.reset();
+        setInviteStatus("");
+        const submit = document.getElementById("inviteSubmit");
+        if (submit) {
+          submit.disabled = false;
+        }
+      }
+
+      function showCollaborateLoggedOut() {
+        collaborateMessage.textContent = "You need to log in to collaborate.";
+        inviteForm.classList.add("hidden");
+        collaborateNote.classList.remove("hidden");
+        collaborateLoginLink.classList.remove("hidden");
+        collaborateLoginLink.href = UndertwigAuth.loginUrl("/");
+        collaborateLoginLink.textContent = "Log in";
+        resetInviteForm();
+      }
+
+      function showCollaborateLoggedIn() {
+        collaborateMessage.textContent = "Invite someone to Undertwig by email.";
+        inviteForm.classList.remove("hidden");
+        collaborateNote.classList.add("hidden");
+        collaborateLoginLink.classList.add("hidden");
+        resetInviteForm();
+      }
+
       function refreshAuthUi() {
         const session = UndertwigAuth.readSession();
         if (session) {
@@ -910,6 +1023,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           accountWrap.classList.add("hidden");
           collaborateLoginLink.classList.remove("hidden");
           collaborateLoginLink.href = UndertwigAuth.loginUrl("/");
+          inviteForm.classList.add("hidden");
         }
         closeHoverBoxes();
       }
@@ -922,16 +1036,52 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           return;
         }
         if (UndertwigAuth.isLoggedIn()) {
-          collaborateMessage.textContent = "Collaboration tools are coming soon for signed-in accounts.";
-          collaborateLoginLink.classList.add("hidden");
+          showCollaborateLoggedIn();
         } else {
-          collaborateMessage.textContent = "You need to log in to collaborate.";
-          collaborateLoginLink.classList.remove("hidden");
-          collaborateLoginLink.href = UndertwigAuth.loginUrl("/");
-          collaborateLoginLink.textContent = "Log in";
+          showCollaborateLoggedOut();
         }
         collaborateBox.classList.remove("hidden");
         collaborateButton.setAttribute("aria-expanded", "true");
+        if (UndertwigAuth.isLoggedIn()) {
+          inviteEmail.focus();
+        }
+      });
+
+      inviteForm.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+
+      inviteForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const session = UndertwigAuth.readSession();
+        if (!session) {
+          showCollaborateLoggedOut();
+          return;
+        }
+        const email = inviteEmail.value.trim();
+        if (!isValidInviteEmail(email)) {
+          setInviteStatus("Enter a valid email address.", "error");
+          inviteEmail.focus();
+          return;
+        }
+
+        const submit = document.getElementById("inviteSubmit");
+        submit.disabled = true;
+        setInviteStatus("Sending invitation…");
+        try {
+          await UndertwigInvite.sendCollaborationInvite(email, buildInviteLoginUrl());
+          setInviteStatus("Invitation sent to " + email + ".", "success");
+          inviteEmail.value = "";
+          setStatus("Collaboration invite sent to " + email + ".");
+        } catch (error) {
+          setInviteStatus(
+            (error && error.message) || "Could not send the invitation.",
+            "error"
+          );
+        } finally {
+          submit.disabled = false;
+        }
       });
 
       accountButton.addEventListener("click", (event) => {

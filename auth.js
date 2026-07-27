@@ -333,6 +333,9 @@
     if (global.UndertwigCloud && typeof global.UndertwigCloud.clearToken === "function") {
       global.UndertwigCloud.clearToken();
     }
+    if (global.UndertwigInvite && typeof global.UndertwigInvite.clearToken === "function") {
+      global.UndertwigInvite.clearToken();
+    }
     if (global.google && global.google.accounts && global.google.accounts.id) {
       try {
         global.google.accounts.id.disableAutoSelect();

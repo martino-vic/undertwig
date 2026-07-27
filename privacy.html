@@ -186,6 +186,16 @@
         Google Cloud storage instead.
       </p>
 
+      <h2>Collaboration invitations</h2>
+      <p>
+        When you are signed in, you can invite another person by email from the Collaborate
+        control. Sending an invite asks Google for permission to send email through your
+        Gmail account (<code>gmail.send</code>). The invitation is sent from your address
+        and includes a link to the Undertwig login page. Undertwig does not operate a
+        separate mail server for these invites. Recipient addresses you type are used only
+        to send that invitation.
+      </p>
+
       <h2>Information processed to provide the service</h2>
       <ul>
         <li>
@@ -199,7 +209,9 @@
           Identity Services. During sign-in verification, the browser may request Google’s
           public signing keys. When cloud storage is used, the editor requests a Google
           OAuth access token and reads/writes project data via the Google Drive API app-data
-          space. Logging out may contact Google to revoke grants for this site.
+          space. Collaboration invites may request Gmail send access and use the Gmail API
+          to deliver an invitation from your account. Logging out may contact Google to
+          revoke grants for this site.
         </li>
         <li>
           <strong>Optional package fetching.</strong> When a document needs TeX packages

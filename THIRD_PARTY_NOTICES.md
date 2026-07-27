@@ -54,6 +54,17 @@ and are not redistributed as part of this project.
   - OAuth access tokens are held in memory only and revoked on logout when possible.
   - Enable the Drive API and app-data scope on the OAuth consent screen in Google Cloud.
 
+## Gmail API (collaboration invites)
+
+- Runtime API: `https://gmail.googleapis.com/gmail/v1/users/me/messages/send`
+- Used by: `invite.js` when a signed-in user sends a collaboration invitation
+- Scope: `https://www.googleapis.com/auth/gmail.send`
+- License / terms: Google APIs Terms of Service
+- Notes:
+  - Invites are sent from the signed-in user's Gmail account, not from Undertwig servers.
+  - Enable the Gmail API and `gmail.send` scope on the OAuth consent screen in Google Cloud.
+  - Access tokens for sending mail are held in memory only and revoked on logout when possible.
+
 ## Future dependency rules
 
 Before adding any dependency or hosted runtime asset, record:

@@ -27,10 +27,12 @@ Use this checklist before any public release.
 - [x] Privacy Policy and Terms of Use are published for the public site.
 - [x] Privacy and Terms cover Google-only sign-in and collaboration gating.
 - [x] Privacy and Terms cover Google Drive app-data cloud project storage for signed-in users.
+- [x] Privacy and Terms cover Gmail-based collaboration invitation emails.
 - [x] Production Google OAuth client ID is configured in `auth-config.js` (undertwig GCP project).
 - [x] Client-side Google ID token verification (JWKS, nonce, claim checks) is enabled.
 - [ ] Confirm authorized JavaScript origins in Google Cloud include `https://undertwig.com` and `https://www.undertwig.com`.
 - [ ] Enable the Google Drive API and add scope `https://www.googleapis.com/auth/drive.appdata` on the OAuth consent screen.
+- [ ] Enable the Gmail API and add scope `https://www.googleapis.com/auth/gmail.send` on the OAuth consent screen.
 - [ ] Keep OAuth consent screen test users listed while status is Testing, or publish when ready.
 - [ ] Revisit Privacy and Terms before adding analytics or additional server-side processing.
 ## Release gate
