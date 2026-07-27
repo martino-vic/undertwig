@@ -1296,6 +1296,66 @@
     return hydrateTokenFromStorage();
   }
 
+  /**
+   * Fast reachability check using the stored Drive token only (no GIS popups).
+   * Resolves within ~8s even when the network is broken.
+   */
+  async function verifyDriveAccess() {
+    if (!hydrateTokenFromStorage()) {
+      return { ok: false, reason: "no-token", fileId: null };
+    }
+
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = setTimeout(() => {
+      if (controller) {
+        try {
+          controller.abort();
+        } catch (_error) {
+          // Ignore.
+        }
+      }
+    }, 8000);
+
+    try {
+      const response = await fetch(DRIVE_API + "/about?fields=user", {
+        method: "GET",
+        credentials: "omit",
+        headers: {
+          Authorization: "Bearer " + memoryAccessToken,
+        },
+        signal: controller ? controller.signal : undefined,
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        forgetAccessToken();
+        return { ok: false, reason: "unauthorized", fileId: null };
+      }
+      if (!response.ok) {
+        return { ok: false, reason: "http-" + response.status, fileId: null };
+      }
+
+      // Best-effort folder id for the Open link; ignore folder errors here.
+      let fileId = getProjectFolderId() || cachedUndertwigFolderId || null;
+      try {
+        fileId = (await ensureUndertwigFolder()) || fileId;
+      } catch (_error) {
+        // about succeeded, so Drive is reachable even if folder setup needs a later sync.
+      }
+      writeRole(cachedRole || "owner");
+      return { ok: true, reason: "ok", fileId: fileId };
+    } catch (error) {
+      const aborted =
+        error && (error.name === "AbortError" || /abort/i.test(String(error.message || "")));
+      return {
+        ok: false,
+        reason: aborted ? "timeout" : "network",
+        fileId: null,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   function isAvailable() {
     return Boolean(auth() && auth().isLoggedIn() && auth().getConfig().googleClientId);
   }
@@ -1317,6 +1377,7 @@
     CLOUD_FOLDER_NAME,
     isAvailable,
     hasAccessToken,
+    verifyDriveAccess,
     isCollaborator,
     connect,
     getAccessToken,
