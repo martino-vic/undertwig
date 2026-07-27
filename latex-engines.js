@@ -88,6 +88,43 @@
     "luatexja.lua",
     "luatexja.sty",
   ];
+  const LIBERTINUS_OTF_FILES = [
+    "LibertinusSerif-Regular.otf",
+    "LibertinusSerif-Bold.otf",
+    "LibertinusSerif-Italic.otf",
+    "LibertinusSerif-BoldItalic.otf",
+    "LibertinusSerif-Semibold.otf",
+    "LibertinusSerif-SemiboldItalic.otf",
+    "LibertinusSans-Regular.otf",
+    "LibertinusSans-Bold.otf",
+    "LibertinusSans-Italic.otf",
+    "LibertinusMono-Regular.otf",
+  ];
+  // fontspec loads these when the thesis uses family names like "Libertinus Serif".
+  const LIBERTINUS_FONTSPEC = {
+    "Libertinus Serif.fontspec":
+      "\\defaultfontfeatures[Libertinus Serif]{\n" +
+      "  Extension = .otf,\n" +
+      "  UprightFont = LibertinusSerif-Regular,\n" +
+      "  BoldFont = LibertinusSerif-Bold,\n" +
+      "  ItalicFont = LibertinusSerif-Italic,\n" +
+      "  BoldItalicFont = LibertinusSerif-BoldItalic,\n" +
+      "  FontFace = {sb}{n}{LibertinusSerif-Semibold},\n" +
+      "  FontFace = {sb}{it}{LibertinusSerif-SemiboldItalic},\n" +
+      "}\n",
+    "Libertinus Sans.fontspec":
+      "\\defaultfontfeatures[Libertinus Sans]{\n" +
+      "  Extension = .otf,\n" +
+      "  UprightFont = LibertinusSans-Regular,\n" +
+      "  BoldFont = LibertinusSans-Bold,\n" +
+      "  ItalicFont = LibertinusSans-Italic,\n" +
+      "}\n",
+    "Libertinus Mono.fontspec":
+      "\\defaultfontfeatures[Libertinus Mono]{\n" +
+      "  Extension = .otf,\n" +
+      "  UprightFont = LibertinusMono-Regular,\n" +
+      "}\n",
+  };
 
   let selectedEngine = readStoredEngine();
   let luaWorker = null;
@@ -95,6 +132,9 @@
   let luaInitPromise = null;
   let luaTexJaReady = false;
   let luaTexJaPromise = null;
+  let luaLibertinusReady = false;
+  let luaLibertinusPromise = null;
+  let luaLibertinusProjectFiles = null;
 
   function readStoredEngine() {
     try {
@@ -157,6 +197,9 @@
     luaInitPromise = null;
     luaTexJaReady = false;
     luaTexJaPromise = null;
+    luaLibertinusReady = false;
+    luaLibertinusPromise = null;
+    luaLibertinusProjectFiles = null;
   }
 
   function fetchTexLiveFile(name) {
@@ -265,6 +308,18 @@
     });
   }
 
+  function stringToUtf8Bytes(text) {
+    if (typeof TextEncoder === "function") {
+      return new TextEncoder().encode(text);
+    }
+    const encoded = unescape(encodeURIComponent(text));
+    const bytes = new Uint8Array(encoded.length);
+    for (let index = 0; index < encoded.length; index += 1) {
+      bytes[index] = encoded.charCodeAt(index);
+    }
+    return bytes;
+  }
+
   function ensureLuaTexJa(onProgress) {
     if (luaTexJaReady) {
       return Promise.resolve();
@@ -296,6 +351,69 @@
       });
 
     return luaTexJaPromise;
+  }
+
+  function ensureLuaLibertinus(onProgress) {
+    if (luaLibertinusReady && luaLibertinusProjectFiles) {
+      return Promise.resolve();
+    }
+    if (luaLibertinusPromise) {
+      return luaLibertinusPromise;
+    }
+
+    luaLibertinusPromise = fetchTexLiveFiles(
+      LIBERTINUS_OTF_FILES,
+      function (loaded, total) {
+        if (typeof onProgress === "function") {
+          onProgress("Loading Libertinus fonts (" + loaded + "/" + total + ")…");
+        }
+      }
+    )
+      .then(function (otfFiles) {
+        if (!otfFiles.length) {
+          throw new Error("Could not download Libertinus font files.");
+        }
+        const fontspecFiles = Object.keys(LIBERTINUS_FONTSPEC).map(function (name) {
+          return {
+            name: name,
+            format: TEXLIVE_TEX_FORMAT,
+            contents: stringToUtf8Bytes(LIBERTINUS_FONTSPEC[name]),
+          };
+        });
+        const allFiles = otfFiles.concat(fontspecFiles);
+        luaLibertinusProjectFiles = allFiles.map(function (file) {
+          return { path: file.name, contents: file.contents };
+        });
+        if (typeof onProgress === "function") {
+          onProgress("Registering Libertinus fonts with LuaLaTeX…");
+        }
+        return writeLuaRemoteFiles(allFiles);
+      })
+      .then(function () {
+        luaLibertinusReady = true;
+      })
+      .catch(function (error) {
+        luaLibertinusPromise = null;
+        luaLibertinusProjectFiles = null;
+        throw error;
+      });
+
+    return luaLibertinusPromise;
+  }
+
+  function mergeLuaEngineFiles(projectFiles) {
+    const files = projectFilesToBusyTex(projectFiles);
+    const seen = {};
+    files.forEach(function (file) {
+      seen[file.path] = true;
+    });
+    (luaLibertinusProjectFiles || []).forEach(function (file) {
+      if (!seen[file.path]) {
+        files.push(file);
+        seen[file.path] = true;
+      }
+    });
+    return files;
   }
 
   function ensureLuaWorker(onProgress) {
@@ -501,8 +619,11 @@
         return ensureLuaTexJa(notify);
       })
       .then(function () {
+        return ensureLuaLibertinus(notify);
+      })
+      .then(function () {
         notify("Converting with LuaLaTeX…");
-        const files = projectFilesToBusyTex(projectFiles);
+        const files = mergeLuaEngineFiles(projectFiles);
         return new Promise(function (resolve, reject) {
           if (!luaWorker) {
             reject(new Error("LuaLaTeX worker is not ready."));
