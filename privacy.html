@@ -128,8 +128,9 @@
       <h2>Summary</h2>
       <p>
         Undertwig is designed to run in your browser. Your project files are stored
-        on your device. We do not operate user accounts, and we do not intentionally
-        collect the contents of your documents.
+        on your device by default. Optional Google sign-in is available for features
+        such as collaboration. We do not intentionally collect the contents of your
+        documents for advertising or profiling.
       </p>
 
       <h2>Information stored on your device</h2>
@@ -140,8 +141,29 @@
         on your device unless you export it, clear site data, or otherwise share it.
       </p>
       <p>
+        If you sign in, a small account session (such as your Google account email,
+        display name, profile image URL, and account identifier) is also stored in
+        local storage under a key such as <code>undertwig-auth-v1</code> so the
+        editor can keep you signed in on that browser.
+      </p>
+      <p>
         Generated PDFs are created locally in your browser and are not uploaded to
-        Undertwig servers.
+        Undertwig servers as part of local conversion.
+      </p>
+
+      <h2>Google account sign-in</h2>
+      <p>
+        Collaboration and related signed-in features require a Google account.
+        Sign-in uses Google Identity Services. When you choose “Continue with Google,”
+        Google authenticates you and may share with Undertwig basic profile details
+        such as your name, email address, language, and profile picture, subject to
+        your Google account settings and Google’s own policies.
+      </p>
+      <p>
+        Undertwig currently uses that profile information only to establish and
+        display your signed-in session in the browser. We do not offer other
+        sign-in providers. Google’s handling of your account is governed by
+        <a href="https://policies.google.com/privacy">Google’s Privacy Policy</a>.
       </p>
 
       <h2>Information processed to provide the service</h2>
@@ -151,6 +173,11 @@
           Like most websites, the hosting provider may process standard technical
           request data such as IP address, user agent, and request timestamps in
           server logs for security, reliability, and abuse prevention.
+        </li>
+        <li>
+          <strong>Google sign-in.</strong> Loading the login page contacts Google’s
+          Identity Services scripts and domains so you can authenticate. Google may
+          process technical and account data as described in its policies.
         </li>
         <li>
           <strong>Optional package fetching.</strong> When a document needs TeX packages
@@ -169,21 +196,27 @@
       <p>
         Undertwig does not use advertising cookies or third-party analytics cookies.
         The app relies on browser local storage (and normal browser/session
-        mechanisms) to keep your project available on your device.
+        mechanisms) to keep your project and optional sign-in session available on
+        your device. Google’s sign-in flow may set or read cookies on Google domains
+        according to Google’s practices.
       </p>
 
       <h2>How we use information</h2>
       <p>
         Technical hosting data, where processed by our hosting provider, is used only
-        to operate, secure, and maintain the website. We do not sell personal
-        information, and we do not use your document contents for advertising.
+        to operate, secure, and maintain the website. Google profile details from
+        sign-in are used to identify your session for signed-in features such as
+        collaboration access controls. We do not sell personal information, and we
+        do not use your document contents for advertising.
       </p>
 
       <h2>Data retention</h2>
       <p>
-        Project data in local storage remains until you clear it or your browser
-        removes it. Hosting provider logs are retained according to that provider’s
-        practices. We do not maintain a separate Undertwig account database.
+        Project data and local sign-in session data in local storage remain until you
+        clear them, log out (for the session), or your browser removes them. Hosting
+        provider logs are retained according to that provider’s practices. Undertwig
+        does not currently operate a separate server-side account database for the
+        public site.
       </p>
 
       <h2>Children</h2>
@@ -195,15 +228,18 @@
       <h2>International visitors</h2>
       <p>
         Because the site is delivered over the internet, technical request data may
-        be processed in the United States or other locations used by GitHub Pages
-        and any package endpoint your browser contacts.
+        be processed in the United States or other locations used by GitHub Pages,
+        Google Identity Services, and any package endpoint your browser contacts.
       </p>
 
       <h2>Your choices</h2>
       <ul>
-        <li>Clear site data in your browser to remove locally stored projects.</li>
+        <li>Use Undertwig without signing in for local editing and conversion.</li>
+        <li>Log out from the account control in the editor to clear the local sign-in session.</li>
+        <li>Clear site data in your browser to remove locally stored projects and session data.</li>
         <li>Export or copy your files before clearing data if you want to keep them.</li>
         <li>Use network controls in your browser if you prefer to block third-party package requests.</li>
+        <li>Manage Google account permissions in your Google account settings.</li>
       </ul>
 
       <h2>Contact</h2>
@@ -220,6 +256,7 @@
 
       <footer>
         <a href="/">Editor</a>
+        <a href="/login.html">Log in</a>
         <a href="/privacy.html">Privacy</a>
         <a href="/terms.html">Terms</a>
         <a href="https://github.com/martino-vic/undertwig">Source</a>

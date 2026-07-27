@@ -299,6 +299,40 @@
         font-size: 12px;
       }
 
+      .topbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 auto;
+      }
+
+      .toolbar-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel-soft);
+        color: var(--text);
+        font-size: 13px;
+        text-decoration: none;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .toolbar-button:hover {
+        background: var(--panel-strong);
+        border-color: #4b6073;
+      }
+
+      .toolbar-button svg {
+        width: 16px;
+        height: 16px;
+        flex: 0 0 auto;
+      }
+
       .convert-button {
         min-height: 36px;
         padding: 0 16px;
@@ -310,6 +344,62 @@
       .convert-button:hover {
         background: var(--brand-strong);
         border-color: transparent;
+      }
+
+      .account-button {
+        max-width: 180px;
+      }
+
+      .account-button .account-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .collaborate-wrap {
+        position: relative;
+      }
+
+      .hover-box {
+        position: absolute;
+        top: calc(100% + 10px);
+        right: 0;
+        z-index: 40;
+        width: min(280px, calc(100vw - 32px));
+        padding: 14px 14px 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #1a2530;
+        box-shadow: var(--shadow);
+        color: var(--text);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .hover-box::before {
+        content: "";
+        position: absolute;
+        top: -6px;
+        right: 18px;
+        width: 10px;
+        height: 10px;
+        border-top: 1px solid var(--border);
+        border-left: 1px solid var(--border);
+        background: #1a2530;
+        transform: rotate(45deg);
+      }
+
+      .hover-box p {
+        margin: 0 0 10px;
+      }
+
+      .hover-box a {
+        color: var(--brand-strong);
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .hover-box a:hover {
+        text-decoration: underline;
       }
 
       .editor-wrap {
@@ -466,7 +556,31 @@
             <strong id="activeFileName">main.tex</strong>
             <span id="activeFileMeta">Write LaTeX, then convert locally</span>
           </div>
-          <button class="convert-button" id="convert" type="button">Convert</button>
+          <div class="topbar-actions">
+            <div class="collaborate-wrap">
+              <button class="toolbar-button" id="collaborate" type="button" aria-haspopup="dialog" aria-expanded="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+                  <path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                </svg>
+                Collaborate
+              </button>
+              <div class="hover-box hidden" id="collaborateBox" role="dialog" aria-label="Collaborate">
+                <p id="collaborateMessage">You need to log in to collaborate.</p>
+                <a id="collaborateLoginLink" href="login.html?next=/">Log in</a>
+              </div>
+            </div>
+            <a class="toolbar-button" id="loginButton" href="login.html">Log in</a>
+            <div class="collaborate-wrap hidden" id="accountWrap">
+              <button class="toolbar-button account-button" id="accountButton" type="button" aria-haspopup="dialog" aria-expanded="false">
+                <span class="account-label" id="accountLabel">Account</span>
+              </button>
+              <div class="hover-box hidden" id="accountBox" role="dialog" aria-label="Account">
+                <p id="accountMessage">Signed in</p>
+                <a id="accountLogout" href="#">Log out</a>
+              </div>
+            </div>
+            <button class="convert-button" id="convert" type="button">Convert</button>
+          </div>
         </div>
         <div class="editor-wrap">
           <textarea id="editor" spellcheck="false"></textarea>
@@ -499,6 +613,8 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
+    <script src="auth-config.js"></script>
+    <script src="auth.js"></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
       const DEFAULT_TEX = String.raw`\documentclass{article}
@@ -541,6 +657,99 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
       const previewMeta = document.getElementById("previewMeta");
       const logPanel = document.getElementById("logPanel");
       const compileLog = document.getElementById("compileLog");
+      const collaborateButton = document.getElementById("collaborate");
+      const collaborateBox = document.getElementById("collaborateBox");
+      const collaborateMessage = document.getElementById("collaborateMessage");
+      const collaborateLoginLink = document.getElementById("collaborateLoginLink");
+      const loginButton = document.getElementById("loginButton");
+      const accountWrap = document.getElementById("accountWrap");
+      const accountButton = document.getElementById("accountButton");
+      const accountBox = document.getElementById("accountBox");
+      const accountLabel = document.getElementById("accountLabel");
+      const accountMessage = document.getElementById("accountMessage");
+      const accountLogout = document.getElementById("accountLogout");
+
+      function closeHoverBoxes() {
+        collaborateBox.classList.add("hidden");
+        accountBox.classList.add("hidden");
+        collaborateButton.setAttribute("aria-expanded", "false");
+        accountButton.setAttribute("aria-expanded", "false");
+      }
+
+      function refreshAuthUi() {
+        const session = UndertwigAuth.readSession();
+        if (session) {
+          loginButton.classList.add("hidden");
+          accountWrap.classList.remove("hidden");
+          accountLabel.textContent = session.name || session.email || "Account";
+          accountMessage.textContent = "Signed in as " + (session.email || session.name) + ".";
+          collaborateLoginLink.classList.add("hidden");
+        } else {
+          loginButton.classList.remove("hidden");
+          accountWrap.classList.add("hidden");
+          collaborateLoginLink.classList.remove("hidden");
+          collaborateLoginLink.href = UndertwigAuth.loginUrl("/");
+        }
+        closeHoverBoxes();
+      }
+
+      collaborateButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const open = !collaborateBox.classList.contains("hidden");
+        closeHoverBoxes();
+        if (open) {
+          return;
+        }
+        if (UndertwigAuth.isLoggedIn()) {
+          collaborateMessage.textContent = "Collaboration tools are coming soon for signed-in accounts.";
+          collaborateLoginLink.classList.add("hidden");
+        } else {
+          collaborateMessage.textContent = "You need to log in to collaborate.";
+          collaborateLoginLink.classList.remove("hidden");
+          collaborateLoginLink.href = UndertwigAuth.loginUrl("/");
+          collaborateLoginLink.textContent = "Log in";
+        }
+        collaborateBox.classList.remove("hidden");
+        collaborateButton.setAttribute("aria-expanded", "true");
+      });
+
+      accountButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const open = !accountBox.classList.contains("hidden");
+        closeHoverBoxes();
+        if (open) {
+          return;
+        }
+        accountBox.classList.remove("hidden");
+        accountButton.setAttribute("aria-expanded", "true");
+      });
+
+      accountLogout.addEventListener("click", (event) => {
+        event.preventDefault();
+        UndertwigAuth.logout();
+        refreshAuthUi();
+      });
+
+      document.addEventListener("click", (event) => {
+        if (
+          !collaborateBox.contains(event.target) &&
+          event.target !== collaborateButton &&
+          !collaborateButton.contains(event.target) &&
+          !accountBox.contains(event.target) &&
+          event.target !== accountButton &&
+          !accountButton.contains(event.target)
+        ) {
+          closeHoverBoxes();
+        }
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeHoverBoxes();
+        }
+      });
+
+      refreshAuthUi();
 
       document.getElementById("collapseExplorer").addEventListener("click", () => {
         app.classList.toggle("explorer-collapsed");

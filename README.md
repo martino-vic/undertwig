@@ -2,7 +2,7 @@
 
 Undertwig is a browser-based LaTeX workspace with a file explorer, source editor, and PDF preview.
 
-Version one runs entirely in the browser: projects stay on the device, there is no account system, and conversion uses the SwiftLaTeX PdfTeX WebAssembly engine locally.
+Local editing and conversion run in the browser: projects stay on the device by default, and conversion uses the SwiftLaTeX PdfTeX WebAssembly engine. Optional Google sign-in unlocks collaboration features.
 
 ## Features
 
@@ -11,6 +11,8 @@ Version one runs entirely in the browser: projects stay on the device, there is 
 - LaTeX source editor
 - Convert button with local PDF preview
 - Compiler log panel
+- Collaborate control (requires Google sign-in)
+- Google-only login page
 
 ## Try it
 
@@ -20,9 +22,21 @@ Use the live site: [undertwig.com](https://undertwig.com).
 
 Convert writes the current project into the SwiftLaTeX in-browser PdfTeX engine and renders the returned PDF in the preview pane. Compilation happens on the user's device. Package resolution may fetch TeX Live resources from the configured on-demand endpoint when needed.
 
+## Authentication
+
+Sign-in is available at [`login.html`](login.html) and supports Google accounts only, via Google Identity Services.
+
+1. Create an OAuth 2.0 Web client ID in Google Cloud Console.
+2. Add authorized JavaScript origins for `https://undertwig.com` (and `http://localhost` for local testing).
+3. Put the client ID in [`auth-config.js`](auth-config.js).
+
+Signed-in session details are stored in the browser under `undertwig-auth-v1`.
+
 ## Project layout
 
 - `index.html` — app UI and conversion workflow
+- `login.html` — Google sign-in page
+- `auth.js` / `auth-config.js` — client-side session helpers and Google client ID
 - `privacy.html` — Privacy Policy
 - `terms.html` — Terms of Use
 - `vendor/swiftlatex/` — SwiftLaTeX PdfTeX WebAssembly engine

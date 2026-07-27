@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Log in — Undertwig</title>
+    <meta name="description" content="Sign in to Undertwig with your Google account.">
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #10161d;
+        --panel: #18212b;
+        --panel-soft: #202b36;
+        --border: #334455;
+        --text: #e8edf3;
+        --muted: #96a4b3;
+        --brand: #2f8f6b;
+        --brand-strong: #39a57d;
+        --danger: #e18484;
+        --shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background:
+          radial-gradient(ellipse 80% 50% at 50% -10%, rgba(47, 143, 107, 0.18), transparent),
+          var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.6;
+      }
+
+      header {
+        border-bottom: 1px solid var(--border);
+        background: rgba(18, 27, 36, 0.92);
+      }
+
+      .header-inner {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 20px 24px;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .brand {
+        color: var(--text);
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .brand span {
+        margin-left: 8px;
+        color: var(--muted);
+        font-weight: 400;
+        font-size: 14px;
+      }
+
+      nav a {
+        color: var(--muted);
+        font-size: 14px;
+        text-decoration: none;
+      }
+
+      nav a:hover { color: var(--text); }
+
+      .shell {
+        max-width: 440px;
+        margin: 64px auto;
+        padding: 0 24px 48px;
+      }
+
+      .card {
+        padding: 32px 28px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 26px;
+        letter-spacing: -0.02em;
+      }
+
+      .lead {
+        margin: 0 0 28px;
+        color: var(--muted);
+        font-size: 15px;
+      }
+
+      #googleButton {
+        display: flex;
+        justify-content: center;
+        min-height: 44px;
+      }
+
+      .note {
+        margin: 20px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .note a { color: var(--brand-strong); }
+
+      .status {
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .status.error { color: var(--danger); }
+
+      .status.ok { color: var(--brand-strong); }
+
+      .signed-in {
+        display: none;
+        gap: 14px;
+        align-items: center;
+      }
+
+      .signed-in.visible {
+        display: flex;
+      }
+
+      .avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--panel-soft);
+        object-fit: cover;
+      }
+
+      .signed-in-meta strong {
+        display: block;
+        font-size: 14px;
+      }
+
+      .signed-in-meta span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 22px;
+      }
+
+      .actions a,
+      .actions button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 36px;
+        padding: 0 14px;
+        border-radius: 8px;
+        font: inherit;
+        font-size: 14px;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      .actions a.primary,
+      .actions button.primary {
+        border: 0;
+        background: var(--brand);
+        color: #fff;
+        font-weight: 600;
+      }
+
+      .actions a.primary:hover,
+      .actions button.primary:hover {
+        background: var(--brand-strong);
+      }
+
+      .actions button.secondary {
+        border: 1px solid var(--border);
+        background: var(--panel-soft);
+        color: var(--text);
+      }
+
+      .hidden { display: none !important; }
+
+      footer {
+        margin-top: 28px;
+        color: var(--muted);
+        font-size: 13px;
+        text-align: center;
+      }
+
+      footer a {
+        color: var(--muted);
+        text-decoration: none;
+        margin: 0 8px;
+      }
+
+      footer a:hover { color: var(--text); }
+    </style>
+    <script src="auth-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <a class="brand" href="/">Undertwig <span>Local LaTeX workspace</span></a>
+        <nav><a href="/">Back to editor</a></nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <div class="card">
+        <h1>Log in</h1>
+        <p class="lead">Sign in with Google to unlock collaboration. Undertwig only supports Google accounts.</p>
+
+        <div id="googleSection">
+          <div id="googleButton"></div>
+          <p class="note">
+            By continuing, you agree to the
+            <a href="privacy.html">Privacy Policy</a> and
+            <a href="terms.html">Terms of Use</a>.
+            Sign-in is handled by Google.
+          </p>
+        </div>
+
+        <div class="signed-in" id="signedIn">
+          <img class="avatar" id="avatar" alt="">
+          <div class="signed-in-meta">
+            <strong id="userName">Signed in</strong>
+            <span id="userEmail"></span>
+          </div>
+        </div>
+
+        <div class="actions hidden" id="signedInActions">
+          <a class="primary" id="continueLink" href="/">Continue to editor</a>
+          <button class="secondary" id="logoutButton" type="button">Log out</button>
+        </div>
+
+        <p class="status" id="status" role="status"></p>
+      </div>
+
+      <footer>
+        <a href="/">Editor</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+      </footer>
+    </main>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const nextPath = params.get("next") || "/";
+      const statusEl = document.getElementById("status");
+      const googleSection = document.getElementById("googleSection");
+      const signedIn = document.getElementById("signedIn");
+      const signedInActions = document.getElementById("signedInActions");
+      const continueLink = document.getElementById("continueLink");
+      const config = UndertwigAuth.getConfig();
+
+      continueLink.href = nextPath;
+
+      function setStatus(message, kind) {
+        statusEl.textContent = message || "";
+        statusEl.className = "status" + (kind ? " " + kind : "");
+      }
+
+      function showSignedIn(session) {
+        googleSection.classList.add("hidden");
+        signedIn.classList.add("visible");
+        signedInActions.classList.remove("hidden");
+        document.getElementById("userName").textContent = session.name || "Signed in";
+        document.getElementById("userEmail").textContent = session.email || "";
+        const avatar = document.getElementById("avatar");
+        if (session.picture) {
+          avatar.src = session.picture;
+          avatar.alt = session.name || session.email || "Account";
+          avatar.style.display = "block";
+        } else {
+          avatar.style.display = "none";
+        }
+        setStatus("You are signed in with Google.", "ok");
+      }
+
+      function redirectAfterLogin() {
+        window.location.href = nextPath;
+      }
+
+      function handleCredentialResponse(response) {
+        try {
+          UndertwigAuth.loginWithCredential(response.credential);
+          setStatus("Signed in. Redirecting…", "ok");
+          redirectAfterLogin();
+        } catch (error) {
+          setStatus(error.message || "Google sign-in failed.", "error");
+        }
+      }
+
+      function whenGoogleReady(onReady, onTimeout) {
+        if (window.google && google.accounts && google.accounts.id) {
+          onReady();
+          return;
+        }
+        const started = Date.now();
+        const timer = setInterval(() => {
+          if (window.google && google.accounts && google.accounts.id) {
+            clearInterval(timer);
+            onReady();
+          } else if (Date.now() - started > 10000) {
+            clearInterval(timer);
+            onTimeout();
+          }
+        }, 50);
+      }
+
+      function initGoogleButton() {
+        if (!config.googleClientId) {
+          setStatus(
+            "Google sign-in is not configured yet. Add a Google OAuth client ID in auth-config.js.",
+            "error"
+          );
+          return;
+        }
+
+        whenGoogleReady(
+          () => {
+            google.accounts.id.initialize({
+              client_id: config.googleClientId,
+              callback: handleCredentialResponse,
+              auto_select: false,
+              cancel_on_tap_outside: true,
+            });
+
+            google.accounts.id.renderButton(document.getElementById("googleButton"), {
+              theme: "outline",
+              size: "large",
+              shape: "rectangular",
+              text: "continue_with",
+              width: 320,
+            });
+          },
+          () => {
+            setStatus("Google sign-in failed to load. Check your network and refresh.", "error");
+          }
+        );
+      }
+
+      document.getElementById("logoutButton").addEventListener("click", () => {
+        UndertwigAuth.logout();
+        window.location.reload();
+      });
+
+      const existing = UndertwigAuth.readSession();
+      if (existing) {
+        showSignedIn(existing);
+      } else {
+        initGoogleButton();
+      }
+    </script>
+  </body>
+</html>

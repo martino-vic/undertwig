@@ -23,6 +23,18 @@ The app also uses browser-provided APIs such as `Blob`, file inputs, `localStora
 `Worker`, and `URL.createObjectURL`. Those APIs are supplied by the user's browser
 and are not redistributed as part of this project.
 
+## Google Identity Services
+
+- Loaded at runtime from: `https://accounts.google.com/gsi/client`
+- Used by: `login.html` for Google-only sign-in
+- License / terms: Google APIs Terms of Service and Google Identity Services terms
+  (see https://developers.google.com/identity and https://policies.google.com/terms)
+- Notes:
+  - The Google script is not vendored in this repository; the browser loads it from Google.
+  - Undertwig stores a local session profile derived from the Google credential in
+    `localStorage` (`undertwig-auth-v1`).
+  - Configure the OAuth 2.0 Web client ID in `auth-config.js`.
+
 ## Future dependency rules
 
 Before adding any dependency or hosted runtime asset, record:

@@ -127,9 +127,24 @@
 
       <h2>What Undertwig is</h2>
       <p>
-        Undertwig is a browser-based LaTeX workspace. Version one runs primarily
-        in your browser: you can edit project files, compile locally with the
-        bundled WebAssembly engine, and preview PDFs on your device.
+        Undertwig is a browser-based LaTeX workspace. You can edit project files,
+        compile locally with the bundled WebAssembly engine, and preview PDFs on
+        your device. Optional Google sign-in unlocks signed-in features such as
+        collaboration.
+      </p>
+
+      <h2>Accounts and collaboration</h2>
+      <p>
+        You may use the local editor without an account. Collaboration requires
+        signing in. Undertwig supports Google accounts only. By signing in, you
+        authorize Undertwig to receive basic Google profile information needed to
+        establish your session, as described in the
+        <a href="/privacy.html">Privacy Policy</a>.
+      </p>
+      <p>
+        You are responsible for activity under your signed-in session on your device.
+        You may log out at any time from the editor. We may suspend or restrict
+        signed-in features if needed to protect the Service or other users.
       </p>
 
       <h2>Your content</h2>
@@ -143,16 +158,17 @@
       <p>You agree not to use the Service to:</p>
       <ul>
         <li>Violate applicable law or third-party rights</li>
-        <li>Attempt to disrupt, overload, or abuse the website, hosting infrastructure, or related package endpoints</li>
+        <li>Attempt to disrupt, overload, or abuse the website, hosting infrastructure, related package endpoints, or sign-in flows</li>
         <li>Distribute malware or engage in unauthorized access to systems</li>
+        <li>Misrepresent your identity when using signed-in features</li>
       </ul>
 
       <h2>Software license</h2>
       <p>
         The Undertwig software is made available under the
         <a href="https://github.com/martino-vic/undertwig/blob/main/LICENSE">GNU Affero General Public License v3.0</a>.
-        Third-party components, including the SwiftLaTeX engine, are described in the
-        project’s
+        Third-party components, including the SwiftLaTeX engine and Google Identity
+        Services, are described in the project’s
         <a href="https://github.com/martino-vic/undertwig/blob/main/THIRD_PARTY_NOTICES.md">third-party notices</a>.
         Corresponding source is available at
         <a href="https://github.com/martino-vic/undertwig">github.com/martino-vic/undertwig</a>.
@@ -163,7 +179,8 @@
         The Service is provided “as is” and “as available,” without warranties of any
         kind, whether express or implied, including merchantability, fitness for a
         particular purpose, and non-infringement. Compilation results, PDF output,
-        availability, and compatibility with particular TeX packages are not guaranteed.
+        availability, sign-in availability, collaboration features, and compatibility
+        with particular TeX packages are not guaranteed.
       </p>
 
       <h2>Limitation of liability</h2>
@@ -178,9 +195,10 @@
 
       <h2>Third-party services</h2>
       <p>
-        The Service may contact third-party resources (for example, a TeX Live package
-        endpoint) when needed to compile a document. Those services are outside our
-        control, and their terms and availability may change.
+        The Service may contact third-party resources when needed, including Google
+        Identity Services for sign-in and a TeX Live package endpoint for compilation.
+        Those services are outside our control, and their terms and availability may
+        change. Google sign-in is also subject to Google’s terms and policies.
       </p>
 
       <h2>Privacy</h2>
@@ -204,6 +222,7 @@
 
       <footer>
         <a href="/">Editor</a>
+        <a href="/login.html">Log in</a>
         <a href="/privacy.html">Privacy</a>
         <a href="/terms.html">Terms</a>
         <a href="https://github.com/martino-vic/undertwig">Source</a>
