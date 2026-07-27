@@ -822,6 +822,13 @@
         letter-spacing: 0.01em;
       }
 
+      .log-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 auto;
+      }
+
       .log-toggle {
         min-height: 28px;
         padding: 0 10px;
@@ -1108,9 +1115,14 @@
         <div class="log hidden" id="logPanel">
           <div class="log-head">
             <strong>Compiler log</strong>
-            <button class="log-toggle" id="toggleLog" type="button" aria-expanded="true" aria-controls="compileLog">
-              Collapse
-            </button>
+            <div class="log-actions">
+              <button class="log-toggle" id="copyLog" type="button">
+                Copy to clipboard
+              </button>
+              <button class="log-toggle" id="toggleLog" type="button" aria-expanded="true" aria-controls="compileLog">
+                Collapse
+              </button>
+            </div>
           </div>
           <pre id="compileLog"></pre>
         </div>
@@ -1389,6 +1401,8 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const logPanel = document.getElementById("logPanel");
       const compileLog = document.getElementById("compileLog");
       const toggleLogButton = document.getElementById("toggleLog");
+      const copyLogButton = document.getElementById("copyLog");
+      let copyLogResetTimer = null;
 
       function setLogCollapsed(collapsed) {
         logPanel.classList.toggle("is-collapsed", Boolean(collapsed));
@@ -1398,6 +1412,28 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
       toggleLogButton.addEventListener("click", () => {
         setLogCollapsed(!logPanel.classList.contains("is-collapsed"));
+      });
+
+      copyLogButton.addEventListener("click", async () => {
+        const text = compileLog.textContent || "";
+        if (!text.trim()) {
+          copyLogButton.textContent = "Nothing to copy";
+          clearTimeout(copyLogResetTimer);
+          copyLogResetTimer = setTimeout(() => {
+            copyLogButton.textContent = "Copy to clipboard";
+          }, 1500);
+          return;
+        }
+        try {
+          await copyTextToClipboard(text);
+          copyLogButton.textContent = "Copied";
+        } catch (_error) {
+          copyLogButton.textContent = "Copy failed";
+        }
+        clearTimeout(copyLogResetTimer);
+        copyLogResetTimer = setTimeout(() => {
+          copyLogButton.textContent = "Copy to clipboard";
+        }, 1500);
       });
       const collaborateButton = document.getElementById("collaborate");
       const collaborateBox = document.getElementById("collaborateBox");
