@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Google Cloud connection help — Undertwig</title>
+    <meta name="description" content="Troubleshooting Undertwig Google Cloud storage connection.">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #10161d;
+        --border: #334455;
+        --text: #e8edf3;
+        --muted: #96a4b3;
+        --brand-strong: #39a57d;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.6;
+      }
+      header {
+        border-bottom: 1px solid var(--border);
+        background: #121b24;
+      }
+      .header-inner,
+      .content {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 20px 24px;
+      }
+      .header-inner {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .brand {
+        color: var(--text);
+        font-weight: 600;
+        text-decoration: none;
+      }
+      .brand span {
+        margin-left: 8px;
+        color: var(--muted);
+        font-weight: 400;
+        font-size: 14px;
+      }
+      nav a {
+        color: var(--muted);
+        font-size: 14px;
+        text-decoration: none;
+      }
+      nav a:hover { color: var(--text); }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+        letter-spacing: -0.02em;
+      }
+      .meta {
+        margin: 0 0 28px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      h2 {
+        margin: 28px 0 10px;
+        font-size: 18px;
+      }
+      p, li { color: #d5dde6; }
+      ul, ol { padding-left: 1.2em; }
+      a { color: var(--brand-strong); }
+      code {
+        font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+        font-size: 0.92em;
+      }
+      footer {
+        margin-top: 48px;
+        padding-top: 20px;
+        border-top: 1px solid var(--border);
+        font-size: 14px;
+      }
+      footer a {
+        color: var(--muted);
+        text-decoration: none;
+        margin-right: 14px;
+      }
+      footer a:hover { color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <a class="brand" href="/">Undertwig <span>Local LaTeX workspace</span></a>
+        <nav><a href="/">Back to editor</a></nav>
+      </div>
+    </header>
+    <main class="content">
+      <h1>Google Cloud connection help</h1>
+      <p class="meta">Use this checklist if Undertwig shows “Not connected to Google Cloud.”</p>
+
+      <h2>What “connected” means</h2>
+      <p>
+        When you are signed in, Undertwig stores your project in your Google Drive
+        <strong>application data</strong> folder (hidden app storage for Undertwig).
+        That data counts against your Google account storage and is free within your Drive quota.
+        It does not appear as a normal folder in the Drive file list.
+      </p>
+
+      <h2>Quick checks</h2>
+      <ol>
+        <li>Confirm you are signed in to Undertwig with Google.</li>
+        <li>Allow the browser popup that requests Drive app-data access when prompted.</li>
+        <li>Use the same site origin you authorized (for example <code>https://www.undertwig.com</code>).</li>
+        <li>Hard-refresh the page, then try editing a file so Undertwig can sync again.</li>
+      </ol>
+
+      <h2>Google Cloud Console (project owners)</h2>
+      <ol>
+        <li>Open the <strong>undertwig</strong> Google Cloud project.</li>
+        <li>Enable the <strong>Google Drive API</strong>.</li>
+        <li>Under OAuth <strong>Data Access</strong> / scopes, include
+          <code>https://www.googleapis.com/auth/drive.appdata</code>.</li>
+        <li>Under <strong>Clients</strong>, ensure Authorized JavaScript origins include your exact site origin
+          (<code>https://www.undertwig.com</code> and/or <code>https://undertwig.com</code>).</li>
+        <li>If the OAuth app is in <strong>Testing</strong>, add your Google account under <strong>Test users</strong>.</li>
+      </ol>
+
+      <h2>Still stuck?</h2>
+      <ul>
+        <li>Sign out of Undertwig, sign back in, and accept Drive permission again.</li>
+        <li>In your
+          <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account permissions</a>,
+          remove Undertwig access and reconnect from the editor.</li>
+        <li>Check the browser console for <code>origin_mismatch</code> or GSI/Drive errors.</li>
+        <li>Open an issue on
+          <a href="https://github.com/martino-vic/undertwig" target="_blank" rel="noopener">GitHub</a>.</li>
+      </ul>
+
+      <footer>
+        <a href="/">Editor</a>
+        <a href="/login.html">Log in</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+      </footer>
+    </main>
+  </body>
+</html>

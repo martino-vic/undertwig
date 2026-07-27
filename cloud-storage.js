@@ -242,6 +242,31 @@
     }
   }
 
+  function getProjectFileId() {
+    return cachedFileId || null;
+  }
+
+  async function probeConnection() {
+    if (!isAvailable()) {
+      return { connected: false, fileId: null, reason: "not-signed-in" };
+    }
+    try {
+      await getAccessToken();
+      const fileId = await findCloudFileId();
+      if (!fileId) {
+        // No cloud file yet; create/sync one so the connection is real.
+        return { connected: true, fileId: null, reason: "ready-no-file" };
+      }
+      return { connected: true, fileId: fileId, reason: "ok" };
+    } catch (error) {
+      return {
+        connected: false,
+        fileId: null,
+        reason: (error && error.message) || "connection-failed",
+      };
+    }
+  }
+
   function isAvailable() {
     return Boolean(auth() && auth().isLoggedIn() && auth().getConfig().googleClientId);
   }
@@ -251,6 +276,8 @@
     CLOUD_FILE_NAME,
     isAvailable,
     getAccessToken,
+    getProjectFileId,
+    probeConnection,
     loadProject,
     saveProject,
     clearToken,

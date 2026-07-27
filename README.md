@@ -61,6 +61,7 @@ Signed-in session details are stored in the browser under `undertwig-auth-v2`.
 - `invite.js` — Gmail-based collaboration invitations
 - `privacy.html` — Privacy Policy
 - `terms.html` — Terms of Use
+- `help-cloud.html` — Google Cloud connection troubleshooting
 - `vendor/swiftlatex/` — SwiftLaTeX PdfTeX WebAssembly engine
 - `LICENSE` — GNU AGPL v3.0
 - `THIRD_PARTY_NOTICES.md` — third-party dependency notes

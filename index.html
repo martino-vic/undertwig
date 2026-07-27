@@ -176,6 +176,58 @@
         color: var(--brand-strong);
       }
 
+      .cloud-status {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 10px 12px;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .cloud-status-dot {
+        display: grid;
+        width: 16px;
+        height: 16px;
+        flex: 0 0 auto;
+        margin-top: 1px;
+        place-items: center;
+        border-radius: 50%;
+        color: #fff;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .cloud-status.is-connected .cloud-status-dot {
+        background: var(--brand);
+      }
+
+      .cloud-status.is-disconnected .cloud-status-dot {
+        background: var(--danger);
+      }
+
+      .cloud-status.is-logged-out .cloud-status-dot,
+      .cloud-status.is-checking .cloud-status-dot {
+        background: #6b7785;
+      }
+
+      .cloud-status-text {
+        min-width: 0;
+      }
+
+      .cloud-status-text a {
+        color: var(--brand-strong);
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .cloud-status-text a:hover {
+        text-decoration: underline;
+      }
+
       .legal-links {
         display: flex;
         gap: 10px;
@@ -298,6 +350,7 @@
       .app.explorer-collapsed .brand,
       .app.explorer-collapsed .sidebar-actions,
       .app.explorer-collapsed .tree,
+      .app.explorer-collapsed .cloud-status,
       .app.explorer-collapsed .legal-links {
         display: none;
       }
@@ -635,6 +688,7 @@
         .app.explorer-collapsed .sidebar-actions,
         .app.explorer-collapsed .tree,
         .app.explorer-collapsed .brand,
+        .app.explorer-collapsed .cloud-status,
         .app.explorer-collapsed .legal-links {
           display: initial;
         }
@@ -645,6 +699,10 @@
 
         .app.explorer-collapsed .tree {
           display: block;
+        }
+
+        .app.explorer-collapsed .cloud-status {
+          display: flex;
         }
 
         .app.explorer-collapsed .legal-links {
@@ -676,6 +734,10 @@
           <button class="wide" id="downloadZip" type="button">Download ZIP</button>
         </div>
         <div class="tree" id="tree"></div>
+        <div class="cloud-status is-logged-out" id="cloudStatus" role="status" aria-live="polite">
+          <span class="cloud-status-dot" id="cloudStatusDot" aria-hidden="true"></span>
+          <span class="cloud-status-text" id="cloudStatusText"></span>
+        </div>
         <div class="legal-links">
           <a href="privacy.html">Privacy</a>
           <a href="terms.html">Terms</a>
@@ -950,11 +1012,84 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const accountLabel = document.getElementById("accountLabel");
       const accountMessage = document.getElementById("accountMessage");
       const accountLogout = document.getElementById("accountLogout");
+      const cloudStatus = document.getElementById("cloudStatus");
+      const cloudStatusDot = document.getElementById("cloudStatusDot");
+      const cloudStatusText = document.getElementById("cloudStatusText");
       let dragSourcePath = null;
       let cloudSaveTimer = null;
       let cloudSaveInFlight = false;
+      let cloudStatusMode = "logged-out";
       const COLLAPSED_FOLDERS_KEY = "undertwig-tree-collapsed-v1";
       let collapsedFolders = loadCollapsedFolders();
+
+      function driveProjectUrl(fileId) {
+        if (fileId) {
+          return "https://drive.google.com/open?id=" + encodeURIComponent(fileId);
+        }
+        return "https://drive.google.com/drive/my-drive";
+      }
+
+      function renderCloudStatus(mode, fileId) {
+        cloudStatusMode = mode;
+        cloudStatus.classList.remove("is-connected", "is-disconnected", "is-logged-out", "is-checking");
+        cloudStatusText.textContent = "";
+
+        if (mode === "connected") {
+          cloudStatus.classList.add("is-connected");
+          cloudStatusDot.textContent = "✓";
+          cloudStatusText.appendChild(document.createTextNode("Connected to Google Cloud "));
+          const link = document.createElement("a");
+          link.href = driveProjectUrl(fileId || UndertwigCloud.getProjectFileId());
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.textContent = "Open in Google Drive";
+          cloudStatusText.appendChild(link);
+          return;
+        }
+
+        if (mode === "disconnected") {
+          cloudStatus.classList.add("is-disconnected");
+          cloudStatusDot.textContent = "✕";
+          cloudStatusText.appendChild(document.createTextNode("Not connected to Google Cloud. "));
+          const help = document.createElement("a");
+          help.href = "help-cloud.html";
+          help.textContent = "Help";
+          cloudStatusText.appendChild(help);
+          return;
+        }
+
+        if (mode === "checking") {
+          cloudStatus.classList.add("is-checking");
+          cloudStatusDot.textContent = "…";
+          cloudStatusText.textContent = "Checking Google Cloud connection…";
+          return;
+        }
+
+        cloudStatus.classList.add("is-logged-out");
+        cloudStatusDot.textContent = "";
+        const login = document.createElement("a");
+        login.href = UndertwigAuth.loginUrl("/");
+        login.textContent = "Log in";
+        cloudStatusText.appendChild(login);
+        cloudStatusText.appendChild(
+          document.createTextNode(" to access your Google Cloud storage (free)")
+        );
+      }
+
+      async function refreshCloudStatus() {
+        if (!UndertwigAuth.isLoggedIn()) {
+          renderCloudStatus("logged-out");
+          return;
+        }
+
+        renderCloudStatus("checking");
+        const result = await UndertwigCloud.probeConnection();
+        if (result.connected) {
+          renderCloudStatus("connected", result.fileId || UndertwigCloud.getProjectFileId());
+        } else {
+          renderCloudStatus("disconnected");
+        }
+      }
 
       function closeHoverBoxes() {
         collaborateBox.classList.add("hidden");
@@ -1026,6 +1161,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           inviteForm.classList.add("hidden");
         }
         closeHoverBoxes();
+        refreshCloudStatus();
       }
 
       collaborateButton.addEventListener("click", (event) => {
@@ -1175,9 +1311,11 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
       async function initCloudProject() {
         if (!UndertwigCloud.isAvailable()) {
+          renderCloudStatus("logged-out");
           return;
         }
 
+        renderCloudStatus("checking");
         setStatus("Loading project from Google Cloud storage…");
         try {
           const cloudProject = await UndertwigCloud.loadProject();
@@ -1190,17 +1328,20 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             }
             render();
             setStatus("Loaded project from Google Cloud storage.");
+            renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
             return;
           }
 
           // No cloud project yet: upload the current local project.
           await UndertwigCloud.saveProject(state);
           setStatus("Signed-in projects are saved to Google Cloud storage (free).");
+          renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
         } catch (error) {
           setStatus(
             `Could not load Google Cloud storage: ${error && error.message ? error.message : error}`,
             true
           );
+          renderCloudStatus("disconnected");
         }
       }
 
@@ -1248,7 +1389,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           cloudSaveInFlight = true;
           try {
             await UndertwigCloud.saveProject(state);
+            renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
           } catch (error) {
+            renderCloudStatus("disconnected");
             setStatus(
               `Could not save to Google Cloud storage: ${error && error.message ? error.message : error}`,
               true
