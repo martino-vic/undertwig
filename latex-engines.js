@@ -8,12 +8,93 @@
   };
   const BUSYTEX_CDN = "https://texlyre.github.io/texlyre-busytex/core/busytex";
   const BUSYTEX_WORKER = "vendor/busytex/busytex_worker.js";
-  const TEXLIVE_REMOTE = "https://texlive.texlyre.org/";
+  // BusyTeX kpse_remote expects GET /<format_id>/<filename> (not the pdftex/ prefix).
+  const TEXLIVE_REMOTE = "https://texlive2026.texlyre.org/";
+  const TEXLIVE_TEX_FORMAT = 26;
+  // Runtime files from CTAN macros/luatex/generic/luatexja (beyond texlive-extra).
+  const LUATEXJA_FILES = [
+    "jfm-CCT.lua",
+    "jfm-banjiao.lua",
+    "jfm-jis.lua",
+    "jfm-kaiming.lua",
+    "jfm-min.lua",
+    "jfm-mono.lua",
+    "jfm-prop.lua",
+    "jfm-propv.lua",
+    "jfm-propw.lua",
+    "jfm-quanjiao.lua",
+    "jfm-tmin.lua",
+    "jfm-ujis.lua",
+    "jfm-ujisv.lua",
+    "lltjcore.sty",
+    "lltjdefs.sty",
+    "lltjext-251101.sty",
+    "lltjext.sty",
+    "lltjfont.sty",
+    "lltjp-array.sty",
+    "lltjp-atbegshi.sty",
+    "lltjp-collcell.sty",
+    "lltjp-everyshi.sty",
+    "lltjp-fancyvrb.sty",
+    "lltjp-fontspec.sty",
+    "lltjp-footmisc.sty",
+    "lltjp-geometry.sty",
+    "lltjp-listings.sty",
+    "lltjp-microtype.sty",
+    "lltjp-preview.sty",
+    "lltjp-siunitx.sty",
+    "lltjp-stfloats.sty",
+    "lltjp-tascmac.sty",
+    "lltjp-unicode-math.sty",
+    "lltjp-xunicode.sty",
+    "ltj-adjust.lua",
+    "ltj-base.lua",
+    "ltj-base.sty",
+    "ltj-charrange.lua",
+    "ltj-compat.lua",
+    "ltj-debug.lua",
+    "ltj-direction-20251230.lua",
+    "ltj-direction.lua",
+    "ltj-inputbuf.lua",
+    "ltj-ivd_aj1.lua",
+    "ltj-jfmglue.lua",
+    "ltj-jfont-20251230.lua",
+    "ltj-jfont.lua",
+    "ltj-jisx0208.lua",
+    "ltj-kinsoku.tex",
+    "ltj-latex.sty",
+    "ltj-lineskip.lua",
+    "ltj-lotf_aux.lua",
+    "ltj-math.lua",
+    "ltj-otf.lua",
+    "ltj-plain.sty",
+    "ltj-pretreat.lua",
+    "ltj-rmlgbm.lua",
+    "ltj-ruby.lua",
+    "ltj-setwidth-20251230.lua",
+    "ltj-setwidth.lua",
+    "ltj-stack.lua",
+    "ltj-unicode-ccfix.lua",
+    "luatexja-adjust.sty",
+    "luatexja-ajmacros.sty",
+    "luatexja-compat.sty",
+    "luatexja-core.sty",
+    "luatexja-fontspec-29e.sty",
+    "luatexja-fontspec.sty",
+    "luatexja-otf.sty",
+    "luatexja-preset.sty",
+    "luatexja-ruby.sty",
+    "luatexja-zhfonts.sty",
+    "luatexja.lua",
+    "luatexja.sty",
+  ];
 
   let selectedEngine = readStoredEngine();
   let luaWorker = null;
   let luaReady = false;
   let luaInitPromise = null;
+  let luaTexJaReady = false;
+  let luaTexJaPromise = null;
 
   function readStoredEngine() {
     try {
@@ -74,6 +155,147 @@
     luaWorker = null;
     luaReady = false;
     luaInitPromise = null;
+    luaTexJaReady = false;
+    luaTexJaPromise = null;
+  }
+
+  function fetchTexLiveFile(name) {
+    const url =
+      TEXLIVE_REMOTE.replace(/\/?$/, "/") +
+      TEXLIVE_TEX_FORMAT +
+      "/" +
+      encodeURIComponent(name);
+    return fetch(url).then(function (response) {
+      if (!response.ok) {
+        throw new Error("Could not download " + name + " (" + response.status + ").");
+      }
+      return response.arrayBuffer().then(function (buffer) {
+        return {
+          name: name,
+          format: TEXLIVE_TEX_FORMAT,
+          contents: new Uint8Array(buffer),
+        };
+      });
+    });
+  }
+
+  function fetchTexLiveFiles(names, onProgress) {
+    const results = [];
+    let index = 0;
+    const workers = Math.min(8, names.length);
+
+    function next() {
+      if (index >= names.length) {
+        return Promise.resolve();
+      }
+      const current = index;
+      index += 1;
+      const name = names[current];
+      return fetchTexLiveFile(name)
+        .then(function (file) {
+          results.push(file);
+          if (typeof onProgress === "function") {
+            onProgress(results.length, names.length, name);
+          }
+        })
+        .catch(function (error) {
+          console.warn("[Undertwig] luatexja file skipped:", name, error);
+        })
+        .then(next);
+    }
+
+    const starters = [];
+    for (let i = 0; i < workers; i += 1) {
+      starters.push(next());
+    }
+    return Promise.all(starters).then(function () {
+      return results;
+    });
+  }
+
+  function writeLuaRemoteFiles(files) {
+    return new Promise(function (resolve, reject) {
+      if (!luaWorker) {
+        reject(new Error("LuaLaTeX worker is not ready."));
+        return;
+      }
+      if (!files.length) {
+        resolve();
+        return;
+      }
+
+      let settled = false;
+      const timeout = setTimeout(function () {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        reject(new Error("Timed out while registering luatexja files."));
+      }, 60000);
+
+      const previous = luaWorker.onmessage;
+      luaWorker.onmessage = function (event) {
+        const data = event && event.data ? event.data : {};
+        if (data.texlive_remote_written) {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(timeout);
+          luaWorker.onmessage = previous;
+          resolve();
+          return;
+        }
+        if (data.exception) {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(timeout);
+          luaWorker.onmessage = previous;
+          reject(new Error(String(data.exception)));
+          return;
+        }
+        if (typeof previous === "function") {
+          previous.call(luaWorker, event);
+        }
+      };
+
+      luaWorker.postMessage({ write_texlive_remote_files: files });
+    });
+  }
+
+  function ensureLuaTexJa(onProgress) {
+    if (luaTexJaReady) {
+      return Promise.resolve();
+    }
+    if (luaTexJaPromise) {
+      return luaTexJaPromise;
+    }
+
+    luaTexJaPromise = fetchTexLiveFiles(LUATEXJA_FILES, function (loaded, total) {
+      if (typeof onProgress === "function") {
+        onProgress("Loading luatexja (" + loaded + "/" + total + ")…");
+      }
+    })
+      .then(function (files) {
+        if (!files.length) {
+          throw new Error("Could not download luatexja package files.");
+        }
+        if (typeof onProgress === "function") {
+          onProgress("Registering luatexja with LuaLaTeX…");
+        }
+        return writeLuaRemoteFiles(files);
+      })
+      .then(function () {
+        luaTexJaReady = true;
+      })
+      .catch(function (error) {
+        luaTexJaPromise = null;
+        throw error;
+      });
+
+    return luaTexJaPromise;
   }
 
   function ensureLuaWorker(onProgress) {
@@ -274,62 +496,68 @@
       } else {
         notify(text);
       }
-    }).then(function () {
-      notify("Converting with LuaLaTeX…");
-      const files = projectFilesToBusyTex(projectFiles);
-      return new Promise(function (resolve, reject) {
-        if (!luaWorker) {
-          reject(new Error("LuaLaTeX worker is not ready."));
-          return;
-        }
-
-        const timeout = setTimeout(function () {
-          reject(new Error("LuaLaTeX compilation timed out."));
-        }, 300000);
-
-        luaWorker.onmessage = function (event) {
-          const data = event && event.data ? event.data : {};
-          if (data.print && typeof notify === "function") {
-            notify(String(data.print));
-          }
-          if (data.pdf !== undefined) {
-            clearTimeout(timeout);
-            resolve({
-              ok: data.exit_code === 0 && Boolean(data.pdf),
-              pdf: data.pdf,
-              log: data.log || "No compiler log returned.",
-              engine: null,
-              label: LABELS.lualatex,
-            });
+    })
+      .then(function () {
+        return ensureLuaTexJa(notify);
+      })
+      .then(function () {
+        notify("Converting with LuaLaTeX…");
+        const files = projectFilesToBusyTex(projectFiles);
+        return new Promise(function (resolve, reject) {
+          if (!luaWorker) {
+            reject(new Error("LuaLaTeX worker is not ready."));
             return;
           }
-          if (data.exception) {
+
+          const timeout = setTimeout(function () {
+            reject(new Error("LuaLaTeX compilation timed out."));
+          }, 300000);
+
+          luaWorker.onmessage = function (event) {
+            const data = event && event.data ? event.data : {};
+            if (data.print && typeof notify === "function") {
+              notify(String(data.print));
+            }
+            if (data.pdf !== undefined) {
+              clearTimeout(timeout);
+              resolve({
+                ok: data.exit_code === 0 && Boolean(data.pdf),
+                pdf: data.pdf,
+                log: data.log || "No compiler log returned.",
+                engine: null,
+                label: LABELS.lualatex,
+              });
+              return;
+            }
+            if (data.exception) {
+              clearTimeout(timeout);
+              reject(new Error(String(data.exception)));
+            }
+          };
+
+          luaWorker.onerror = function (error) {
             clearTimeout(timeout);
-            reject(new Error(String(data.exception)));
-          }
-        };
+            reject(
+              new Error(
+                (error && error.message) || "LuaLaTeX worker failed during compile."
+              )
+            );
+          };
 
-        luaWorker.onerror = function (error) {
-          clearTimeout(timeout);
-          reject(
-            new Error((error && error.message) || "LuaLaTeX worker failed during compile.")
-          );
-        };
-
-        luaWorker.postMessage({
-          files: files,
-          main_tex_path: "main.tex",
-          bibtex: null,
-          makeindex: null,
-          rerun: true,
-          verbose: "silent",
-          driver: "luahbtex_bibtex8",
-          data_packages_js: null,
-          remote_endpoint: TEXLIVE_REMOTE,
-          shell_escape: false,
+          luaWorker.postMessage({
+            files: files,
+            main_tex_path: "main.tex",
+            bibtex: null,
+            makeindex: null,
+            rerun: true,
+            verbose: "silent",
+            driver: "luahbtex_bibtex8",
+            data_packages_js: null,
+            remote_endpoint: TEXLIVE_REMOTE,
+            shell_escape: false,
+          });
         });
       });
-    });
   }
 
   function compileProjectFiles(projectFiles, options) {
