@@ -10,6 +10,7 @@
   const PROJECT_MAP_KEY = "undertwig-drive-project-map-v2";
   const ACTIVE_FOLDER_KEY = "undertwig-drive-active-folder-v2";
   const ROLE_KEY = "undertwig-drive-role-v2";
+  const OWNER_EMAIL_KEY = "undertwig-drive-owner-email-v1";
   const PENDING_INVITE_KEY = "undertwig-pending-invite-project-v1";
   // Legacy keys from the single-JSON sync era — clear on load so stale IDs cannot 404.
   const LEGACY_FILE_KEYS = ["undertwig-drive-file-v1", "undertwig-drive-folder-v1"];
@@ -25,6 +26,7 @@
   let cachedUndertwigFolderId = null;
   let cachedActiveFolderId = null;
   let cachedRole = null;
+  let cachedOwnerEmail = null;
   let projectFolderMap = {};
   let saveChain = Promise.resolve();
 
@@ -228,6 +230,9 @@
     } catch (_error) {
       // Ignore.
     }
+    if (!role) {
+      writeOwnerEmail(null);
+    }
   }
 
   function readRole() {
@@ -236,6 +241,43 @@
     } catch (_error) {
       return null;
     }
+  }
+
+  function writeOwnerEmail(email) {
+    const value = String(email || "").trim() || null;
+    cachedOwnerEmail = value;
+    try {
+      if (value) {
+        localStorage.setItem(OWNER_EMAIL_KEY, value);
+      } else {
+        localStorage.removeItem(OWNER_EMAIL_KEY);
+      }
+    } catch (_error) {
+      // Ignore.
+    }
+  }
+
+  function readOwnerEmail() {
+    try {
+      return String(localStorage.getItem(OWNER_EMAIL_KEY) || "").trim() || null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function ownerEmailFromMeta(meta) {
+    const owners = Array.isArray(meta && meta.owners) ? meta.owners : [];
+    for (let i = 0; i < owners.length; i += 1) {
+      const email = owners[i] && owners[i].emailAddress;
+      if (email) {
+        return String(email).trim();
+      }
+    }
+    return null;
+  }
+
+  function getProjectOwnerEmail() {
+    return cachedOwnerEmail || readOwnerEmail() || null;
   }
 
   function isCollaborator() {
@@ -1248,6 +1290,7 @@
 
     const role = roleFromMeta(meta);
     writeRole(role);
+    writeOwnerEmail(ownerEmailFromMeta(meta));
     return meta;
   }
 
@@ -1720,6 +1763,7 @@
   loadProjectMap();
   cachedActiveFolderId = readActiveFolderId();
   cachedRole = readRole();
+  cachedOwnerEmail = readOwnerEmail();
   try {
     cachedUndertwigFolderId = localStorage.getItem(UNDERTWIG_FOLDER_KEY) || null;
   } catch (_error) {
@@ -1742,6 +1786,7 @@
     getOpenInDriveUrl,
     getProjectFolderId,
     getProjectRole,
+    getProjectOwnerEmail,
     setActiveProjectFileId,
     setActiveProjectByName,
     resolveProjectAccess,
