@@ -1051,6 +1051,15 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           cloudStatus.classList.add("is-disconnected");
           cloudStatusDot.textContent = "✕";
           cloudStatusText.appendChild(document.createTextNode("Not connected to Google Cloud. "));
+          const connect = document.createElement("a");
+          connect.href = "#";
+          connect.textContent = "Connect";
+          connect.addEventListener("click", (event) => {
+            event.preventDefault();
+            connectCloudStorage();
+          });
+          cloudStatusText.appendChild(connect);
+          cloudStatusText.appendChild(document.createTextNode(" · "));
           const help = document.createElement("a");
           help.href = "help-cloud.html";
           help.textContent = "Help";
@@ -1081,13 +1090,28 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           renderCloudStatus("logged-out");
           return;
         }
+        // Full connect/sync is owned by initCloudProject so we do not race a probe here.
+        if (cloudStatusMode === "logged-out") {
+          renderCloudStatus("checking");
+        }
+      }
 
+      async function connectCloudStorage() {
+        if (!UndertwigAuth.isLoggedIn()) {
+          renderCloudStatus("logged-out");
+          return;
+        }
         renderCloudStatus("checking");
-        const result = await UndertwigCloud.probeConnection();
-        if (result.connected) {
-          renderCloudStatus("connected", result.fileId || UndertwigCloud.getProjectFileId());
-        } else {
+        setStatus("Connecting to Google Cloud storage…");
+        try {
+          await UndertwigCloud.connect({ interactive: true });
+          await initCloudProject({ force: true });
+        } catch (error) {
           renderCloudStatus("disconnected");
+          setStatus(
+            `Could not connect to Google Cloud storage: ${error && error.message ? error.message : error}`,
+            true
+          );
         }
       }
 
@@ -1309,40 +1333,70 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         state.files = nextState.files || {};
       }
 
-      async function initCloudProject() {
+      let cloudInitPromise = null;
+
+      async function initCloudProject(options) {
+        const force = Boolean(options && options.force);
         if (!UndertwigCloud.isAvailable()) {
           renderCloudStatus("logged-out");
           return;
         }
 
-        renderCloudStatus("checking");
-        setStatus("Loading project from Google Cloud storage…");
-        try {
-          const cloudProject = await UndertwigCloud.loadProject();
-          if (cloudProject && cloudProject.files && Object.keys(cloudProject.files).length) {
-            replaceProjectState(cloudProject);
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-            } catch (_error) {
-              // Local cache is optional when cloud storage is available.
-            }
-            render();
-            setStatus("Loaded project from Google Cloud storage.");
-            renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
-            return;
+        if (cloudInitPromise) {
+          if (!force) {
+            return cloudInitPromise;
           }
-
-          // No cloud project yet: upload the current local project.
-          await UndertwigCloud.saveProject(state);
-          setStatus("Signed-in projects are saved to Google Cloud storage (free).");
-          renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
-        } catch (error) {
-          setStatus(
-            `Could not load Google Cloud storage: ${error && error.message ? error.message : error}`,
-            true
-          );
-          renderCloudStatus("disconnected");
+          try {
+            await cloudInitPromise;
+          } catch (_error) {
+            // Previous attempt failed; continue with a forced retry.
+          }
         }
+
+        cloudInitPromise = (async () => {
+          renderCloudStatus("checking");
+          setStatus("Syncing project with Google Cloud storage…");
+          try {
+            const result = await UndertwigCloud.syncProject(state);
+            if (result.source === "cloud" && result.project) {
+              replaceProjectState(result.project);
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+              } catch (_error) {
+                // Local cache is optional when cloud storage is available.
+              }
+              render();
+              const fileCount = Object.keys(state.files || {}).length;
+              setStatus(
+                "Loaded " +
+                  fileCount +
+                  " file" +
+                  (fileCount === 1 ? "" : "s") +
+                  " from Google Cloud storage."
+              );
+            } else {
+              const fileCount = Object.keys(state.files || {}).length;
+              setStatus(
+                "Synced " +
+                  fileCount +
+                  " file" +
+                  (fileCount === 1 ? "" : "s") +
+                  " to Google Cloud storage (free)."
+              );
+            }
+            renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+          } catch (error) {
+            setStatus(
+              `Could not sync with Google Cloud storage: ${error && error.message ? error.message : error}`,
+              true
+            );
+            renderCloudStatus("disconnected");
+          } finally {
+            cloudInitPromise = null;
+          }
+        })();
+
+        return cloudInitPromise;
       }
 
       function persistProject(options) {

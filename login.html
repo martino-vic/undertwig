@@ -207,6 +207,7 @@
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <script src="auth-config.js"></script>
     <script src="auth.js"></script>
+    <script src="cloud-storage.js"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
@@ -300,8 +301,17 @@
         try {
           setStatus("Verifying Google sign-in…");
           await UndertwigAuth.loginWithCredential(response.credential);
-          setStatus("Signed in. Redirecting…", "ok");
-          redirectAfterLogin();
+          setStatus("Connecting Google Drive storage…");
+          try {
+            await UndertwigCloud.connect({ interactive: true });
+            setStatus("Signed in. Opening editor…", "ok");
+          } catch (driveError) {
+            setStatus(
+              "Signed in. Google Drive access was not granted — you can connect from the editor. Redirecting…",
+              "error"
+            );
+          }
+          window.setTimeout(redirectAfterLogin, 400);
         } catch (error) {
           UndertwigAuth.logout();
           setStatus(error.message || "Google sign-in failed.", "error");

@@ -3,6 +3,8 @@
   const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
   const DRIVE_API = "https://www.googleapis.com/drive/v3";
   const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3";
+  const TOKEN_STORAGE_KEY = "undertwig-drive-token-v1";
+  const FILE_ID_STORAGE_KEY = "undertwig-drive-file-v1";
 
   let memoryAccessToken = null;
   let memoryTokenExpiresAt = 0;
@@ -37,6 +39,73 @@
     });
   }
 
+  function readStoredToken() {
+    try {
+      const raw = sessionStorage.getItem(TOKEN_STORAGE_KEY);
+      if (!raw) {
+        return null;
+      }
+      const data = JSON.parse(raw);
+      if (!data || !data.accessToken || !data.expiresAt) {
+        return null;
+      }
+      if (Number(data.expiresAt) - 60000 <= Date.now()) {
+        sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+        return null;
+      }
+      return {
+        accessToken: String(data.accessToken),
+        expiresAt: Number(data.expiresAt),
+      };
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function writeStoredToken(accessToken, expiresAt) {
+    try {
+      sessionStorage.setItem(
+        TOKEN_STORAGE_KEY,
+        JSON.stringify({
+          accessToken: accessToken,
+          expiresAt: expiresAt,
+        })
+      );
+    } catch (_error) {
+      // sessionStorage may be unavailable; in-memory token still works for this page.
+    }
+  }
+
+  function readStoredFileId() {
+    try {
+      return sessionStorage.getItem(FILE_ID_STORAGE_KEY) || null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function writeStoredFileId(fileId) {
+    try {
+      if (fileId) {
+        sessionStorage.setItem(FILE_ID_STORAGE_KEY, String(fileId));
+      } else {
+        sessionStorage.removeItem(FILE_ID_STORAGE_KEY);
+      }
+    } catch (_error) {
+      // Ignore.
+    }
+  }
+
+  function forgetAccessToken() {
+    memoryAccessToken = null;
+    memoryTokenExpiresAt = 0;
+    try {
+      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    } catch (_error) {
+      // Ignore.
+    }
+  }
+
   function clearToken() {
     if (
       memoryAccessToken &&
@@ -51,18 +120,36 @@
         // Best-effort token revoke.
       }
     }
-    memoryAccessToken = null;
-    memoryTokenExpiresAt = 0;
+    forgetAccessToken();
     cachedFileId = null;
+    writeStoredFileId(null);
   }
 
-  async function getAccessToken(options) {
-    const forcePrompt = Boolean(options && options.forcePrompt);
-    const now = Date.now();
-    if (!forcePrompt && memoryAccessToken && memoryTokenExpiresAt - 60000 > now) {
-      return memoryAccessToken;
+  function hydrateTokenFromStorage() {
+    if (memoryAccessToken && memoryTokenExpiresAt - 60000 > Date.now()) {
+      return true;
     }
+    const stored = readStoredToken();
+    if (!stored) {
+      return false;
+    }
+    memoryAccessToken = stored.accessToken;
+    memoryTokenExpiresAt = stored.expiresAt;
+    if (!cachedFileId) {
+      cachedFileId = readStoredFileId();
+    }
+    return true;
+  }
 
+  function rememberToken(tokenResponse) {
+    memoryAccessToken = tokenResponse.access_token;
+    const expiresIn = Number(tokenResponse.expires_in) || 3600;
+    memoryTokenExpiresAt = Date.now() + expiresIn * 1000;
+    writeStoredToken(memoryAccessToken, memoryTokenExpiresAt);
+    return memoryAccessToken;
+  }
+
+  async function requestOauthToken(forcePrompt) {
     const session = auth().readSession();
     if (!session) {
       throw new Error("Sign in to use Google Cloud storage.");
@@ -103,10 +190,34 @@
       }
     });
 
-    memoryAccessToken = token.access_token;
-    const expiresIn = Number(token.expires_in) || 3600;
-    memoryTokenExpiresAt = Date.now() + expiresIn * 1000;
-    return memoryAccessToken;
+    return rememberToken(token);
+  }
+
+  async function getAccessToken(options) {
+    const forcePrompt = Boolean(options && options.forcePrompt);
+    const allowConsentRetry = Boolean(options && options.allowConsentRetry);
+    if (!forcePrompt && hydrateTokenFromStorage()) {
+      return memoryAccessToken;
+    }
+
+    try {
+      return await requestOauthToken(forcePrompt);
+    } catch (error) {
+      // Used right after Google sign-in (user gesture) so Drive consent can complete.
+      if (!forcePrompt && allowConsentRetry) {
+        return requestOauthToken(true);
+      }
+      throw error;
+    }
+  }
+
+  /** Request Drive access and keep the token for this browser session. */
+  async function connect(options) {
+    const opts = options || {};
+    return getAccessToken({
+      forcePrompt: Boolean(opts.forcePrompt),
+      allowConsentRetry: Boolean(opts.interactive || opts.allowConsentRetry),
+    });
   }
 
   function describeOauthError(response) {
@@ -127,7 +238,7 @@
     const response = await fetch(url, Object.assign({}, init, { headers, credentials: "omit" }));
 
     if (response.status === 401 && !retried) {
-      clearToken();
+      forgetAccessToken();
       await getAccessToken({ forcePrompt: true });
       return driveFetch(url, init, true);
     }
@@ -137,6 +248,11 @@
 
   async function findCloudFileId() {
     if (cachedFileId) {
+      return cachedFileId;
+    }
+    const storedId = readStoredFileId();
+    if (storedId) {
+      cachedFileId = storedId;
       return cachedFileId;
     }
 
@@ -153,6 +269,7 @@
     const payload = await response.json();
     const file = payload.files && payload.files[0];
     cachedFileId = file ? file.id : null;
+    writeStoredFileId(cachedFileId);
     return cachedFileId;
   }
 
@@ -178,6 +295,12 @@
       method: "GET",
     });
     if (!response.ok) {
+      // Stale cached id: forget it and treat as no cloud project.
+      if (response.status === 404) {
+        cachedFileId = null;
+        writeStoredFileId(null);
+        return null;
+      }
       throw new Error(await readDriveError(response, "Could not download cloud project."));
     }
 
@@ -233,17 +356,23 @@
     });
 
     if (!response.ok) {
+      if (fileId && response.status === 404) {
+        cachedFileId = null;
+        writeStoredFileId(null);
+        return writeProject(body);
+      }
       throw new Error(await readDriveError(response, "Could not save project to Google Cloud storage."));
     }
 
     const payload = await response.json();
     if (payload && payload.id) {
       cachedFileId = payload.id;
+      writeStoredFileId(cachedFileId);
     }
   }
 
   function getProjectFileId() {
-    return cachedFileId || null;
+    return cachedFileId || readStoredFileId() || null;
   }
 
   async function probeConnection() {
@@ -251,10 +380,9 @@
       return { connected: false, fileId: null, reason: "not-signed-in" };
     }
     try {
-      await getAccessToken();
+      await connect();
       const fileId = await findCloudFileId();
       if (!fileId) {
-        // No cloud file yet; create/sync one so the connection is real.
         return { connected: true, fileId: null, reason: "ready-no-file" };
       }
       return { connected: true, fileId: fileId, reason: "ok" };
@@ -267,17 +395,36 @@
     }
   }
 
+  /** Load cloud project if present; otherwise upload the provided local project. */
+  async function syncProject(localProject) {
+    await connect();
+    const cloudProject = await loadProject();
+    if (cloudProject && cloudProject.files && Object.keys(cloudProject.files).length) {
+      return { project: cloudProject, source: "cloud" };
+    }
+    await saveProject(localProject || { activeFile: "", folders: [], files: {} });
+    return { project: localProject || null, source: "uploaded" };
+  }
+
   function isAvailable() {
     return Boolean(auth() && auth().isLoggedIn() && auth().getConfig().googleClientId);
+  }
+
+  // Restore any token left from login redirect / prior page in this tab.
+  hydrateTokenFromStorage();
+  if (!cachedFileId) {
+    cachedFileId = readStoredFileId();
   }
 
   global.UndertwigCloud = {
     DRIVE_SCOPE,
     CLOUD_FILE_NAME,
     isAvailable,
+    connect,
     getAccessToken,
     getProjectFileId,
     probeConnection,
+    syncProject,
     loadProject,
     saveProject,
     clearToken,
