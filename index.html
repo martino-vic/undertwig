@@ -1203,6 +1203,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             (session.email || session.name) +
             ". Your projects live in Google Drive; invites share your project with collaborators.";
           collaborateLoginLink.classList.add("hidden");
+          UndertwigInvite.preload();
         } else {
           loginButton.classList.remove("hidden");
           accountWrap.classList.add("hidden");
