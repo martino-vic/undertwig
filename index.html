@@ -1620,11 +1620,28 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
           setStatus("Converting with PdfTeX in the browser...");
           engine.setEngineMainFile("main.tex");
-          const result = await engine.compileLaTeX();
-          compileLog.textContent = result.log || "No compiler log returned.";
+
+          // Two passes so .toc / .aux from the first resolve TOC and references.
+          let result = null;
+          let auxFiles = {};
+          for (let pass = 1; pass <= 2; pass += 1) {
+            setStatus(`Converting with PdfTeX in the browser (pass ${pass}/2)...`);
+            Object.entries(auxFiles).forEach(([path, content]) => {
+              engine.writeMemFSFile(path, content);
+            });
+            result = await engine.compileLaTeX();
+            if (result && result.aux && typeof result.aux === "object") {
+              auxFiles = result.aux;
+            }
+            if (!result || result.status !== 0 || !result.pdf) {
+              break;
+            }
+          }
+
+          compileLog.textContent = (result && result.log) || "No compiler log returned.";
           logPanel.classList.remove("hidden");
 
-          if (result.status !== 0 || !result.pdf) {
+          if (!result || result.status !== 0 || !result.pdf) {
             setStatus("Conversion failed. Check the compiler log below the preview.", true);
             return;
           }

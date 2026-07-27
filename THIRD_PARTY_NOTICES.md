@@ -7,10 +7,12 @@
 - Release used: https://github.com/SwiftLaTeX/SwiftLaTeX/releases/tag/v20022022
 - License: GNU Affero General Public License v3.0 (`vendor/swiftlatex/LICENSE`)
 - Local modifications:
-  - `PdfTeXEngine.js`: worker path set to `vendor/swiftlatex/swiftlatexpdftex.js`
+  - `PdfTeXEngine.js`: worker path set to `vendor/swiftlatex/swiftlatexpdftex.js`;
+    compile results may include auxiliary files (`.aux`, `.toc`, …)
   - `swiftlatexpdftex.js`: TeXLive package endpoint set to `https://texlive.texlyre.org/`
-  - `swiftlatexpdftex.js`: `compileLaTeXRoutine` runs PdfTeX multiple times in one
-    job so `\tableofcontents` and cross-references resolve from `.toc`/`.aux`
+  - `swiftlatexpdftex.js`: project files are tracked in JS and re-applied after each
+    heap restore; auxiliary files are returned so the app can run a second pass for
+    `\tableofcontents` and cross-references without crashing the engine
 
 Undertwig loads these assets in the browser to compile LaTeX to PDF locally.
 

@@ -66,6 +66,7 @@ var CompileResult = /** @class */ (function () {
         this.pdf = undefined;
         this.status = -254;
         this.log = 'No log';
+        this.aux = {};
     }
     return CompileResult;
 }());
@@ -143,6 +144,7 @@ var PdfTeXEngine = /** @class */ (function () {
                                     var nice_report = new CompileResult();
                                     nice_report.status = status;
                                     nice_report.log = log;
+                                    nice_report.aux = data['aux'] || {};
                                     if (result === 'ok') {
                                         var pdf = new Uint8Array(data['pdf']);
                                         nice_report.pdf = pdf;
