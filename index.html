@@ -816,10 +816,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727h"></script>
-    <script src="auth.js?v=20260727h"></script>
-    <script src="cloud-storage.js?v=20260727h"></script>
-    <script src="invite.js?v=20260727h"></script>
+    <script src="auth-config.js?v=20260727i"></script>
+    <script src="auth.js?v=20260727i"></script>
+    <script src="cloud-storage.js?v=20260727i"></script>
+    <script src="invite.js?v=20260727i"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1223,6 +1223,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
         if (UndertwigAuth.isLoggedIn()) {
           showCollaborateLoggedIn();
+          UndertwigInvite.preload();
         } else {
           showCollaborateLoggedOut();
         }
@@ -1260,13 +1261,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             throw new Error("Select a file inside a project folder before inviting collaborators.");
           }
 
-          // Request Gmail (and Drive if needed) immediately on click. Waiting until after
-          // the upload makes browsers block the OAuth popup ("Failed to open popup").
-          setInviteStatus("Allow Google permission popups for Gmail (and Drive if asked)…");
-          await UndertwigInvite.connect({ interactive: true });
-          if (!UndertwigCloud.hasAccessToken()) {
-            await UndertwigCloud.connect({ interactive: true });
-          }
+          // One popup for Drive + Gmail, opened from this click (no await before it).
+          setInviteStatus("Allow Google permission if a popup appears…");
+          await UndertwigInvite.connectForCollaboration();
 
           setInviteStatus("Uploading “" + projectName + "” to Google Drive / Undertwig…");
           await UndertwigCloud.saveProject(state, { projectName: projectName });

@@ -197,6 +197,14 @@
     return memoryAccessToken;
   }
 
+  /** Accept a token from another Undertwig OAuth helper (e.g. invite combined scopes). */
+  function acceptTokenResponse(tokenResponse) {
+    if (!tokenResponse || !tokenResponse.access_token) {
+      throw new Error("Missing Google access token.");
+    }
+    return rememberToken(tokenResponse);
+  }
+
   function withTimeout(promise, ms, message) {
     let timer = null;
     const timeout = new Promise((_, reject) => {
@@ -252,7 +260,14 @@
     if (!clientId) {
       throw new Error("Google Cloud storage is not configured.");
     }
-    await ensureGisOauth();
+    // Awaiting script load before requestAccessToken() breaks the user-gesture chain and
+    // browsers report popup_failed_to_open. Warm GIS before the click; only wait here if needed.
+    if (!(global.google && global.google.accounts && global.google.accounts.oauth2)) {
+      await ensureGisOauth();
+      throw new Error(
+        "Google permission UI finished loading. Click Connect (or Send invite) again to open the permission popup."
+      );
+    }
     const waitMs = Number(timeoutMs) > 0 ? Number(timeoutMs) : TOKEN_REQUEST_TIMEOUT_MS;
 
     const token = await new Promise((resolve, reject) => {
@@ -294,7 +309,18 @@
             finish(resolve, response);
           },
           error_callback: (error) => {
-            finish(reject, new Error((error && error.message) || "Google cloud storage authorization failed."));
+            const message =
+              (error && (error.message || error.type)) || "Google cloud storage authorization failed.";
+            if (/popup/i.test(message)) {
+              finish(
+                reject,
+                new Error(
+                  "Browser blocked the Google permission popup. Allow popups for this site, then click Connect again."
+                )
+              );
+              return;
+            }
+            finish(reject, new Error(message));
           },
         });
         client.requestAccessToken();
@@ -323,11 +349,20 @@
         timeoutMs || (forcePrompt || interactive ? INTERACTIVE_TOKEN_TIMEOUT_MS : SILENT_TOKEN_TIMEOUT_MS)
       );
     } catch (error) {
+      const message = (error && error.message) || "";
+      // Never retry with a second popup after an await — browsers will block it.
+      if (/popup/i.test(message) || /Click Connect/i.test(message) || /finished loading/i.test(message)) {
+        throw error;
+      }
       if (interactive && !forcePrompt) {
-        return requestOauthToken(true, INTERACTIVE_TOKEN_TIMEOUT_MS);
+        throw new Error(
+          message + " Click Connect again if Google asks for Drive permission."
+        );
       }
       if (!forcePrompt && allowConsentRetry) {
-        return requestOauthToken(true, INTERACTIVE_TOKEN_TIMEOUT_MS);
+        throw new Error(
+          message + " Click Connect under the file tree to grant Google Drive permission."
+        );
       }
       throw error;
     }
@@ -1152,6 +1187,7 @@
     isCollaborator,
     connect,
     getAccessToken,
+    acceptTokenResponse,
     getProjectFileId,
     getProjectFolderId,
     getProjectRole,
