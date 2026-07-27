@@ -955,10 +955,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727u"></script>
-    <script src="auth.js?v=20260727u"></script>
-    <script src="cloud-storage.js?v=20260727u"></script>
-    <script src="invite.js?v=20260727u"></script>
+    <script src="auth-config.js?v=20260727v"></script>
+    <script src="auth.js?v=20260727v"></script>
+    <script src="cloud-storage.js?v=20260727v"></script>
+    <script src="invite.js?v=20260727v"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -2525,10 +2525,26 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       }
 
       function downloadProjectZip() {
+        const project = getActiveProjectName();
+        if (!project) {
+          setStatus("Set a current project before downloading a ZIP.", true);
+          return;
+        }
+
+        const prefix = project + "/";
         const entries = [];
-        const folderPaths = new Set(state.folders || []);
+        const folderPaths = new Set();
+
+        (state.folders || []).forEach((folderPath) => {
+          if (folderPath === project || folderPath.startsWith(prefix)) {
+            folderPaths.add(folderPath);
+          }
+        });
 
         Object.keys(state.files).forEach((filePath) => {
+          if (!(filePath === project || filePath.startsWith(prefix))) {
+            return;
+          }
           const parts = filePath.split("/");
           parts.pop();
           let current = "";
@@ -2548,6 +2564,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           });
 
         Object.keys(state.files)
+          .filter((filePath) => filePath === project || filePath.startsWith(prefix))
           .sort((a, b) => a.localeCompare(b))
           .forEach((filePath) => {
             const file = state.files[filePath];
@@ -2558,22 +2575,23 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           });
 
         if (!entries.length) {
-          setStatus("Nothing to download yet.", true);
+          setStatus("Current project “" + project + "” has nothing to download yet.", true);
           return;
         }
 
+        const zipName = project.replace(/[^\w.-]+/g, "_") + ".zip";
         try {
           const zipBytes = createZipArchive(entries);
           const blob = new Blob([zipBytes], { type: "application/zip" });
           const url = URL.createObjectURL(blob);
           const link = document.createElement("a");
           link.href = url;
-          link.download = "undertwig-project.zip";
+          link.download = zipName;
           document.body.appendChild(link);
           link.click();
           link.remove();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
-          setStatus(`Downloaded undertwig-project.zip (${entries.length} entries).`);
+          setStatus("Downloaded " + zipName + " (" + entries.length + " entries) for current project “" + project + "”.");
         } catch (error) {
           setStatus(
             `Could not create ZIP: ${error && error.message ? error.message : error}`,
@@ -2691,8 +2709,14 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           setStatus("Enter a single project folder name (no slashes).", true);
           return;
         }
-        if ((state.folders || []).includes(name) || Object.keys(state.files).some((path) => path === name || path.startsWith(name + "/"))) {
-          setStatus(`A project named ${name} already exists.`, true);
+        const existing = listLocalRootProjects(state).find(
+          (root) => root.toLowerCase() === name.toLowerCase()
+        );
+        if (existing) {
+          setStatus(
+            "A project named “" + existing + "” already exists. Choose a different name.",
+            true
+          );
           return;
         }
         addFolder(name);
@@ -2700,11 +2724,32 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         setStatus(`Created project folder ${name}. It is now the current project.`);
       }
 
+      function pathUnderCurrentProject(path) {
+        const cleaned = normalizePath(path);
+        if (!cleaned) {
+          return "";
+        }
+        const project = getActiveProjectName();
+        if (!project) {
+          return cleaned;
+        }
+        if (cleaned === project || cleaned.startsWith(project + "/")) {
+          return cleaned;
+        }
+        return project + "/" + cleaned;
+      }
+
       function createFile() {
-        const path = normalizePath(prompt("New file path", suggestedPath("untitled.tex")));
+        const project = getActiveProjectName();
+        if (!project) {
+          setStatus("Set a current project before creating a file.", true);
+          return;
+        }
+        let path = normalizePath(prompt("New file path", suggestedPath("untitled.tex")));
         if (!path) return;
+        path = pathUnderCurrentProject(path);
         if (!path.includes("/")) {
-          setStatus("Create files inside a project folder (for example SampleProject/notes.tex).", true);
+          setStatus("Create files inside the current project (for example " + project + "/notes.tex).", true);
           return;
         }
         if (state.files[path]) {
@@ -2724,8 +2769,14 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       }
 
       function createFolder() {
-        const path = normalizePath(prompt("New folder path", suggestedPath("sections")));
+        const project = getActiveProjectName();
+        if (!project) {
+          setStatus("Set a current project before creating a folder.", true);
+          return;
+        }
+        let path = normalizePath(prompt("New folder path", suggestedPath("sections")));
         if (!path) return;
+        path = pathUnderCurrentProject(path);
         if (!path.includes("/")) {
           setStatus("Use “New project” to create a root project folder.", true);
           return;
@@ -2741,14 +2792,19 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         if (!project) {
           return "SampleProject/" + name;
         }
-        const activeFolder = state.activeFile.includes("/")
-          ? state.activeFile.split("/").slice(0, -1).join("/")
-          : project;
-        return activeFolder ? `${activeFolder}/${name}` : `${project}/${name}`;
+        // Prefer a subfolder inside Current when the open file belongs to Current.
+        if (state.activeFile && state.activeFile.startsWith(project + "/")) {
+          const activeFolder = state.activeFile.split("/").slice(0, -1).join("/");
+          if (activeFolder) {
+            return activeFolder + "/" + name;
+          }
+        }
+        return project + "/" + name;
       }
 
       async function handleUpload(fileList, preserveFolders = false) {
         const files = [...(fileList || [])];
+        const project = getActiveProjectName();
 
         if (!files.length) {
           if (preserveFolders) {
@@ -2757,6 +2813,12 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
               true
             );
           }
+          resetUploadInputs();
+          return;
+        }
+
+        if (!project) {
+          setStatus("Set a current project before uploading files.", true);
           resetUploadInputs();
           return;
         }
@@ -2778,11 +2840,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           const label = file.webkitRelativePath || file.name || "file";
           try {
             const rawPath = preserveFolders && file.webkitRelativePath ? file.webkitRelativePath : file.name;
-            let path = normalizePath(rawPath);
-            if (path && !path.includes("/")) {
-              const project = getActiveProjectName() || "SampleProject";
-              path = project + "/" + path;
-            }
+            let path = pathUnderCurrentProject(rawPath);
             if (!path) {
               failures.push(`${label} (invalid path)`);
               continue;
@@ -2829,7 +2887,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         render();
         if (failures.length) {
           setStatus(
-            `Uploaded ${uploaded} ${uploaded === 1 ? "file" : "files"}, but ${failures.length} could not be added. ${failures[0]}`,
+            `Uploaded ${uploaded} ${uploaded === 1 ? "file" : "files"} into “${project}”, but ${failures.length} could not be added. ${failures[0]}`,
             true
           );
           return;
@@ -2837,8 +2895,8 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
         setStatus(
           preserveFolders
-            ? `Uploaded folder with ${uploaded} ${uploaded === 1 ? "file" : "files"}.`
-            : `Uploaded ${uploaded} ${uploaded === 1 ? "file" : "files"}.`
+            ? `Uploaded folder with ${uploaded} ${uploaded === 1 ? "file" : "files"} into current project “${project}”.`
+            : `Uploaded ${uploaded} ${uploaded === 1 ? "file" : "files"} into current project “${project}”.`
         );
       }
 
