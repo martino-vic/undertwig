@@ -977,7 +977,11 @@
         }
         if (me && fileOwnedByEmail(match, me)) {
           try {
-            await trashDriveFile(match.id);
+            await removeDriveItemFromProject({
+              id: match.id,
+              parentId: parentId,
+              owners: match.owners || [{ emailAddress: me }],
+            });
           } catch (_error) {
             // Best-effort cleanup only.
           }
@@ -1053,37 +1057,76 @@
     }
   }
 
-  async function trashDriveFile(fileId) {
-    const id = String(fileId || "").trim();
+  /**
+   * Remove a file/folder from a shared project folder.
+   * Only owners can trash via the Drive API; writers must removeParents (same as Drive UI "delete"
+   * for non-owned items in a shared folder).
+   */
+  async function removeDriveItemFromProject(item) {
+    const id = String((item && item.id) || "").trim();
     if (!id) {
       return;
     }
+    const parentId = String((item && item.parentId) || "").trim();
+    const me = currentSessionEmail();
+    const ownedByMe = Boolean(me && fileOwnedByEmail(item, me));
+
+    if (ownedByMe) {
+      const trashed = await tryTrashDriveFile(id);
+      if (trashed) {
+        return;
+      }
+    }
+
+    if (parentId) {
+      await removeDriveParents(id, parentId);
+      return;
+    }
+
+    const trashed = await tryTrashDriveFile(id);
+    if (trashed) {
+      return;
+    }
+    throw new Error(
+      "Could not remove a file from Google Drive. Only the file owner can trash it; open the folder in Drive and remove it there, or ask the owner to Save after deleting."
+    );
+  }
+
+  async function tryTrashDriveFile(fileId) {
     const response = await driveFetch(
-      DRIVE_API + "/files/" + encodeURIComponent(id) + "?supportsAllDrives=true",
+      DRIVE_API + "/files/" + encodeURIComponent(fileId) + "?supportsAllDrives=true",
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ trashed: true }),
       }
     );
-    if (!response.ok) {
-      // Writers sometimes cannot trash a file they don't own; try a hard delete as fallback.
-      if (response.status === 403) {
-        const del = await driveFetch(
-          DRIVE_API + "/files/" + encodeURIComponent(id) + "?supportsAllDrives=true",
-          { method: "DELETE" }
-        );
-        if (del.ok || del.status === 204) {
-          return;
-        }
-        throw new Error(
-          await readDriveError(
-            del,
-            "Could not delete a file from Google Drive. Ask the project owner to Save once so file ownership can be fixed, then try again."
-          )
-        );
+    return response.ok;
+  }
+
+  async function removeDriveParents(fileId, parentId) {
+    const response = await driveFetch(
+      DRIVE_API +
+        "/files/" +
+        encodeURIComponent(fileId) +
+        "?supportsAllDrives=true&removeParents=" +
+        encodeURIComponent(parentId) +
+        "&fields=id,parents",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
       }
-      throw new Error(await readDriveError(response, "Could not delete a file from Google Drive."));
+    );
+    if (!response.ok) {
+      throw new Error(await readDriveError(response, "Could not remove a file from the shared Google Drive folder."));
+    }
+  }
+
+  async function trashDriveFile(fileId) {
+    const ok = await tryTrashDriveFile(fileId);
+    if (!ok) {
+      throw new Error("Could not delete a file from Google Drive.");
     }
   }
 
@@ -1138,12 +1181,26 @@
       }
       if (entry.type === "file") {
         if (!Object.prototype.hasOwnProperty.call(localFiles, entry.path)) {
-          deletions.push({ path: entry.path, id: entry.id, type: "file", name: entry.name || entry.path });
+          deletions.push({
+            path: entry.path,
+            id: entry.id,
+            parentId: entry.parentId || null,
+            type: "file",
+            name: entry.name || entry.path,
+            owners: entry.owners || [],
+          });
         }
         continue;
       }
       if (entry.type === "folder" && !localFolderSet[entry.path]) {
-        deletions.push({ path: entry.path, id: entry.id, type: "folder", name: entry.name || entry.path });
+        deletions.push({
+          path: entry.path,
+          id: entry.id,
+          parentId: entry.parentId || null,
+          type: "folder",
+          name: entry.name || entry.path,
+          owners: entry.owners || [],
+        });
       }
     }
     return pruneNestedDriveDeletions(deletions);
@@ -1311,7 +1368,7 @@
     if (opts.deleteMissing) {
       const deletions = await findDriveDeletions(folderId, state, projectName);
       for (let i = 0; i < deletions.length; i += 1) {
-        await trashDriveFile(deletions[i].id);
+        await removeDriveItemFromProject(deletions[i]);
       }
     }
 
@@ -1413,6 +1470,7 @@
           type: "folder",
           path: path,
           id: child.id,
+          parentId: folderId,
           name: child.name,
           owners: child.owners || [],
         });
@@ -1426,6 +1484,7 @@
           type: "file",
           path: path,
           id: child.id,
+          parentId: folderId,
           name: child.name,
           mimeType: child.mimeType,
           owners: child.owners || [],
