@@ -691,25 +691,161 @@
     <script src="cloud-storage.js"></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
-      const DEFAULT_TEX = String.raw`\documentclass{article}
-\usepackage{amsmath}
+      const DEMO_FIGURE_PNG_BASE64 =
+        "iVBORw0KGgoAAAANSUhEUgAAAPAAAACMCAIAAADN17N/AAAD20lEQVR42u3dMU4UURjAcdjsAaigIlzBwsKSTisSL8ARKI2cAGPpEbyACZV2lhQUXIHSW1hMMpkMy26YN/PeN+/9/pUxsM6yv/38Zncdj09Oz4+kWtr4EQhoCWgJaAloAS0BLQEtAS0BLaAloCWgJaAloNVS24Vu9+L2yg9X+3u+u5/9No/n/YA/xyorezbQKCsC63lAv9T878dfj5D2d3ZzObvpVNAjyhwrXXYK6w3NKt5ITsr6ul3igKRphF4uIfkmdP80olmzj+rJQ3qTqFlaqGnGNnM9paQI6+sm5alDs6ItHj7LoaoCWm2Dtm8o8tZhQsvKIQEtAS0BLaClOtoWP4L0D1gFzGuaLYKukvLwrmHd0MpRseam7iPQbT3STNe/crT2GJ/dXEbbPZ4eH/Z/wbv3H4CmObTpg4hf++J14d4eqep2Ov78+/v+7/r16cvLW1iF7KygW14o8w/pEeWDiF/74h53d4PBWZvQlU/lNznej7uTHZw10NVqTqe8U3bPOqZpoFGeyDrmqPZZDpqT9pA3vXgCtCJqjmzaylGJ5pyUd64fQXYPE5rmeVgHmdNA01yVaaBprso00Os+C3RsQNdTnPEc53iAtmxUtXgATXNVpoFWVQFtPFc1pIGWCS3jOeqQBlomtAS02tk3Cm4dQMuEloCWgNZaF+hSazTQqqoK/03hn+tvQY/sOum7h5fnmn2IWjkkoCWgpaZ36I8/v8Y8sMlXH13vqxwmtAS0BLSAloBWct11EBd6Y2XRumPOeR1HoGVCS0BLQGvFa3T+BRpomdAS0Gpt6yiybwAtE1qGdNTxDLRMaBnSUccz0ExXpRnodRfNdITjAXrFQ9qxAW3xqHbZAJrp2jQDzXRVmo+qvIxBg6afHh86VZkvddA/keLs9CZ0VeeIOUd1QM25QU++0koFLX3fM5uOqdnKUeGcXnr9CEu5zMrR5pDOea+Ho3reaT28wbAvhG+LPLpnN5c0ZxjVw4E6eWCPnhWR39MptnK0Y7rg30hD1iOXB3HvHO3BKRfeoVswHWG/6hUO/6OTN60iq3Ac4qSwe7yrZB3wVGHo8uD/4rMuxFFAt3yaGAd3ZXljRUBLQEtAS0ALaKlR0M93990vmnr7WpnrdfXeTGiZ0FKDoG0dirlvzDChmdZCmrOuHBOeOlIGY5v0P8+QVoRlo2s743H43JyK765JO/ToaWRUaxbNKQvt8cnpefoBXdxejX7HtNaEqZx+bjYP6J2mpQxngUuBxlplKS8CmmwVcbw4aKlIPsshoCWgJaAloAW0BLQEtAS0BLSAloCWgJaAlg71HwSpsZ+X/NyHAAAAAElFTkSuQmCC";
 
-\title{Undertwig Local LaTeX}
-\author{Version One}
+      const DEFAULT_MAIN_TEX = String.raw`\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\input{macros}
+
+\title{Undertwig Sample Project}
+\author{Local browser compilation}
 \date{\today}
 
 \begin{document}
 \maketitle
 
-\section{Hello}
-This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
+\begin{abstract}
+This starter project shows common LaTeX patterns that work well in Undertwig:
+multi-file \texttt{\textbackslash input}, figures, tables, cross-references, and math.
+Edit any file in the tree and press \textbf{Convert}.
+\end{abstract}
 
-\[
-  e^{i\pi} + 1 = 0
-\]
+\tableofcontents
+\newpage
+
+\input{sections/introduction}
+\input{sections/results}
+
+\section{Conclusion}
+You can delete these sample files, upload your own folder, or keep building on this layout.
+
+\begin{thebibliography}{9}
+\bibitem{lamport94}
+Leslie Lamport.
+\newblock \emph{LaTeX: A Document Preparation System}.
+\newblock Addison-Wesley, 2nd edition, 1994.
+\end{thebibliography}
 
 \end{document}
 `;
+
+      const DEFAULT_MACROS_TEX = String.raw`% Shared macros loaded by main.tex
+\newcommand{\uw}{Undertwig}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+`;
+
+      const DEFAULT_INTRODUCTION_TEX = String.raw`\section{Introduction}
+\label{sec:intro}
+
+Welcome to \uw{}---a browser-based \LaTeX{} workspace.
+This section lives in \texttt{sections/introduction.tex} and is pulled into
+\texttt{main.tex} with:
+
+\begin{verbatim}
+\input{sections/introduction}
+\end{verbatim}
+
+\subsection{Why multi-file projects?}
+Splitting a paper into sections keeps large documents manageable.
+You can also keep shared commands in \texttt{macros.tex}.
+
+\subsection{A first equation}
+For $x \in \R$, a classic identity is
+\begin{equation}
+\label{eq:euler}
+  e^{i\pi} + 1 = 0.
+\end{equation}
+See also the matrix example in Section~\ref{sec:results}.
+`;
+
+      const DEFAULT_RESULTS_TEX = String.raw`\section{Results}
+\label{sec:results}
+
+\subsection{Figures}
+Figure~\ref{fig:diagram} is a lightweight PNG stored in
+\texttt{figures/diagram.png} and included with \texttt{graphicx}:
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.62\textwidth]{figures/diagram.png}
+  \caption{A small sample figure shipped with the starter project.}
+  \label{fig:diagram}
+\end{figure}
+
+\subsection{Tables}
+\begin{table}[ht]
+  \centering
+  \begin{tabular}{lrr}
+    \toprule
+    Method & Error & Time (s) \\
+    \midrule
+    Baseline & 0.041 & 1.2 \\
+    Improved & 0.018 & 1.5 \\
+    \bottomrule
+  \end{tabular}
+  \caption{A compact comparison table using \texttt{booktabs}.}
+  \label{tab:compare}
+\end{table}
+
+\subsection{Aligned math}
+\begin{align}
+  \norm{Ax - b}_2^2
+    &= (Ax - b)^\top (Ax - b) \\
+    &= x^\top A^\top A x - 2 b^\top A x + b^\top b.
+\end{align}
+
+\subsection{Lists and notes}
+\begin{itemize}
+  \item Upload a folder to mirror your local project layout.
+  \item Drag files between folders in the left tree.
+  \item Sign in to sync larger projects to Google Cloud storage.
+\end{itemize}
+
+A short footnote can annotate claims.\footnote{Footnotes are useful for asides
+without breaking the main narrative.}
+Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
+`;
+
+      function createDefaultProject() {
+        return {
+          activeFile: "main.tex",
+          folders: ["sections", "figures"],
+          files: {
+            "main.tex": {
+              name: "main.tex",
+              content: DEFAULT_MAIN_TEX,
+              binary: false
+            },
+            "macros.tex": {
+              name: "macros.tex",
+              content: DEFAULT_MACROS_TEX,
+              binary: false
+            },
+            "sections/introduction.tex": {
+              name: "introduction.tex",
+              content: DEFAULT_INTRODUCTION_TEX,
+              binary: false
+            },
+            "sections/results.tex": {
+              name: "results.tex",
+              content: DEFAULT_RESULTS_TEX,
+              binary: false
+            },
+            "figures/diagram.png": {
+              name: "diagram.png",
+              content: DEMO_FIGURE_PNG_BASE64,
+              binary: true
+            }
+          }
+        };
+      }
 
       const STORAGE_KEY = "undertwig-latex-project-v1";
       const TEXT_EXTENSIONS = new Set(["tex", "bib", "cls", "sty", "txt", "md", "csv", "json", "log"]);
@@ -872,17 +1008,7 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
           // Fall back to the starter document when stored data is unavailable.
         }
 
-        return {
-          activeFile: "main.tex",
-          folders: [],
-          files: {
-            "main.tex": {
-              name: "main.tex",
-              content: DEFAULT_TEX,
-              binary: false
-            }
-          }
-        };
+        return createDefaultProject();
       }
 
       function replaceProjectState(nextState) {
