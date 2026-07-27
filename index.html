@@ -416,6 +416,7 @@
         <div class="legal-links">
           <a href="LICENSE" target="_blank" rel="noopener">License</a>
           <a href="THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener">Notices</a>
+          <a href="https://github.com/martino-vic/undertwig" target="_blank" rel="noopener">Source</a>
           <a href="COMPLIANCE.md" target="_blank" rel="noopener">Compliance</a>
         </div>
       </aside>
@@ -431,7 +432,7 @@
         <div class="editor-wrap">
           <textarea id="editor" spellcheck="false"></textarea>
         </div>
-        <div class="statusbar" id="status">Ready. Conversion runs locally in your browser with the first-party v1 renderer.</div>
+        <div class="statusbar" id="status">Ready. Conversion runs locally in your browser with SwiftLaTeX WebAssembly.</div>
       </section>
 
       <section class="preview" aria-label="PDF preview">
@@ -459,6 +460,7 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
+    <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
       const DEFAULT_TEX = String.raw`\documentclass{article}
 \usepackage{amsmath}
@@ -471,7 +473,7 @@
 \maketitle
 
 \section{Hello}
-This document is converted locally in your browser with Undertwig's first-party v1 renderer.
+This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
 
 \[
   e^{i\pi} + 1 = 0
@@ -483,6 +485,7 @@ This document is converted locally in your browser with Undertwig's first-party 
       const STORAGE_KEY = "undertwig-latex-project-v1";
       const TEXT_EXTENSIONS = new Set(["tex", "bib", "cls", "sty", "txt", "md", "csv", "json", "log"]);
       const state = loadProject();
+      let engine = null;
       let pdfUrl = null;
 
       const app = document.getElementById("app");
@@ -700,15 +703,33 @@ This document is converted locally in your browser with Undertwig's first-party 
         }
 
         convertButton.disabled = true;
-        setStatus("Converting locally with the first-party v1 renderer...");
+        setStatus("Loading local WebAssembly LaTeX engine...");
         compileLog.textContent = "";
         logPanel.classList.add("hidden");
 
         try {
-          const source = state.files["main.tex"].content;
-          const result = renderLatexSubset(source);
-          compileLog.textContent = result.log;
+          if (engine) engine.closeWorker();
+          engine = new PdfTeXEngine();
+          await engine.loadEngine();
+
+          const folders = collectFolders();
+          folders.forEach((folder) => engine.makeMemFSFolder(folder));
+
+          Object.entries(state.files).forEach(([path, file]) => {
+            const content = file.binary ? base64ToBytes(file.content) : file.content;
+            engine.writeMemFSFile(path, content);
+          });
+
+          setStatus("Converting with PdfTeX in the browser...");
+          engine.setEngineMainFile("main.tex");
+          const result = await engine.compileLaTeX();
+          compileLog.textContent = result.log || "No compiler log returned.";
           logPanel.classList.remove("hidden");
+
+          if (result.status !== 0 || !result.pdf) {
+            setStatus("Conversion failed. Check the compiler log below the preview.", true);
+            return;
+          }
 
           if (pdfUrl) URL.revokeObjectURL(pdfUrl);
           pdfUrl = URL.createObjectURL(new Blob([result.pdf], { type: "application/pdf" }));
@@ -723,260 +744,20 @@ This document is converted locally in your browser with Undertwig's first-party 
         }
       }
 
-      function renderLatexSubset(source) {
-        const document = parseLatexDocument(source);
-        const pdf = buildPdf(document.blocks);
-        const unsupported = document.unsupported.length
-          ? `\n\nUnsupported commands ignored: ${[...new Set(document.unsupported)].join(", ")}`
-          : "";
-        const assets = Object.entries(state.files).filter(([path, file]) => path !== "main.tex" && file.binary);
-        const assetNote = assets.length
-          ? `\nUploaded binary assets are stored in the project but not embedded by the v1 renderer: ${assets.map(([path]) => path).join(", ")}`
-          : "";
+      function collectFolders() {
+        const folders = new Set(state.folders);
+        Object.keys(state.files).forEach(ensureFoldersForPathInSet);
+        return [...folders].sort((a, b) => a.split("/").length - b.split("/").length);
 
-        return {
-          pdf,
-          log: `Undertwig v1 local renderer\nParsed ${document.blocks.length} content blocks from main.tex.${unsupported}${assetNote}\n\nThis renderer intentionally supports a focused LaTeX subset.`
-        };
-      }
-
-      function parseLatexDocument(source) {
-        const metadata = {
-          title: readCommandArgument(source, "title"),
-          author: readCommandArgument(source, "author"),
-          date: readCommandArgument(source, "date")
-        };
-        const unsupported = [];
-        let body = extractDocumentBody(source);
-        body = body.replace(/(^|[^\\])%.*/g, "$1");
-        body = body.replace(/\\usepackage(?:\[[^\]]*\])?\{[^}]*\}/g, "");
-        body = body.replace(/\\documentclass(?:\[[^\]]*\])?\{[^}]*\}/g, "");
-
-        const blocks = [];
-        const pushParagraph = (text) => {
-          const clean = cleanLatexText(text);
-          if (clean) blocks.push({ type: "paragraph", text: clean });
-        };
-
-        if (body.includes("\\maketitle")) {
-          if (metadata.title) blocks.push({ type: "title", text: cleanLatexText(metadata.title) });
-          if (metadata.author) blocks.push({ type: "subtitle", text: cleanLatexText(metadata.author) });
-          if (metadata.date) blocks.push({ type: "subtitle", text: metadata.date === "\\today" ? new Date().toLocaleDateString() : cleanLatexText(metadata.date) });
-          body = body.replace("\\maketitle", "\n\n");
+        function ensureFoldersForPathInSet(path) {
+          const parts = path.split("/");
+          parts.pop();
+          let current = "";
+          parts.forEach((part) => {
+            current = current ? `${current}/${part}` : part;
+            folders.add(current);
+          });
         }
-
-        const pattern = /\\(section|subsection|subsubsection)\*?\{([^}]*)\}|\\\[((?:.|\n)*?)\\\]|\\begin\{itemize\}((?:.|\n)*?)\\end\{itemize\}/g;
-        let cursor = 0;
-        let match;
-
-        while ((match = pattern.exec(body)) !== null) {
-          pushParagraph(body.slice(cursor, match.index));
-
-          if (match[1]) {
-            blocks.push({
-              type: match[1] === "section" ? "heading" : "subheading",
-              text: cleanLatexText(match[2])
-            });
-          } else if (match[3]) {
-            blocks.push({ type: "math", text: cleanMathText(match[3]) });
-          } else if (match[4]) {
-            const items = match[4]
-              .split(/\\item/g)
-              .map(cleanLatexText)
-              .filter(Boolean);
-            if (items.length) blocks.push({ type: "list", items });
-          }
-
-          cursor = pattern.lastIndex;
-        }
-
-        pushParagraph(body.slice(cursor));
-
-        const handledCommands = new Set([
-          "\\begin", "\\end", "\\maketitle", "\\section", "\\subsection", "\\subsubsection",
-          "\\item", "\\title", "\\author", "\\date", "\\today", "\\LaTeX", "\\TeX",
-          "\\usepackage", "\\documentclass", "\\textbf", "\\textit", "\\emph", "\\underline",
-          "\\frac", "\\sqrt", "\\left", "\\right", "\\pi", "\\alpha", "\\beta", "\\gamma"
-        ]);
-        const remainingCommands = body.match(/\\[A-Za-z]+/g) || [];
-        remainingCommands
-          .filter((command) => !handledCommands.has(command))
-          .forEach((command) => unsupported.push(command));
-
-        return { blocks: blocks.length ? blocks : [{ type: "paragraph", text: "No renderable LaTeX content found." }], unsupported };
-      }
-
-      function readCommandArgument(source, command) {
-        const match = source.match(new RegExp(`\\\\${command}\\s*\\{([^}]*)\\}`));
-        return match ? match[1].trim() : "";
-      }
-
-      function extractDocumentBody(source) {
-        const match = source.match(/\\begin\{document\}((?:.|\n)*)\\end\{document\}/);
-        return match ? match[1] : source;
-      }
-
-      function cleanLatexText(text) {
-        return text
-          .replace(/\r/g, "")
-          .replace(/\\(textbf|textit|emph|underline)\{([^}]*)\}/g, "$2")
-          .replace(/\$([^$]*)\$/g, "$1")
-          .replace(/\\LaTeX/g, "LaTeX")
-          .replace(/\\TeX/g, "TeX")
-          .replace(/\\today/g, new Date().toLocaleDateString())
-          .replace(/\\[A-Za-z]+\*?(?:\[[^\]]*\])?(?:\{[^}]*\})?/g, "")
-          .replace(/[{}]/g, "")
-          .replace(/~+/g, " ")
-          .replace(/\s+/g, " ")
-          .trim();
-      }
-
-      function cleanMathText(text) {
-        return text
-          .replace(/\s+/g, " ")
-          .replace(/\\left|\\right/g, "")
-          .replace(/\\frac\{([^}]*)\}\{([^}]*)\}/g, "($1)/($2)")
-          .replace(/\\sqrt\{([^}]*)\}/g, "sqrt($1)")
-          .replace(/\\pi/g, "pi")
-          .replace(/\\gamma/g, "gamma")
-          .replace(/\\alpha/g, "alpha")
-          .replace(/\\beta/g, "beta")
-          .replace(/\^\{([^}]*)\}/g, "^($1)")
-          .replace(/_\{([^}]*)\}/g, "_($1)")
-          .replace(/[{}]/g, "")
-          .replace(/\s+/g, " ")
-          .trim();
-      }
-
-      function buildPdf(blocks) {
-        const pages = paginateBlocks(blocks);
-        const objects = [];
-        const addObject = (content) => {
-          objects.push(content);
-          return objects.length;
-        };
-
-        const catalogId = addObject("<< /Type /Catalog /Pages 2 0 R >>");
-        const pagesId = addObject("");
-        const fontRegularId = addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-        const fontBoldId = addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
-        const pageIds = [];
-
-        pages.forEach((lines) => {
-          const stream = renderPdfPage(lines);
-          const contentId = addObject(`<< /Length ${byteLength(stream)} >>\nstream\n${stream}\nendstream`);
-          const pageId = addObject(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontRegularId} 0 R /F2 ${fontBoldId} 0 R >> >> /Contents ${contentId} 0 R >>`);
-          pageIds.push(pageId);
-        });
-
-        objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`;
-
-        let output = "%PDF-1.4\n";
-        const offsets = [0];
-        objects.forEach((object, index) => {
-          offsets.push(byteLength(output));
-          output += `${index + 1} 0 obj\n${object}\nendobj\n`;
-        });
-
-        const xrefOffset = byteLength(output);
-        output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-        offsets.slice(1).forEach((offset) => {
-          output += `${String(offset).padStart(10, "0")} 00000 n \n`;
-        });
-        output += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-        return new TextEncoder().encode(output);
-      }
-
-      function paginateBlocks(blocks) {
-        const pages = [[]];
-        let y = 790;
-        const bottom = 54;
-
-        const addLine = (line) => {
-          const height = line.text ? line.size + (line.gap || 4) : (line.gap || 8);
-          if (y - height < bottom && pages[pages.length - 1].length) {
-            pages.push([]);
-            y = 790;
-          }
-          pages[pages.length - 1].push(line);
-          y -= height;
-        };
-
-        blocks.forEach((block) => {
-          if (block.type === "title") {
-            addLine({ text: block.text, size: 24, font: "F2", gap: 10 });
-          } else if (block.type === "subtitle") {
-            addLine({ text: block.text, size: 12, font: "F1", gap: 6 });
-          } else if (block.type === "heading") {
-            addLine({ text: "", size: 10, font: "F1", gap: 14 });
-            addLine({ text: block.text, size: 16, font: "F2", gap: 10 });
-          } else if (block.type === "subheading") {
-            addLine({ text: "", size: 10, font: "F1", gap: 10 });
-            addLine({ text: block.text, size: 13, font: "F2", gap: 8 });
-          } else if (block.type === "math") {
-            addLine({ text: "", size: 10, font: "F1", gap: 8 });
-            wrapText(block.text, 78).forEach((line) => addLine({ text: line, size: 12, font: "F1", indent: 28, gap: 4 }));
-            addLine({ text: "", size: 10, font: "F1", gap: 8 });
-          } else if (block.type === "list") {
-            block.items.forEach((item) => {
-              wrapText(item, 82).forEach((line, index) => addLine({ text: `${index === 0 ? "- " : "  "}${line}`, size: 11, font: "F1", indent: 12, gap: 3 }));
-            });
-            addLine({ text: "", size: 10, font: "F1", gap: 8 });
-          } else {
-            wrapText(block.text, 88).forEach((line) => addLine({ text: line, size: 11, font: "F1", gap: 4 }));
-            addLine({ text: "", size: 10, font: "F1", gap: 10 });
-          }
-        });
-
-        return pages.filter((page) => page.length);
-      }
-
-      function renderPdfPage(lines) {
-        let y = 790;
-        const commands = ["BT"];
-        lines.forEach((line) => {
-          if (!line.text) {
-            y -= line.gap || 8;
-            return;
-          }
-          const x = 54 + (line.indent || 0);
-          // Tm sets an absolute text matrix. Td is relative and was stacking offsets off-page.
-          commands.push(`/${line.font} ${line.size} Tf`);
-          commands.push(`1 0 0 1 ${x} ${y} Tm (${escapePdfText(line.text)}) Tj`);
-          y -= line.size + (line.gap || 4);
-        });
-        commands.push("ET");
-        return commands.join("\n");
-      }
-
-      function wrapText(text, maxLength) {
-        const words = safePdfText(text).split(/\s+/).filter(Boolean);
-        const lines = [];
-        let current = "";
-        words.forEach((word) => {
-          const candidate = current ? `${current} ${word}` : word;
-          if (candidate.length > maxLength && current) {
-            lines.push(current);
-            current = word;
-          } else {
-            current = candidate;
-          }
-        });
-        if (current) lines.push(current);
-        return lines.length ? lines : [""];
-      }
-
-      function escapePdfText(text) {
-        return safePdfText(text).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-      }
-
-      function safePdfText(text) {
-        return text.replace(/[^\x20-\x7E]/g, "?");
-      }
-
-      function byteLength(text) {
-        return new TextEncoder().encode(text).length;
       }
 
       function ensureFoldersForPath(path) {

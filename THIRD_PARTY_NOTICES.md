@@ -1,34 +1,34 @@
 # Third-Party Notices
 
-This version of Undertwig does not ship third-party JavaScript libraries,
-WebAssembly engines, fonts, TeXLive packages, or compiler assets.
+## SwiftLaTeX PdfTeX WebAssembly engine
 
-The previous SwiftLaTeX browser engine bundle was removed. PDF conversion is
-implemented by Undertwig's first-party v1 renderer in `index.html`.
+- Location: `vendor/swiftlatex/`
+- Upstream: https://github.com/SwiftLaTeX/SwiftLaTeX
+- Release used: https://github.com/SwiftLaTeX/SwiftLaTeX/releases/tag/v20022022
+- License: GNU Affero General Public License v3.0 (`vendor/swiftlatex/LICENSE`)
+- Local modifications:
+  - `PdfTeXEngine.js`: worker path set to `vendor/swiftlatex/swiftlatexpdftex.js`
+  - `swiftlatexpdftex.js`: TeXLive package endpoint set to `https://texlive.texlyre.org/`
 
-Browser-provided platform APIs used by the app include:
+Undertwig loads these assets in the browser to compile LaTeX to PDF locally.
 
-- `Blob`
-- `File`
-- `FileReader` / file input APIs
-- `localStorage`
-- `TextEncoder`
-- `URL.createObjectURL`
+Corresponding source for this repository, including the vendored SwiftLaTeX assets
+and local modifications, is available at:
 
-These APIs are supplied by the user's browser and are not redistributed as part
-of this project.
+https://github.com/martino-vic/undertwig
 
-## Future Dependency Rules
+## Browser platform APIs
+
+The app also uses browser-provided APIs such as `Blob`, file inputs, `localStorage`,
+`Worker`, and `URL.createObjectURL`. Those APIs are supplied by the user's browser
+and are not redistributed as part of this project.
+
+## Future dependency rules
 
 Before adding any dependency or hosted runtime asset, record:
 
 - Component name and upstream URL
 - Exact version, release, or commit
 - License identifier and full license text
-- Whether the component is served to users, bundled in source, or only used in
-  development
-- Whether corresponding source, notices, relink materials, or attribution are
-  required
-
-Do not add AGPL-licensed runtime code unless the whole deployed application is
-intentionally made AGPL-compliant and source-available to users.
+- Whether the component is served to users
+- Whether corresponding source, notices, or attribution are required
