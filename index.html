@@ -785,7 +785,16 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
       document.getElementById("newFile").addEventListener("click", createFile);
       document.getElementById("newFolder").addEventListener("click", createFolder);
       document.getElementById("uploadFiles").addEventListener("click", () => fileInput.click());
-      document.getElementById("uploadFolder").addEventListener("click", () => folderInput.click());
+      document.getElementById("uploadFolder").addEventListener("click", () => {
+        if (!supportsFolderUpload()) {
+          setStatus(
+            "Folder upload is not supported in this browser. Try Chrome, Edge, Firefox, or Safari, or upload files individually.",
+            true
+          );
+          return;
+        }
+        folderInput.click();
+      });
       fileInput.addEventListener("change", () => handleUpload(fileInput.files));
       folderInput.addEventListener("change", () => handleUpload(folderInput.files, true));
       convertButton.addEventListener("click", compileProject);
@@ -1131,25 +1140,130 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
       }
 
       async function handleUpload(fileList, preserveFolders = false) {
-        const files = [...fileList];
-        if (!files.length) return;
+        const files = [...(fileList || [])];
 
-        for (const file of files) {
-          const rawPath = preserveFolders && file.webkitRelativePath ? file.webkitRelativePath : file.name;
-          const path = normalizePath(rawPath);
-          if (!path) continue;
-          ensureFoldersForPath(path);
-          const binary = !isTextFile(path);
-          const content = binary ? bytesToBase64(new Uint8Array(await file.arrayBuffer())) : await file.text();
-          state.files[path] = { name: file.name, content, binary };
+        if (!files.length) {
+          if (preserveFolders) {
+            setStatus(
+              "Folder upload did not complete. The folder may be empty, inaccessible, or the selection was cancelled.",
+              true
+            );
+          }
+          resetUploadInputs();
+          return;
         }
 
-        state.activeFile = normalizePath((preserveFolders && files[0].webkitRelativePath) || files[0].name) || state.activeFile;
+        if (preserveFolders && !files.some((file) => file.webkitRelativePath)) {
+          setStatus(
+            "Folder upload failed because this browser did not provide folder paths. Try another browser, or upload files individually.",
+            true
+          );
+          resetUploadInputs();
+          return;
+        }
+
+        let uploaded = 0;
+        const failures = [];
+        let firstUploadedPath = "";
+
+        for (const file of files) {
+          const label = file.webkitRelativePath || file.name || "file";
+          try {
+            const rawPath = preserveFolders && file.webkitRelativePath ? file.webkitRelativePath : file.name;
+            const path = normalizePath(rawPath);
+            if (!path) {
+              failures.push(`${label} (invalid path)`);
+              continue;
+            }
+
+            ensureFoldersForPath(path);
+            const binary = !isTextFile(path);
+            const content = binary
+              ? bytesToBase64(new Uint8Array(await file.arrayBuffer()))
+              : await file.text();
+            state.files[path] = { name: file.name, content, binary };
+            uploaded += 1;
+            if (!firstUploadedPath) firstUploadedPath = path;
+          } catch (error) {
+            failures.push(`${label}: ${explainUploadError(error)}`);
+          }
+        }
+
+        resetUploadInputs();
+
+        if (!uploaded) {
+          setStatus(
+            preserveFolders
+              ? `Folder could not be uploaded. ${failures[0] || "No readable files were found in the selected folder."}`
+              : `Upload failed. ${failures[0] || "No readable files were selected."}`,
+            true
+          );
+          return;
+        }
+
+        if (firstUploadedPath) {
+          state.activeFile = firstUploadedPath;
+        }
+
+        try {
+          persistProject();
+        } catch (error) {
+          setStatus(
+            preserveFolders
+              ? "Folder contents were read, but could not be saved. The folder may be too large for browser storage."
+              : "Files were read, but could not be saved. Browser storage may be full.",
+            true
+          );
+          return;
+        }
+
+        render();
+        if (failures.length) {
+          setStatus(
+            `Uploaded ${uploaded} ${uploaded === 1 ? "file" : "files"}, but ${failures.length} could not be added. ${failures[0]}`,
+            true
+          );
+          return;
+        }
+
+        setStatus(
+          preserveFolders
+            ? `Uploaded folder with ${uploaded} ${uploaded === 1 ? "file" : "files"}.`
+            : `Uploaded ${uploaded} ${uploaded === 1 ? "file" : "files"}.`
+        );
+      }
+
+      function resetUploadInputs() {
         fileInput.value = "";
         folderInput.value = "";
-        persistProject();
-        render();
-        setStatus(`Uploaded ${files.length} ${files.length === 1 ? "file" : "files"}.`);
+      }
+
+      function supportsFolderUpload() {
+        const input = document.createElement("input");
+        input.type = "file";
+        return "webkitdirectory" in input || "directory" in input;
+      }
+
+      function explainUploadError(error) {
+        const name = error && error.name ? error.name : "";
+        const message = error && error.message ? String(error.message) : "";
+
+        if (name === "NotAllowedError" || name === "SecurityError") {
+          return "permission denied by the browser";
+        }
+        if (name === "NotReadableError") {
+          return "could not be read (locked or inaccessible)";
+        }
+        if (name === "NotFoundError") {
+          return "file was not found";
+        }
+        if (name === "AbortError") {
+          return "read was aborted";
+        }
+        if (/quota|storage|exceeded/i.test(message) || name === "QuotaExceededError") {
+          return "browser storage is full";
+        }
+        return message || "unknown read error";
       }
 
       async function compileProject() {
