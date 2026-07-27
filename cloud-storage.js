@@ -627,6 +627,40 @@
     return (payload && payload.files) || [];
   }
 
+  /**
+   * List direct children of a folder. Used for shared invite folders too — do not
+   * constrain with spaces=drive (that can hide shared-with-me children).
+   */
+  async function listChildren(folderId) {
+    const all = [];
+    let pageToken = "";
+    const query = "'" + folderId + "' in parents and trashed = false";
+    do {
+      let url =
+        DRIVE_API +
+        "/files?supportsAllDrives=true&includeItemsFromAllDrives=true" +
+        "&pageSize=100" +
+        "&fields=" +
+        encodeURIComponent("nextPageToken,files(id,name,mimeType,modifiedTime,md5Checksum,size)") +
+        "&q=" +
+        encodeURIComponent(query);
+      if (pageToken) {
+        url += "&pageToken=" + encodeURIComponent(pageToken);
+      }
+      const response = await driveFetch(url, { method: "GET" });
+      if (!response.ok) {
+        throw new Error(await readDriveError(response, "Could not list Google Drive folder contents."));
+      }
+      const payload = await response.json();
+      const files = (payload && payload.files) || [];
+      for (let i = 0; i < files.length; i += 1) {
+        all.push(files[i]);
+      }
+      pageToken = (payload && payload.nextPageToken) || "";
+    } while (pageToken);
+    return all;
+  }
+
   async function createDriveFolder(name, parentId) {
     const metadata = {
       name: name,
@@ -830,10 +864,6 @@
       });
       return btoa(binary);
     });
-  }
-
-  async function listChildren(folderId) {
-    return driveSearch("'" + folderId + "' in parents and trashed = false", 100);
   }
 
   async function ensurePathFolders(rootFolderId, relativeDir) {
@@ -1044,8 +1074,17 @@
         entries.push({ type: "folder", path: path, id: child.id });
         const nested = await listFolderTree(child.id, path);
         entries.push.apply(entries, nested);
+      } else if (child.mimeType && child.mimeType.indexOf("application/vnd.google-apps.") === 0) {
+        // Skip Google Docs/Sheets/etc. — Undertwig stores plain project files.
+        continue;
       } else {
-        entries.push({ type: "file", path: path, id: child.id, name: child.name, mimeType: child.mimeType });
+        entries.push({
+          type: "file",
+          path: path,
+          id: child.id,
+          name: child.name,
+          mimeType: child.mimeType,
+        });
       }
     }
     return entries;
@@ -1086,15 +1125,23 @@
     );
   }
 
-  async function loadFolderAsProject(folderId, projectName) {
+  /**
+   * Pull a Drive folder into an Undertwig workspace project (Drive → file tree).
+   * Used when an invitee opens an invite link.
+   */
+  async function loadFolderAsProject(folderId, projectName, onProgress) {
+    const notify = typeof onProgress === "function" ? onProgress : function () {};
     const meta = await refreshProjectMeta(folderId);
-    const name =
-      projectName ||
-      (meta && meta.name) ||
-      "SharedProject";
+    if (!meta) {
+      throw new Error("Could not read the Google Drive project folder.");
+    }
+    const name = projectName || meta.name || "SharedProject";
+
+    notify("Listing files in Google Drive / " + name + "…");
     const entries = await listFolderTree(folderId, "");
     const folders = [];
     const files = {};
+    const fileEntries = [];
 
     folders.push(name);
     for (let i = 0; i < entries.length; i += 1) {
@@ -1103,13 +1150,38 @@
       if (entry.type === "folder") {
         folders.push(fullPath);
       } else {
-        const binary = isBinaryMime(entry.mimeType, entry.path);
-        const content = await downloadDriveFile(entry.id, binary);
-        files[fullPath] = {
-          name: entry.name,
+        fileEntries.push({ entry: entry, fullPath: fullPath });
+      }
+    }
+
+    if (!fileEntries.length) {
+      const emptyError = new Error(
+        "The shared Google Drive folder “" +
+          name +
+          "” has no downloadable files yet. Ask the owner to open the project in Undertwig and click Save, then reopen this invite link."
+      );
+      emptyError.code = "shared-folder-empty";
+      throw emptyError;
+    }
+
+    for (let i = 0; i < fileEntries.length; i += 1) {
+      const item = fileEntries[i];
+      notify("Downloading " + (i + 1) + "/" + fileEntries.length + ": " + item.entry.name + "…");
+      const binary = isBinaryMime(item.entry.mimeType, item.entry.path);
+      try {
+        const content = await downloadDriveFile(item.entry.id, binary);
+        files[item.fullPath] = {
+          name: item.entry.name,
           content: content,
           binary: binary,
         };
+      } catch (error) {
+        throw new Error(
+          "Could not download “" +
+            item.entry.name +
+            "” from Google Drive: " +
+            ((error && error.message) || error)
+        );
       }
     }
 
@@ -1124,7 +1196,6 @@
 
     writeActiveFolderId(folderId);
     setMappedProject(name, folderId, cachedRole || null);
-    persistProjectMap();
 
     return {
       activeFile: activeFile,
@@ -1133,6 +1204,8 @@
       projectName: name,
       currentProject: name,
       role: cachedRole,
+      fileCount: Object.keys(files).length,
+      folderCount: folders.length,
     };
   }
 
@@ -1178,7 +1251,7 @@
     return meta;
   }
 
-  async function joinSharedProject(folderId) {
+  async function joinSharedProject(folderId, onProgress) {
     const id = String(folderId || "").trim();
     if (!id) {
       throw new Error("Missing shared project id.");
@@ -1207,18 +1280,25 @@
       accessError.code = "shared-folder-unavailable";
       throw accessError;
     }
-    const project = await loadFolderAsProject(id, meta.name);
+
+    // Mark invitee before download so the tree label is correct as soon as files land.
+    const role = isOwnerEmail(meta) ? "owner" : "writer";
+    writeRole(role);
+
+    const project = await loadFolderAsProject(id, meta.name, onProgress);
     if (!project) {
       throw new Error("Shared project folder was inaccessible.");
     }
-    // Invitees edit the owner's folder; never treat them as creating their own Undertwig copy.
-    const role = isOwnerEmail(meta) ? "owner" : "writer";
-    writeRole(role);
     setMappedProject(project.projectName || meta.name, id, role);
     project.role = role;
     project.currentProject = project.projectName || meta.name;
     clearPendingInvite();
     return project;
+  }
+
+  /** Explicit Drive → Undertwig sync for a folder id (invite or refresh). */
+  async function syncFromDrive(folderId, onProgress) {
+    return joinSharedProject(folderId, onProgress);
   }
 
   function isOwnerEmail(meta) {
@@ -1671,6 +1751,7 @@
     clearPendingInvite,
     inviteEditorPath,
     joinSharedProject,
+    syncFromDrive,
     shareProjectWithEmail,
     refreshProjectMeta,
     probeConnection,

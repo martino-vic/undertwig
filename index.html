@@ -955,10 +955,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260728a"></script>
-    <script src="auth.js?v=20260728a"></script>
-    <script src="cloud-storage.js?v=20260728a"></script>
-    <script src="invite.js?v=20260728a"></script>
+    <script src="auth-config.js?v=20260728b"></script>
+    <script src="auth.js?v=20260728b"></script>
+    <script src="cloud-storage.js?v=20260728b"></script>
+    <script src="invite.js?v=20260728b"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1933,48 +1933,58 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             if (sharedProjectId) {
               try {
                 const sharedProject = await Promise.race([
-                  UndertwigCloud.joinSharedProject(sharedProjectId),
+                  UndertwigCloud.syncFromDrive
+                    ? UndertwigCloud.syncFromDrive(sharedProjectId, function (message) {
+                        setStatus(message || "Syncing shared project from Google Drive…");
+                      })
+                    : UndertwigCloud.joinSharedProject(sharedProjectId, function (message) {
+                        setStatus(message || "Syncing shared project from Google Drive…");
+                      }),
                   new Promise(function (_, reject) {
                     setTimeout(function () {
-                      reject(new Error("Opening the shared project timed out."));
-                    }, 15000);
+                      reject(new Error("Syncing the shared project from Google Drive timed out."));
+                    }, 120000);
                   }),
                 ]);
                 const projectName =
                   sharedProject.currentProject || sharedProject.projectName || "SharedProject";
-                replaceProjectState({
-                  activeFile: sharedProject.activeFile,
-                  folders: sharedProject.folders,
-                  files: sharedProject.files,
-                  currentProject: projectName,
-                });
+                // Replace local workspace with the Drive project (do not merge with SampleProject).
+                state.folders = Array.isArray(sharedProject.folders) ? sharedProject.folders.slice() : [];
+                state.files = sharedProject.files || {};
                 state.currentProject = projectName;
+                state.activeFile = sharedProject.activeFile || "";
+                state.version = 2;
                 try {
                   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
                 } catch (_error) {
                   // Local cache is optional.
                 }
+                collapsedFolders.clear();
+                persistCollapsedFolders();
                 render();
                 clearProjectIdFromUrl();
                 renderCloudStatus("connected", sharedProjectId);
-                const fileCount = Object.keys(state.files || {}).length;
+                const fileCount =
+                  typeof sharedProject.fileCount === "number"
+                    ? sharedProject.fileCount
+                    : Object.keys(state.files || {}).length;
                 setStatus(
-                  "Joined shared project “" +
+                  "Synced “" +
                     projectName +
-                    "” (" +
+                    "” from the owner's Google Drive (" +
                     fileCount +
                     " file" +
                     (fileCount === 1 ? "" : "s") +
-                    "). You are an invitee — edits save to the owner's Google Drive."
+                    "). Current (invitee) — edits save back to the owner's folder."
                 );
                 return;
               } catch (joinError) {
-                const message = (joinError && joinError.message) || "Could not open shared project.";
+                const message = (joinError && joinError.message) || "Could not sync shared project.";
                 const code = joinError && joinError.code;
                 if (code === "missing-scope" || /insufficient authentication scopes/i.test(message)) {
                   renderCloudStatus("disconnected");
                   setStatus(
-                    "Google Drive permission needs an update to open shared projects. Redirecting…",
+                    "Google Drive permission needs an update to sync shared projects. Redirecting…",
                     true
                   );
                   try {
