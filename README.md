@@ -14,7 +14,7 @@ Version one runs entirely in the browser: projects stay on the device, there is 
 
 ## Try it
 
-Open `index.html` in a modern browser, or use the GitHub Pages deployment for this repository if one is configured.
+Use the live site: [undertwig.com](https://undertwig.com).
 
 ## How conversion works
 
