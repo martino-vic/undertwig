@@ -2544,8 +2544,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
         convertButton.disabled = true;
         convertButton.setAttribute("aria-busy", "true");
-        convertBusy.classList.remove("hidden");
-        convertBusy.classList.add("is-active");
+        startConvertSpinner();
         setStatus("Loading local WebAssembly LaTeX engine...");
         compileLog.textContent = "";
         logPanel.classList.add("hidden");
@@ -2613,8 +2612,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         } finally {
           convertButton.disabled = false;
           convertButton.removeAttribute("aria-busy");
-          convertBusy.classList.add("hidden");
-          convertBusy.classList.remove("is-active");
+          stopConvertSpinner();
         }
       }
 
