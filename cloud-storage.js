@@ -654,13 +654,13 @@
   }
 
   async function driveSearch(query, pageSize) {
+    // Do not set spaces=drive — that can hide children inside folders shared with the user.
     const url =
       DRIVE_API +
       "/files?supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,mimeType,modifiedTime,owners,capabilities)&q=" +
       encodeURIComponent(query) +
       "&pageSize=" +
-      (pageSize || 100) +
-      "&spaces=drive";
+      (pageSize || 100);
     const response = await driveFetch(url, { method: "GET" });
     if (!response.ok) {
       throw new Error(await readDriveError(response, "Could not search Google Drive."));
@@ -683,7 +683,9 @@
         "/files?supportsAllDrives=true&includeItemsFromAllDrives=true" +
         "&pageSize=100" +
         "&fields=" +
-        encodeURIComponent("nextPageToken,files(id,name,mimeType,modifiedTime,md5Checksum,size)") +
+        encodeURIComponent(
+          "nextPageToken,files(id,name,mimeType,modifiedTime,md5Checksum,size,owners,capabilities)"
+        ) +
         "&q=" +
         encodeURIComponent(query);
       if (pageToken) {
@@ -816,18 +818,12 @@
   }
 
   async function ensureChildFolder(parentId, name) {
-    const existing = await driveSearch(
-      "name = '" +
-        name.replace(/'/g, "\\'") +
-        "' and '" +
-        parentId +
-        "' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
-      1
-    );
-    if (existing[0] && existing[0].id) {
-      return existing[0].id;
+    const existing = await findNamedChild(parentId, name, "application/vnd.google-apps.folder");
+    if (existing && existing.id) {
+      return existing.id;
     }
     const created = await createDriveFolder(name, parentId);
+    await maybeTransferToProjectOwner(created && created.id);
     return created.id;
   }
 
@@ -919,14 +915,142 @@
     return parentId;
   }
 
-  async function findNamedChild(parentId, name, mimeType) {
-    let query =
-      "name = '" + name.replace(/'/g, "\\'") + "' and '" + parentId + "' in parents and trashed = false";
-    if (mimeType) {
-      query += " and mimeType = '" + mimeType + "'";
+  function currentSessionEmail() {
+    const session = auth().readSession();
+    return session && session.email ? String(session.email).toLowerCase() : "";
+  }
+
+  function fileOwnedByEmail(meta, email) {
+    const want = String(email || "").toLowerCase();
+    if (!want || !meta) {
+      return false;
     }
-    const files = await driveSearch(query, 1);
-    return files[0] || null;
+    const owners = Array.isArray(meta.owners) ? meta.owners : [];
+    return owners.some(function (owner) {
+      return owner && owner.emailAddress && String(owner.emailAddress).toLowerCase() === want;
+    });
+  }
+
+  function pickPreferredChild(matches) {
+    if (!matches || !matches.length) {
+      return null;
+    }
+    if (matches.length === 1) {
+      return matches[0];
+    }
+    const ownerEmail = getProjectOwnerEmail();
+    if (ownerEmail) {
+      for (let i = 0; i < matches.length; i += 1) {
+        if (fileOwnedByEmail(matches[i], ownerEmail)) {
+          return matches[i];
+        }
+      }
+    }
+    return matches[0];
+  }
+
+  async function findNamedChild(parentId, name, mimeType) {
+    const wantName = String(name || "");
+    if (!parentId || !wantName) {
+      return null;
+    }
+    const children = await listChildren(parentId);
+    const matches = [];
+    for (let i = 0; i < children.length; i += 1) {
+      const child = children[i];
+      if (!child || child.name !== wantName) {
+        continue;
+      }
+      if (mimeType && child.mimeType !== mimeType) {
+        continue;
+      }
+      matches.push(child);
+    }
+    const preferred = pickPreferredChild(matches);
+    // Older saves could create duplicate names owned by whoever saved last — remove our extras.
+    if (preferred && matches.length > 1) {
+      const me = currentSessionEmail();
+      for (let i = 0; i < matches.length; i += 1) {
+        const match = matches[i];
+        if (!match || match.id === preferred.id) {
+          continue;
+        }
+        if (me && fileOwnedByEmail(match, me)) {
+          try {
+            await trashDriveFile(match.id);
+          } catch (_error) {
+            // Best-effort cleanup only.
+          }
+        }
+      }
+    }
+    return preferred;
+  }
+
+  async function transferOwnership(fileId, emailAddress) {
+    const id = String(fileId || "").trim();
+    const email = String(emailAddress || "").trim();
+    if (!id || !email) {
+      return;
+    }
+    const response = await driveFetch(
+      DRIVE_API +
+        "/files/" +
+        encodeURIComponent(id) +
+        "/permissions?transferOwnership=true&sendNotificationEmail=false&supportsAllDrives=true",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "user",
+          role: "owner",
+          emailAddress: email,
+        }),
+      }
+    );
+    if (!response.ok) {
+      throw new Error(await readDriveError(response, "Could not transfer Google Drive ownership."));
+    }
+  }
+
+  /**
+   * Keep shared-project items owned by the folder owner so every writer can delete/update them.
+   */
+  async function maybeTransferToProjectOwner(fileId) {
+    const id = String(fileId || "").trim();
+    const ownerEmail = getProjectOwnerEmail();
+    const me = currentSessionEmail();
+    if (!id || !ownerEmail || !me || me === String(ownerEmail).toLowerCase()) {
+      return false;
+    }
+    try {
+      await transferOwnership(id, ownerEmail);
+      return true;
+    } catch (_error) {
+      // Best-effort: save should still succeed if transfer is blocked.
+      return false;
+    }
+  }
+
+  /**
+   * Invitees may already own files from earlier saves — hand them back to the project owner.
+   */
+  async function reclaimSharedOwnershipUnderFolder(folderId) {
+    const ownerEmail = getProjectOwnerEmail();
+    const me = currentSessionEmail();
+    if (!folderId || !ownerEmail || !me || me === String(ownerEmail).toLowerCase()) {
+      return;
+    }
+    const remote = await listFolderTree(folderId, "");
+    for (let i = 0; i < remote.length; i += 1) {
+      const entry = remote[i];
+      if (!entry || !entry.id) {
+        continue;
+      }
+      if (fileOwnedByEmail(entry, me)) {
+        await maybeTransferToProjectOwner(entry.id);
+      }
+    }
   }
 
   async function trashDriveFile(fileId) {
@@ -943,6 +1067,22 @@
       }
     );
     if (!response.ok) {
+      // Writers sometimes cannot trash a file they don't own; try a hard delete as fallback.
+      if (response.status === 403) {
+        const del = await driveFetch(
+          DRIVE_API + "/files/" + encodeURIComponent(id) + "?supportsAllDrives=true",
+          { method: "DELETE" }
+        );
+        if (del.ok || del.status === 204) {
+          return;
+        }
+        throw new Error(
+          await readDriveError(
+            del,
+            "Could not delete a file from Google Drive. Ask the project owner to Save once so file ownership can be fixed, then try again."
+          )
+        );
+      }
       throw new Error(await readDriveError(response, "Could not delete a file from Google Drive."));
     }
   }
@@ -1098,7 +1238,11 @@
       }
       throw new Error(await readDriveError(response, "Could not upload " + fileName + " to Google Drive."));
     }
-    return response.json();
+    const saved = await response.json();
+    if (!existingId && saved && saved.id) {
+      await maybeTransferToProjectOwner(saved.id);
+    }
+    return saved;
   }
 
   function projectRelativePath(projectName, fullPath) {
@@ -1155,6 +1299,14 @@
     const opts = options || {};
     const relativeFiles = filesForProject(state, projectName);
     const relativeFolders = foldersForProject(state, projectName);
+
+    // Refresh owner email so transfers/deletes work for shared projects.
+    try {
+      await refreshProjectMeta(folderId);
+    } catch (_error) {
+      // Continue; ownership helpers will no-op without an owner email.
+    }
+    await reclaimSharedOwnershipUnderFolder(folderId);
 
     if (opts.deleteMissing) {
       const deletions = await findDriveDeletions(folderId, state, projectName);
@@ -1257,7 +1409,13 @@
       const child = children[i];
       const path = prefix ? prefix + "/" + child.name : child.name;
       if (child.mimeType === "application/vnd.google-apps.folder") {
-        entries.push({ type: "folder", path: path, id: child.id });
+        entries.push({
+          type: "folder",
+          path: path,
+          id: child.id,
+          name: child.name,
+          owners: child.owners || [],
+        });
         const nested = await listFolderTree(child.id, path);
         entries.push.apply(entries, nested);
       } else if (child.mimeType && child.mimeType.indexOf("application/vnd.google-apps.") === 0) {
@@ -1270,6 +1428,7 @@
           id: child.id,
           name: child.name,
           mimeType: child.mimeType,
+          owners: child.owners || [],
         });
       }
     }
