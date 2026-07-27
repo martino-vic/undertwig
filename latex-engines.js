@@ -152,7 +152,10 @@
       luaWorker.postMessage({
         busytex_js: BUSYTEX_CDN + "/busytex.js",
         busytex_wasm: BUSYTEX_CDN + "/busytex.wasm",
-        preload_data_packages_js: [BUSYTEX_CDN + "/texlive-basic.js"],
+        preload_data_packages_js: [
+          BUSYTEX_CDN + "/texlive-basic.js",
+          BUSYTEX_CDN + "/texlive-recommended.js",
+        ],
         data_packages_js: [],
         texmf_local: [],
         preload: true,
