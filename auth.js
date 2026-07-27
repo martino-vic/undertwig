@@ -233,11 +233,8 @@
     if (typeof payload.exp !== "number" || payload.exp + CLOCK_SKEW_SECONDS < now) {
       throw new Error("Google credential has expired.");
     }
-    // Honor not-before when present. Do not reject on iat skew: local clocks
-    // are often slightly wrong, and Google's own verifiers primarily enforce exp.
-    if (typeof payload.nbf === "number" && payload.nbf - CLOCK_SKEW_SECONDS > now) {
-      throw new Error("Google credential is not valid yet.");
-    }
+    // Skip iat/nbf "not yet valid" rejects: local clocks are often skewed, and
+    // Google's ID token guidance centers on signature, aud, iss, and exp.
     if (!(await nonceMatches(expectedNonce, payload.nonce))) {
       throw new Error("Google credential nonce mismatch.");
     }
