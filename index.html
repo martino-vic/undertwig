@@ -1010,10 +1010,11 @@
         <div class="sidebar-actions">
           <button id="newFile" type="button">New file</button>
           <button id="newFolder" type="button">New folder</button>
-          <button id="uploadFiles" type="button">Upload files</button>
-          <button id="uploadFolder" type="button">Upload folder</button>
+          <button id="uploadFiles" type="button">Import files</button>
+          <button id="uploadFolder" type="button">Import folder</button>
           <button class="wide" id="downloadZip" type="button">Download ZIP</button>
           <button class="wide" id="newProject" type="button">New project</button>
+          <button class="wide" id="importProject" type="button" title="Import a local project folder as the current project">Import new project</button>
           <button class="wide" id="syncProject" type="button" title="Load the current project from Google Drive into the file tree">Load</button>
         </div>
         <div class="tree" id="tree"></div>
@@ -1117,6 +1118,7 @@
 
       <input class="hidden" id="fileInput" type="file" multiple>
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
+      <input class="hidden" id="projectFolderInput" type="file" multiple webkitdirectory directory>
     </main>
 
     <div class="modal-overlay hidden" id="driveDeleteDialog" role="alertdialog" aria-modal="true" aria-labelledby="driveDeleteTitle" aria-describedby="driveDeleteMessage">
@@ -1137,13 +1139,13 @@
       </div>
     </div>
 
-    <script src="auth-config.js?v=20260728p"></script>
-    <script src="auth.js?v=20260728p"></script>
-    <script src="cloud-storage.js?v=20260728p"></script>
-    <script src="invite.js?v=20260728p"></script>
+    <script src="auth-config.js?v=20260728q"></script>
+    <script src="auth.js?v=20260728q"></script>
+    <script src="cloud-storage.js?v=20260728q"></script>
+    <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
-    <script src="latex-engines.js?v=20260728p"></script>
+    <script src="latex-engines.js?v=20260728q"></script>
     <script>
       const DEMO_FIGURE_PNG_BASE64 =
         "iVBORw0KGgoAAAANSUhEUgAAAPAAAACMCAIAAADN17N/AAAD20lEQVR42u3dMU4UURjAcdjsAaigIlzBwsKSTisSL8ARKI2cAGPpEbyACZV2lhQUXIHSW1hMMpkMy26YN/PeN+/9/pUxsM6yv/38Zncdj09Oz4+kWtr4EQhoCWgJaAloAS0BLQEtAS0BLaAloCWgJaAloNVS24Vu9+L2yg9X+3u+u5/9No/n/YA/xyorezbQKCsC63lAv9T878dfj5D2d3ZzObvpVNAjyhwrXXYK6w3NKt5ITsr6ul3igKRphF4uIfkmdP80olmzj+rJQ3qTqFlaqGnGNnM9paQI6+sm5alDs6ItHj7LoaoCWm2Dtm8o8tZhQsvKIQEtAS0BLaClOtoWP4L0D1gFzGuaLYKukvLwrmHd0MpRseam7iPQbT3STNe/crT2GJ/dXEbbPZ4eH/Z/wbv3H4CmObTpg4hf++J14d4eqep2Ov78+/v+7/r16cvLW1iF7KygW14o8w/pEeWDiF/74h53d4PBWZvQlU/lNznej7uTHZw10NVqTqe8U3bPOqZpoFGeyDrmqPZZDpqT9pA3vXgCtCJqjmzaylGJ5pyUd64fQXYPE5rmeVgHmdNA01yVaaBprso00Os+C3RsQNdTnPEc53iAtmxUtXgATXNVpoFWVQFtPFc1pIGWCS3jOeqQBlomtAS02tk3Cm4dQMuEloCWgNZaF+hSazTQqqoK/03hn+tvQY/sOum7h5fnmn2IWjkkoCWgpaZ36I8/v8Y8sMlXH13vqxwmtAS0BLSAloBWct11EBd6Y2XRumPOeR1HoGVCS0BLQGvFa3T+BRpomdAS0Gpt6yiybwAtE1qGdNTxDLRMaBnSUccz0ExXpRnodRfNdITjAXrFQ9qxAW3xqHbZAJrp2jQDzXRVmo+qvIxBg6afHh86VZkvddA/keLs9CZ0VeeIOUd1QM25QU++0koFLX3fM5uOqdnKUeGcXnr9CEu5zMrR5pDOea+Ho3reaT28wbAvhG+LPLpnN5c0ZxjVw4E6eWCPnhWR39MptnK0Y7rg30hD1iOXB3HvHO3BKRfeoVswHWG/6hUO/6OTN60iq3Ac4qSwe7yrZB3wVGHo8uD/4rMuxFFAt3yaGAd3ZXljRUBLQEtAS0ALaKlR0M93990vmnr7WpnrdfXeTGiZ0FKDoG0dirlvzDChmdZCmrOuHBOeOlIGY5v0P8+QVoRlo2s743H43JyK765JO/ToaWRUaxbNKQvt8cnpefoBXdxejX7HtNaEqZx+bjYP6J2mpQxngUuBxlplKS8CmmwVcbw4aKlIPsshoCWgJaAloAW0BLQEtAS0BLSAloCWgJaAlg71HwSpsZ+X/NyHAAAAAElFTkSuQmCC";
@@ -1380,6 +1382,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const activeFileMeta = document.getElementById("activeFileMeta");
       const fileInput = document.getElementById("fileInput");
       const folderInput = document.getElementById("folderInput");
+      const projectFolderInput = document.getElementById("projectFolderInput");
       const pdfFrame = document.getElementById("pdfFrame");
       const emptyPreview = document.getElementById("emptyPreview");
       const previewMeta = document.getElementById("previewMeta");
@@ -2166,6 +2169,16 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       });
 
       document.getElementById("newProject").addEventListener("click", createProject);
+      document.getElementById("importProject").addEventListener("click", () => {
+        if (!supportsFolderUpload()) {
+          setStatus(
+            "Importing a project folder is not supported in this browser. Try Chrome, Edge, Firefox, or Safari.",
+            true
+          );
+          return;
+        }
+        projectFolderInput.click();
+      });
       syncProjectButton.addEventListener("click", () => {
         syncCurrentProjectFromDrive();
       });
@@ -2177,7 +2190,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       document.getElementById("uploadFolder").addEventListener("click", () => {
         if (!supportsFolderUpload()) {
           setStatus(
-            "Folder upload is not supported in this browser. Try Chrome, Edge, Firefox, or Safari, or upload files individually.",
+            "Folder import is not supported in this browser. Try Chrome, Edge, Firefox, or Safari, or import files individually.",
             true
           );
           return;
@@ -2186,6 +2199,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       });
       fileInput.addEventListener("change", () => handleUpload(fileInput.files));
       folderInput.addEventListener("change", () => handleUpload(folderInput.files, true));
+      projectFolderInput.addEventListener("change", () => handleImportNewProject(projectFolderInput.files));
       convertButton.addEventListener("click", compileProject);
 
       latexEngineButton.addEventListener("click", (event) => {
@@ -3512,8 +3526,156 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           return;
         }
         addFolder(name);
+        if (UndertwigCloud.clearCollaboratorState) {
+          UndertwigCloud.clearCollaboratorState();
+        }
         setCurrentProject(name);
         setStatus(`Created project folder ${name}. It is now the current project.`);
+      }
+
+      function uniqueImportedProjectName(preferred) {
+        const base =
+          normalizePath(String(preferred || "").trim().replace(/[\\/]+/g, "-")) || "ImportedProject";
+        const taken = new Set(listLocalRootProjects(state).map((root) => root.toLowerCase()));
+        if (!taken.has(base.toLowerCase())) {
+          return base;
+        }
+        let n = 2;
+        let candidate = base + " (" + n + ")";
+        while (taken.has(candidate.toLowerCase())) {
+          n += 1;
+          candidate = base + " (" + n + ")";
+        }
+        return candidate;
+      }
+
+      async function handleImportNewProject(fileList) {
+        const files = [...(fileList || [])];
+        if (!files.length) {
+          setStatus(
+            "Project import did not complete. The folder may be empty, inaccessible, or the selection was cancelled.",
+            true
+          );
+          resetUploadInputs();
+          return;
+        }
+
+        if (!files.some((file) => file.webkitRelativePath)) {
+          setStatus(
+            "Project import failed because this browser did not provide folder paths. Try another browser.",
+            true
+          );
+          resetUploadInputs();
+          return;
+        }
+
+        const active = state.files[state.activeFile];
+        if (active && !active.binary) {
+          active.content = editor.value;
+        }
+
+        let preferredRoot = "";
+        for (let i = 0; i < files.length; i += 1) {
+          const rel = String(files[i].webkitRelativePath || "").replace(/\\/g, "/");
+          const root = rel.split("/").filter(Boolean)[0];
+          if (root) {
+            preferredRoot = root;
+            break;
+          }
+        }
+        if (!preferredRoot) {
+          setStatus("Could not determine the project folder name.", true);
+          resetUploadInputs();
+          return;
+        }
+
+        const projectName = uniqueImportedProjectName(preferredRoot);
+        let imported = 0;
+        const failures = [];
+        let firstImportedPath = "";
+
+        addFolder(projectName);
+
+        for (const file of files) {
+          const label = file.webkitRelativePath || file.name || "file";
+          try {
+            const rel = normalizePath(String(file.webkitRelativePath || file.name || ""));
+            if (!rel) {
+              failures.push(label + " (invalid path)");
+              continue;
+            }
+            const parts = rel.split("/");
+            parts.shift();
+            if (!parts.length) {
+              continue;
+            }
+            const path = normalizePath(projectName + "/" + parts.join("/"));
+            if (!path || path === projectName) {
+              continue;
+            }
+
+            ensureFoldersForPath(path);
+            const binary = !isTextFile(path);
+            const content = binary
+              ? bytesToBase64(new Uint8Array(await file.arrayBuffer()))
+              : await file.text();
+            state.files[path] = { name: file.name, content, binary };
+            imported += 1;
+            if (!firstImportedPath) {
+              firstImportedPath = path;
+            }
+          } catch (error) {
+            failures.push(label + ": " + explainUploadError(error));
+          }
+        }
+
+        resetUploadInputs();
+
+        if (!imported) {
+          removeRootProjectPaths(projectName);
+          setStatus(
+            "Project could not be imported. " +
+              (failures[0] || "No readable files were found in the selected folder."),
+            true
+          );
+          render();
+          return;
+        }
+
+        if (UndertwigCloud.clearCollaboratorState) {
+          UndertwigCloud.clearCollaboratorState();
+        }
+
+        const mainPath = projectName + "/main.tex";
+        state.activeFile = state.files[mainPath] ? mainPath : firstImportedPath;
+        setCurrentProject(projectName, { keepActiveFile: true });
+
+        if (failures.length) {
+          setStatus(
+            "Imported “" +
+              projectName +
+              "” as Current (owner) with " +
+              imported +
+              " file" +
+              (imported === 1 ? "" : "s") +
+              ", but " +
+              failures.length +
+              " could not be added. " +
+              failures[0],
+            true
+          );
+          return;
+        }
+
+        setStatus(
+          "Imported “" +
+            projectName +
+            "” as Current (owner) (" +
+            imported +
+            " file" +
+            (imported === 1 ? "" : "s") +
+            ")."
+        );
       }
 
       async function syncCurrentProjectFromDrive() {
@@ -3674,7 +3836,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         if (!files.length) {
           if (preserveFolders) {
             setStatus(
-              "Folder upload did not complete. The folder may be empty, inaccessible, or the selection was cancelled.",
+              "Folder import did not complete. The folder may be empty, inaccessible, or the selection was cancelled.",
               true
             );
           }
@@ -3683,14 +3845,14 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
 
         if (!project) {
-          setStatus("Set a current project before uploading files.", true);
+          setStatus("Set a current project before importing files.", true);
           resetUploadInputs();
           return;
         }
 
         if (preserveFolders && !files.some((file) => file.webkitRelativePath)) {
           setStatus(
-            "Folder upload failed because this browser did not provide folder paths. Try another browser, or upload files individually.",
+            "Folder import failed because this browser did not provide folder paths. Try another browser, or import files individually.",
             true
           );
           resetUploadInputs();
@@ -3729,8 +3891,8 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         if (!uploaded) {
           setStatus(
             preserveFolders
-              ? `Folder could not be uploaded. ${failures[0] || "No readable files were found in the selected folder."}`
-              : `Upload failed. ${failures[0] || "No readable files were selected."}`,
+              ? `Folder could not be imported. ${failures[0] || "No readable files were found in the selected folder."}`
+              : `Import failed. ${failures[0] || "No readable files were selected."}`,
             true
           );
           return;
@@ -3752,7 +3914,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         render();
         if (failures.length) {
           setStatus(
-            `Uploaded ${uploaded} ${uploaded === 1 ? "file" : "files"} into “${project}”, but ${failures.length} could not be added. ${failures[0]}`,
+            `Imported ${uploaded} ${uploaded === 1 ? "file" : "files"} into “${project}”, but ${failures.length} could not be added. ${failures[0]}`,
             true
           );
           return;
@@ -3760,14 +3922,17 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
         setStatus(
           preserveFolders
-            ? `Uploaded folder with ${uploaded} ${uploaded === 1 ? "file" : "files"} into current project “${project}”.`
-            : `Uploaded ${uploaded} ${uploaded === 1 ? "file" : "files"} into current project “${project}”.`
+            ? `Imported folder with ${uploaded} ${uploaded === 1 ? "file" : "files"} into current project “${project}”.`
+            : `Imported ${uploaded} ${uploaded === 1 ? "file" : "files"} into current project “${project}”.`
         );
       }
 
       function resetUploadInputs() {
         fileInput.value = "";
         folderInput.value = "";
+        if (projectFolderInput) {
+          projectFolderInput.value = "";
+        }
       }
 
       function supportsFolderUpload() {
