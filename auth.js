@@ -1,11 +1,15 @@
 (function (global) {
   const AUTH_STORAGE_KEY = "undertwig-auth-v2";
   const NONCE_STORAGE_KEY = "undertwig-auth-nonce";
+  const NEXT_STORAGE_KEY = "undertwig-auth-next";
+  const PKCE_VERIFIER_KEY = "undertwig-auth-pkce-verifier";
   const GOOGLE_ISSUERS = new Set([
     "https://accounts.google.com",
     "accounts.google.com",
   ]);
   const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
+  const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+  const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
   const CLOCK_SKEW_SECONDS = 300;
 
   let jwksCache = null;
@@ -446,6 +450,170 @@
     return "login.html?next=" + encodeURIComponent(next);
   }
 
+  function base64UrlEncodeBytes(bytes) {
+    let binary = "";
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+
+  function createPkceVerifier() {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    return base64UrlEncodeBytes(bytes);
+  }
+
+  async function createPkceChallenge(verifier) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    return base64UrlEncodeBytes(new Uint8Array(digest));
+  }
+
+  function loginRedirectUri() {
+    return new URL("login.html", global.location.href).href.split("#")[0].split("?")[0];
+  }
+
+  function rememberLoginNext(nextPath) {
+    try {
+      sessionStorage.setItem(NEXT_STORAGE_KEY, safeNextPath(nextPath || "/"));
+    } catch (_error) {
+      // Ignore.
+    }
+  }
+
+  function consumeLoginNext(fallback) {
+    try {
+      const next = sessionStorage.getItem(NEXT_STORAGE_KEY);
+      sessionStorage.removeItem(NEXT_STORAGE_KEY);
+      return safeNextPath(next || fallback || "/");
+    } catch (_error) {
+      return safeNextPath(fallback || "/");
+    }
+  }
+
+  /**
+   * Full-page Google OAuth redirect (PKCE). Works in private windows where the
+   * GIS FedCM button often appears to do nothing.
+   */
+  async function beginGoogleRedirectSignIn(nextPath) {
+    const clientId = getConfig().googleClientId;
+    if (!clientId) {
+      throw new Error("Google sign-in is not configured.");
+    }
+    if (!global.crypto || !global.crypto.subtle) {
+      throw new Error("Secure sign-in is unavailable in this browser.");
+    }
+
+    const nonce = prepareSignInNonce();
+    const verifier = createPkceVerifier();
+    const challenge = await createPkceChallenge(verifier);
+    rememberLoginNext(nextPath);
+
+    try {
+      sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+    } catch (_error) {
+      throw new Error("Could not start Google redirect sign-in (session storage blocked).");
+    }
+
+    const redirectUri = loginRedirectUri();
+    const url = new URL(GOOGLE_AUTH_URL);
+    url.searchParams.set("client_id", clientId);
+    url.searchParams.set("redirect_uri", redirectUri);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("scope", "openid email profile");
+    url.searchParams.set("nonce", nonce);
+    url.searchParams.set("state", "undertwig");
+    url.searchParams.set("prompt", "select_account");
+    url.searchParams.set("code_challenge", challenge);
+    url.searchParams.set("code_challenge_method", "S256");
+    global.location.assign(url.toString());
+  }
+
+  async function exchangeAuthorizationCode(code) {
+    const clientId = getConfig().googleClientId;
+    let verifier = null;
+    try {
+      verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
+      sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+    } catch (_error) {
+      verifier = null;
+    }
+    if (!verifier) {
+      throw new Error("Google sign-in could not be completed (missing PKCE verifier). Try again.");
+    }
+
+    const body = new URLSearchParams({
+      client_id: clientId,
+      code: code,
+      code_verifier: verifier,
+      redirect_uri: loginRedirectUri(),
+      grant_type: "authorization_code",
+    });
+
+    const response = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST",
+      credentials: "omit",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(
+        (payload && payload.error_description) ||
+          (payload && payload.error) ||
+          "Google authorization code exchange failed."
+      );
+    }
+    if (!payload.id_token) {
+      throw new Error("Google did not return an ID token.");
+    }
+    return payload.id_token;
+  }
+
+  /**
+   * If login.html was opened as an OAuth redirect callback, complete sign-in.
+   * Returns { session, nextPath } or null when this is a normal page load.
+   */
+  async function completeGoogleRedirectSignInIfPresent() {
+    const params = new URLSearchParams(global.location.search);
+    const error = params.get("error");
+    const code = params.get("code");
+    if (!error && !code) {
+      return null;
+    }
+
+    const nextPath = consumeLoginNext(params.get("next") || "/");
+
+    // Clean the OAuth params out of the address bar.
+    try {
+      const clean = new URL(global.location.href);
+      clean.searchParams.delete("code");
+      clean.searchParams.delete("state");
+      clean.searchParams.delete("scope");
+      clean.searchParams.delete("authuser");
+      clean.searchParams.delete("prompt");
+      clean.searchParams.delete("error");
+      clean.searchParams.delete("error_description");
+      if (!clean.searchParams.get("next")) {
+        clean.searchParams.set("next", nextPath);
+      }
+      global.history.replaceState({}, "", clean.pathname + clean.search + clean.hash);
+    } catch (_error) {
+      // Ignore history cleanup failures.
+    }
+
+    if (error) {
+      throw new Error(params.get("error_description") || error || "Google sign-in was cancelled.");
+    }
+
+    const idToken = await exchangeAuthorizationCode(code);
+    const session = await loginWithCredential(idToken);
+    return { session: session, nextPath: nextPath };
+  }
+
   global.UndertwigAuth = {
     AUTH_STORAGE_KEY,
     getConfig,
@@ -457,6 +625,9 @@
     logout,
     logoutAndRevoke,
     loginUrl,
+    loginRedirectUri,
+    beginGoogleRedirectSignIn,
+    completeGoogleRedirectSignInIfPresent,
     loadGoogleIdentityServices,
   };
 })(window);

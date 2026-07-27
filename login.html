@@ -101,6 +101,25 @@
         min-height: 44px;
       }
 
+      #googleRedirectButton {
+        display: block;
+        width: 100%;
+        margin-top: 12px;
+        padding: 12px 16px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--panel-soft);
+        color: var(--text);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      #googleRedirectButton:hover {
+        border-color: var(--brand);
+        color: var(--brand-strong);
+      }
+
       .note {
         margin: 20px 0 0;
         color: var(--muted);
@@ -224,12 +243,16 @@
 
         <div id="googleSection">
           <div id="googleButton"></div>
+          <button class="secondary" id="googleRedirectButton" type="button">
+            Continue with Google (works in private windows)
+          </button>
           <p class="note">
             By continuing, you agree to the
             <a href="privacy.html">Privacy Policy</a> and
             <a href="terms.html">Terms of Use</a>.
             Sign-in is handled by Google. Signed-in projects are stored in an Undertwig folder
             on your Google Drive. Inviting collaborators shares your project with them.
+            If the Google button above does nothing in a private window, use the redirect button.
           </p>
         </div>
 
@@ -264,7 +287,10 @@
       const signedIn = document.getElementById("signedIn");
       const signedInActions = document.getElementById("signedInActions");
       const continueLink = document.getElementById("continueLink");
+      const googleRedirectButton = document.getElementById("googleRedirectButton");
       const config = UndertwigAuth.getConfig();
+      let gisClickTimer = null;
+      let gisCredentialReceived = false;
 
       continueLink.href = nextPath;
 
@@ -292,21 +318,39 @@
         setStatus("You are signed in with Google.", "ok");
       }
 
-      function redirectAfterLogin() {
-        window.location.replace(nextPath);
+      function redirectAfterLogin(path) {
+        window.location.replace(path || nextPath);
       }
 
       async function handleCredentialResponse(response) {
+        gisCredentialReceived = true;
+        if (gisClickTimer) {
+          clearTimeout(gisClickTimer);
+          gisClickTimer = null;
+        }
         try {
           setStatus("Verifying Google sign-in…");
           await UndertwigAuth.loginWithCredential(response.credential);
           setStatus("Signed in. Opening editor…", "ok");
-          // Drive access is granted from the editor via Connect (needs a reliable user gesture).
-          window.setTimeout(redirectAfterLogin, 250);
+          window.setTimeout(() => redirectAfterLogin(nextPath), 250);
         } catch (error) {
           UndertwigAuth.logout();
           setStatus(error.message || "Google sign-in failed.", "error");
           initGoogleButton();
+        }
+      }
+
+      async function startRedirectSignIn() {
+        try {
+          setStatus("Redirecting to Google sign-in…");
+          await UndertwigAuth.beginGoogleRedirectSignIn(nextPath);
+        } catch (error) {
+          setStatus(
+            (error && error.message) ||
+              "Could not start Google redirect sign-in. In Google Cloud Console, add this page as an Authorized redirect URI: " +
+              UndertwigAuth.loginRedirectUri(),
+            "error"
+          );
         }
       }
 
@@ -339,8 +383,6 @@
         whenGoogleReady(
           () => {
             const nonce = UndertwigAuth.prepareSignInNonce();
-            // Incognito / third-party-cookie blocking requires FedCM for the GIS button.
-            // Classic non-FedCM mode often renders a button that does nothing when clicked.
             google.accounts.id.initialize({
               client_id: config.googleClientId,
               callback: handleCredentialResponse,
@@ -360,18 +402,39 @@
               text: "continue_with",
               width: 320,
               logo_alignment: "left",
-              // Prefer popup UX; FedCM still handles third-party cookie restrictions.
               click_listener: () => {
+                gisCredentialReceived = false;
                 setStatus("Opening Google sign-in…");
+                if (gisClickTimer) {
+                  clearTimeout(gisClickTimer);
+                }
+                // Private windows often swallow the FedCM UI. Fall back to redirect.
+                gisClickTimer = window.setTimeout(() => {
+                  if (gisCredentialReceived) {
+                    return;
+                  }
+                  setStatus(
+                    "Google’s button did not open in this private window. Use “Continue with Google (works in private windows)” below.",
+                    "error"
+                  );
+                  googleRedirectButton.focus();
+                }, 2500);
               },
             });
-            setStatus("");
           },
           () => {
-            setStatus("Google sign-in failed to load. Check your network and refresh.", "error");
+            setStatus(
+              "Google’s embedded button failed to load. Use “Continue with Google (works in private windows)” below.",
+              "error"
+            );
           }
         );
       }
+
+      googleRedirectButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        startRedirectSignIn();
+      });
 
       document.getElementById("logoutButton").addEventListener("click", async () => {
         setStatus("Signing out…");
@@ -379,12 +442,27 @@
         window.location.replace("login.html?next=" + encodeURIComponent(nextPath));
       });
 
-      const existing = UndertwigAuth.readSession();
-      if (existing) {
-        showSignedIn(existing);
-      } else {
-        initGoogleButton();
-      }
+      (async function boot() {
+        try {
+          const redirected = await UndertwigAuth.completeGoogleRedirectSignInIfPresent();
+          if (redirected && redirected.session) {
+            showSignedIn(redirected.session);
+            setStatus("Signed in. Opening editor…", "ok");
+            window.setTimeout(() => redirectAfterLogin(redirected.nextPath || nextPath), 250);
+            return;
+          }
+        } catch (error) {
+          UndertwigAuth.logout();
+          setStatus(error.message || "Google redirect sign-in failed.", "error");
+        }
+
+        const existing = UndertwigAuth.readSession();
+        if (existing) {
+          showSignedIn(existing);
+        } else {
+          initGoogleButton();
+        }
+      })();
     </script>
   </body>
 </html>
