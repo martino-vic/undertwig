@@ -104,10 +104,12 @@
 
       <h2>What “connected” means</h2>
       <p>
-        When you are signed in, Undertwig stores your project in your Google Drive
-        <strong>application data</strong> folder (hidden app storage for Undertwig).
-        That data counts against your Google account storage and is free within your Drive quota.
-        It does not appear as a normal folder in the Drive file list.
+        When you are signed in and connected, Undertwig stores your project in a folder named
+        <strong>Undertwig</strong> in your Google Drive. That is the project you own.
+      </p>
+      <p>
+        If someone invites you, you open their shared project file and edit
+        <strong>their</strong> Drive copy — the inviter remains the owner.
       </p>
 
       <h2>Quick checks</h2>
@@ -117,6 +119,8 @@
           (you may have up to about two minutes — do not ignore a background tab/window).</li>
         <li>After Connect succeeds once, reloads should show green automatically (token is kept for the tab session).</li>
         <li>Use the same site origin you authorized (for example <code>https://www.undertwig.com</code>).</li>
+        <li>In Google Cloud Console, OAuth scopes must include
+          <code>https://www.googleapis.com/auth/drive.file</code> (shareable Drive files).</li>
       </ol>
 
       <h2>Brave browser</h2>
@@ -152,7 +156,8 @@
         <li>Open the <strong>undertwig</strong> Google Cloud project.</li>
         <li>Enable the <strong>Google Drive API</strong>.</li>
         <li>Under OAuth <strong>Data Access</strong> / scopes, include
-          <code>https://www.googleapis.com/auth/drive.appdata</code>.</li>
+          <code>https://www.googleapis.com/auth/drive.file</code>
+          (and <code>https://www.googleapis.com/auth/gmail.send</code> for email invites).</li>
         <li>Under <strong>Clients</strong>, ensure Authorized JavaScript origins include your exact site origin
           (<code>https://www.undertwig.com</code> and/or <code>https://undertwig.com</code>).</li>
         <li>If the OAuth app is in <strong>Testing</strong>, add your Google account under <strong>Test users</strong>.</li>

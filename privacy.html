@@ -173,10 +173,9 @@
       <h2>Google Cloud project storage</h2>
       <p>
         When you are signed in, Undertwig can store your LaTeX project (file names and
-        contents, including uploaded assets) in Google Drive application data associated
-        with your Google account. That data is stored by Google in a hidden app-data space
-        for Undertwig, not in Undertwig-operated servers. Access uses a Google OAuth token
-        with the Drive app data scope. After sign-in, click <strong>Connect</strong> under the file tree
+        contents, including uploaded assets) in an <strong>Undertwig</strong> folder in your
+        Google Drive. You own that project. Access uses a Google OAuth token
+        with the Drive file scope. After sign-in, click <strong>Connect</strong> under the file tree
         to grant Drive access (browsers only allow that popup from a click). The access token is kept
         in session storage for the current browser tab session so later saves can sync without
         repeated prompts. Logging out
@@ -192,11 +191,13 @@
       <h2>Collaboration invitations</h2>
       <p>
         When you are signed in, you can invite another person by email from the Collaborate
-        control. Sending an invite asks Google for permission to send email through your
-        Gmail account (<code>gmail.send</code>). The invitation is sent from your address
-        and includes a link to the Undertwig login page. Undertwig does not operate a
+        control. Undertwig shares your Drive project with that Google account (editor access)
+        and asks Google for permission to send email through your Gmail account
+        (<code>gmail.send</code>). The invitation is sent from your address and includes a
+        link to open that shared project. The invitee edits your Google Drive project; you
+        remain the owner. Undertwig does not operate a
         separate mail server for these invites. Recipient addresses you type are used only
-        to send that invitation.
+        to create the Drive share and send that invitation.
       </p>
 
       <h2>Information processed to provide the service</h2>
@@ -211,9 +212,9 @@
           <strong>Google sign-in and cloud storage.</strong> The login page loads Google
           Identity Services. During sign-in verification, the browser may request Google’s
           public signing keys. When cloud storage is used, the editor requests a Google
-          OAuth access token and reads/writes project data via the Google Drive API app-data
-          space. Collaboration invites may request Gmail send access and use the Gmail API
-          to deliver an invitation from your account. Logging out may contact Google to
+          OAuth access token and reads/writes project data via the Google Drive API
+          (Undertwig folder / shared project files). Collaboration invites may share a Drive
+          file with the recipient and request Gmail send access to deliver an invitation from your account. Logging out may contact Google to
           revoke grants for this site.
         </li>
         <li>

@@ -127,19 +127,21 @@
     return String(value || "").replace(/[\r\n]+/g, " ").trim();
   }
 
-  function buildInviteMessage(recipientEmail, session, loginUrl) {
+  function buildInviteMessage(recipientEmail, session, projectUrl) {
     const inviterName = sanitizeHeaderValue((session && session.name) || session.email || "Undertwig user");
     const inviterEmail = sanitizeHeaderValue((session && session.email) || "");
     const to = sanitizeHeaderValue(recipientEmail);
-    const subject = "Invitation to collaborate on Undertwig";
+    const subject = "Invitation to collaborate on an Undertwig project";
     const fromLine = inviterEmail ? inviterName + " <" + inviterEmail + ">" : inviterName;
     const body =
       "Hi,\n\n" +
       inviterName +
       (inviterEmail ? " (" + inviterEmail + ")" : "") +
-      " invited you to collaborate on Undertwig, a free browser-based LaTeX workspace.\n\n" +
-      "Open this link to sign in with Google:\n" +
-      loginUrl +
+      " invited you to collaborate on their Undertwig LaTeX project.\n\n" +
+      "The project lives in their Google Drive. When you open the link and sign in with Google, " +
+      "you will edit that shared project (not a separate copy).\n\n" +
+      "Open this link:\n" +
+      projectUrl +
       "\n\nIf you were not expecting this invitation, you can ignore this email.\n";
 
     return (
@@ -159,7 +161,7 @@
     );
   }
 
-  async function sendCollaborationInvite(recipientEmail, loginUrl) {
+  async function sendCollaborationInvite(recipientEmail, projectUrl) {
     const session = auth().readSession();
     if (!session) {
       throw new Error("Sign in to send collaboration invites.");
@@ -169,8 +171,11 @@
     if (!email) {
       throw new Error("Enter an email address.");
     }
+    if (!projectUrl) {
+      throw new Error("Missing project invite link.");
+    }
 
-    const rawMessage = buildInviteMessage(email, session, loginUrl);
+    const rawMessage = buildInviteMessage(email, session, projectUrl);
     const raw = encodeUtf8Base64Url(rawMessage);
 
     let token = await getGmailAccessToken();

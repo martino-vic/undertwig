@@ -1,19 +1,23 @@
 (function (global) {
   const CLOUD_FILE_NAME = "undertwig-project-v1.json";
-  const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+  const CLOUD_FOLDER_NAME = "Undertwig";
+  // Shareable Drive files (not appData). Required so invitees can work in the owner's project.
+  const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
   const DRIVE_API = "https://www.googleapis.com/drive/v3";
   const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3";
   const TOKEN_STORAGE_KEY = "undertwig-drive-token-v1";
   const FILE_ID_STORAGE_KEY = "undertwig-drive-file-v1";
+  const FOLDER_ID_STORAGE_KEY = "undertwig-drive-folder-v1";
   const TOKEN_REQUEST_TIMEOUT_MS = 8000;
   const SILENT_TOKEN_TIMEOUT_MS = 4000;
-  // Interactive Connect waits for the user to finish Google's popup — must not be short.
   const INTERACTIVE_TOKEN_TIMEOUT_MS = 120000;
   const FETCH_TIMEOUT_MS = 12000;
 
   let memoryAccessToken = null;
   let memoryTokenExpiresAt = 0;
   let cachedFileId = null;
+  let cachedFolderId = null;
+  let cachedRole = null; // "owner" | "writer" | "reader" | null
   let saveChain = Promise.resolve();
 
   function auth() {
@@ -77,13 +81,13 @@
         })
       );
     } catch (_error) {
-      // sessionStorage may be unavailable; in-memory token still works for this page.
+      // Ignore.
     }
   }
 
   function readStoredFileId() {
     try {
-      return sessionStorage.getItem(FILE_ID_STORAGE_KEY) || null;
+      return localStorage.getItem(FILE_ID_STORAGE_KEY) || sessionStorage.getItem(FILE_ID_STORAGE_KEY) || null;
     } catch (_error) {
       return null;
     }
@@ -92,9 +96,31 @@
   function writeStoredFileId(fileId) {
     try {
       if (fileId) {
+        localStorage.setItem(FILE_ID_STORAGE_KEY, String(fileId));
         sessionStorage.setItem(FILE_ID_STORAGE_KEY, String(fileId));
       } else {
+        localStorage.removeItem(FILE_ID_STORAGE_KEY);
         sessionStorage.removeItem(FILE_ID_STORAGE_KEY);
+      }
+    } catch (_error) {
+      // Ignore.
+    }
+  }
+
+  function readStoredFolderId() {
+    try {
+      return localStorage.getItem(FOLDER_ID_STORAGE_KEY) || null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function writeStoredFolderId(folderId) {
+    try {
+      if (folderId) {
+        localStorage.setItem(FOLDER_ID_STORAGE_KEY, String(folderId));
+      } else {
+        localStorage.removeItem(FOLDER_ID_STORAGE_KEY);
       }
     } catch (_error) {
       // Ignore.
@@ -126,8 +152,7 @@
       }
     }
     forgetAccessToken();
-    cachedFileId = null;
-    writeStoredFileId(null);
+    cachedRole = null;
   }
 
   function hydrateTokenFromStorage() {
@@ -182,8 +207,6 @@
     await ensureGisOauth();
 
     const waitMs = Number(timeoutMs) > 0 ? Number(timeoutMs) : TOKEN_REQUEST_TIMEOUT_MS;
-    // Empty prompt still shows Google UI when consent is missing, as long as this
-    // runs from a user click. Always forcing "consent" is slower and more brittle.
     const prompt = forcePrompt ? "consent" : "";
 
     const token = await new Promise((resolve, reject) => {
@@ -202,7 +225,7 @@
           reject,
           new Error(
             forcePrompt
-              ? "Google Cloud authorization timed out while waiting for the permission popup. In Brave, also check Shields for this site (allow cookies/popups for accounts.google.com), then click Connect again and finish the Google dialog."
+              ? "Google Cloud authorization timed out while waiting for the permission popup. In Brave, also check Shields for this site, then click Connect again and finish the Google dialog."
               : "Google Cloud authorization needs a permission popup. Click Connect under the file tree."
           )
         );
@@ -251,7 +274,6 @@
     }
 
     try {
-      // Prefer a normal token request from a user gesture; only force consent on retry.
       if (interactive && !forcePrompt) {
         return await requestOauthToken(false, timeoutMs || INTERACTIVE_TOKEN_TIMEOUT_MS);
       }
@@ -262,7 +284,6 @@
       );
     } catch (error) {
       if (interactive && !forcePrompt) {
-        // First attempt may fail if Google requires an explicit consent screen.
         return requestOauthToken(true, INTERACTIVE_TOKEN_TIMEOUT_MS);
       }
       if (!forcePrompt && allowConsentRetry) {
@@ -272,7 +293,6 @@
     }
   }
 
-  /** Request Drive access and keep the token for this browser session. */
   async function connect(options) {
     const opts = options || {};
     if (opts.interactive || opts.forcePrompt) {
@@ -356,7 +376,6 @@
 
     if (response.status === 401 && !retried) {
       forgetAccessToken();
-      // Silent refresh only — never open a consent popup from a background fetch.
       await getAccessToken({ forcePrompt: false, timeoutMs: SILENT_TOKEN_TIMEOUT_MS });
       return driveFetch(url, init, true);
     }
@@ -364,7 +383,124 @@
     return response;
   }
 
-  async function findCloudFileId(options) {
+  async function readDriveError(response, fallback) {
+    try {
+      const payload = await response.json();
+      if (payload && payload.error && payload.error.message) {
+        return payload.error.message;
+      }
+    } catch (_error) {
+      // Ignore.
+    }
+    return fallback + " (HTTP " + response.status + ")";
+  }
+
+  async function driveSearch(query, pageSize) {
+    const url =
+      DRIVE_API +
+      "/files?fields=files(id,name,modifiedTime,owners,capabilities)&q=" +
+      encodeURIComponent(query) +
+      "&pageSize=" +
+      (pageSize || 1) +
+      "&spaces=drive";
+    const response = await driveFetch(url, { method: "GET" });
+    if (!response.ok) {
+      throw new Error(await readDriveError(response, "Could not search Google Drive."));
+    }
+    const payload = await response.json();
+    return (payload && payload.files) || [];
+  }
+
+  async function ensureUndertwigFolder() {
+    if (cachedFolderId) {
+      return cachedFolderId;
+    }
+    const stored = readStoredFolderId();
+    if (stored) {
+      cachedFolderId = stored;
+      return cachedFolderId;
+    }
+
+    const existing = await driveSearch(
+      "name = '" +
+        CLOUD_FOLDER_NAME +
+        "' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+      1
+    );
+    if (existing[0] && existing[0].id) {
+      cachedFolderId = existing[0].id;
+      writeStoredFolderId(cachedFolderId);
+      return cachedFolderId;
+    }
+
+    const response = await driveFetch(DRIVE_API + "/files?fields=id,name", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: CLOUD_FOLDER_NAME,
+        mimeType: "application/vnd.google-apps.folder",
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(await readDriveError(response, "Could not create Undertwig Drive folder."));
+    }
+    const payload = await response.json();
+    cachedFolderId = payload.id;
+    writeStoredFolderId(cachedFolderId);
+    return cachedFolderId;
+  }
+
+  function setActiveProjectFileId(fileId) {
+    cachedFileId = fileId || null;
+    cachedRole = null;
+    writeStoredFileId(cachedFileId);
+  }
+
+  function getProjectFileId() {
+    return cachedFileId || readStoredFileId() || null;
+  }
+
+  function getProjectRole() {
+    return cachedRole;
+  }
+
+  async function refreshProjectMeta(fileId) {
+    const id = fileId || getProjectFileId();
+    if (!id) {
+      cachedRole = null;
+      return null;
+    }
+    const response = await driveFetch(
+      DRIVE_API +
+        "/files/" +
+        encodeURIComponent(id) +
+        "?fields=id,name,owners,capabilities,shared,webViewLink",
+      { method: "GET" }
+    );
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null;
+      }
+      throw new Error(await readDriveError(response, "Could not read project metadata."));
+    }
+    const meta = await response.json();
+    const session = auth().readSession();
+    const email = session && session.email ? String(session.email).toLowerCase() : "";
+    const owners = Array.isArray(meta.owners) ? meta.owners : [];
+    const isOwner = owners.some(function (owner) {
+      return owner && owner.emailAddress && String(owner.emailAddress).toLowerCase() === email;
+    });
+    if (isOwner || (meta.capabilities && meta.capabilities.canShare)) {
+      cachedRole = "owner";
+    } else if (meta.capabilities && meta.capabilities.canEdit === false) {
+      cachedRole = "reader";
+    } else {
+      cachedRole = "writer";
+    }
+    return meta;
+  }
+
+  async function findOwnedProjectFileId(options) {
     const allowCache = !(options && options.skipCache);
     if (allowCache && cachedFileId) {
       return cachedFileId;
@@ -377,49 +513,40 @@
       }
     }
 
-    const query = encodeURIComponent("name = '" + CLOUD_FILE_NAME + "' and trashed = false");
-    const url =
-      DRIVE_API +
-      "/files?spaces=appDataFolder&fields=files(id,name,modifiedTime)&q=" +
-      query +
-      "&pageSize=1";
-    const response = await driveFetch(url, { method: "GET" });
-    if (!response.ok) {
-      throw new Error(await readDriveError(response, "Could not look up cloud project file."));
-    }
-    const payload = await response.json();
-    const file = payload.files && payload.files[0];
-    cachedFileId = file ? file.id : null;
+    const folderId = await ensureUndertwigFolder();
+    const files = await driveSearch(
+      "name = '" + CLOUD_FILE_NAME + "' and '" + folderId + "' in parents and trashed = false",
+      1
+    );
+    cachedFileId = files[0] ? files[0].id : null;
     writeStoredFileId(cachedFileId);
     return cachedFileId;
   }
 
-  async function readDriveError(response, fallback) {
-    try {
-      const payload = await response.json();
-      if (payload && payload.error && payload.error.message) {
-        return payload.error.message;
+  async function findCloudFileId(options) {
+    // If we already point at a shared/owned project, keep it.
+    const existing = getProjectFileId();
+    if (existing && !(options && options.createOwned)) {
+      if (!(options && options.skipCache)) {
+        cachedFileId = existing;
+        return cachedFileId;
       }
-    } catch (_error) {
-      // Ignore JSON parse failures.
     }
-    return fallback + " (HTTP " + response.status + ")";
+    return findOwnedProjectFileId(options);
   }
 
-  async function loadProject() {
-    const fileId = await findCloudFileId();
-    if (!fileId) {
-      return null;
-    }
-
+  async function loadProjectById(fileId) {
     const response = await driveFetch(DRIVE_API + "/files/" + encodeURIComponent(fileId) + "?alt=media", {
       method: "GET",
     });
     if (!response.ok) {
       if (response.status === 404) {
-        cachedFileId = null;
-        writeStoredFileId(null);
         return null;
+      }
+      if (response.status === 403) {
+        throw new Error(
+          "You do not have access to this Undertwig project. Ask the owner to invite your Google account."
+        );
       }
       throw new Error(await readDriveError(response, "Could not download cloud project."));
     }
@@ -435,6 +562,19 @@
     };
   }
 
+  async function loadProject() {
+    const fileId = await findCloudFileId();
+    if (!fileId) {
+      return null;
+    }
+    try {
+      await refreshProjectMeta(fileId);
+    } catch (_error) {
+      // Role is optional for loading.
+    }
+    return loadProjectById(fileId);
+  }
+
   async function saveProject(project) {
     const body = JSON.stringify({
       activeFile: project.activeFile || "",
@@ -447,19 +587,23 @@
     const write = () =>
       withTimeout(writeProject(body), FETCH_TIMEOUT_MS + 5000, "Google Cloud save timed out.");
 
-    // Serialize saves so rapid editor updates do not race. Recover the chain if one save fails/hangs.
     saveChain = saveChain.then(write, write);
     return saveChain;
   }
 
   async function writeProject(body) {
-    let fileId = await findCloudFileId();
+    let fileId = getProjectFileId();
+    if (!fileId) {
+      fileId = await findOwnedProjectFileId({ skipCache: true });
+    }
+
     const metadata = {
       name: CLOUD_FILE_NAME,
       mimeType: "application/json",
     };
     if (!fileId) {
-      metadata.parents = ["appDataFolder"];
+      const folderId = await ensureUndertwigFolder();
+      metadata.parents = [folderId];
     }
 
     const form = new FormData();
@@ -480,9 +624,7 @@
 
     if (!response.ok) {
       if (fileId && response.status === 404) {
-        cachedFileId = null;
-        writeStoredFileId(null);
-        fileId = null;
+        setActiveProjectFileId(null);
         return writeProject(body);
       }
       throw new Error(await readDriveError(response, "Could not save project to Google Cloud storage."));
@@ -490,45 +632,138 @@
 
     const payload = await response.json();
     if (payload && payload.id) {
-      cachedFileId = payload.id;
-      writeStoredFileId(cachedFileId);
+      setActiveProjectFileId(payload.id);
+      cachedRole = cachedRole || "owner";
     }
-  }
-
-  function getProjectFileId() {
-    return cachedFileId || readStoredFileId() || null;
   }
 
   /**
-   * Lightweight connectivity check: token + Drive appData list.
-   * Does not download/upload the full project (that can hang the UI on large trees).
+   * Open a project shared by an owner (from an invite link).
    */
+  async function joinSharedProject(fileId) {
+    const id = String(fileId || "").trim();
+    if (!id) {
+      throw new Error("Missing shared project id.");
+    }
+    await connect();
+    setActiveProjectFileId(id);
+    const project = await loadProjectById(id);
+    if (!project) {
+      throw new Error("Shared project was not found.");
+    }
+    await refreshProjectMeta(id);
+    return project;
+  }
+
+  /**
+   * Share the active project with a collaborator so they edit the owner's Drive file.
+   */
+  async function shareProjectWithEmail(emailAddress, role) {
+    const fileId = getProjectFileId();
+    if (!fileId) {
+      throw new Error("Connect Google Drive and sync your project before inviting collaborators.");
+    }
+    const email = String(emailAddress || "").trim();
+    if (!email) {
+      throw new Error("Enter an email address.");
+    }
+
+    await connect();
+    const meta = await refreshProjectMeta(fileId);
+    if (cachedRole && cachedRole !== "owner") {
+      throw new Error("Only the project owner can invite collaborators.");
+    }
+
+    const response = await driveFetch(
+      DRIVE_API +
+        "/files/" +
+        encodeURIComponent(fileId) +
+        "/permissions?sendNotificationEmail=false&fields=id,role,emailAddress",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "user",
+          role: role || "writer",
+          emailAddress: email,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      // Already shared is fine.
+      const detail = await readDriveError(response, "Could not share the project on Google Drive.");
+      if (/already|exists/i.test(detail)) {
+        return { fileId: fileId, email: email, role: role || "writer", meta: meta };
+      }
+      throw new Error(detail);
+    }
+
+    return { fileId: fileId, email: email, role: role || "writer", meta: meta };
+  }
+
   async function probeConnection() {
     if (!isAvailable()) {
-      return { connected: false, fileId: null, reason: "not-signed-in" };
+      return { connected: false, fileId: null, role: null, reason: "not-signed-in" };
     }
     try {
       await connect();
-      const fileId = await findCloudFileId({ skipCache: true });
-      return { connected: true, fileId: fileId, reason: fileId ? "ok" : "ready-no-file" };
+      let fileId = getProjectFileId();
+      if (fileId) {
+        await refreshProjectMeta(fileId);
+      } else {
+        fileId = await findOwnedProjectFileId({ skipCache: true });
+        if (fileId) {
+          await refreshProjectMeta(fileId);
+        }
+      }
+      return {
+        connected: true,
+        fileId: fileId,
+        role: cachedRole,
+        reason: fileId ? "ok" : "ready-no-file",
+      };
     } catch (error) {
       return {
         connected: false,
         fileId: null,
+        role: null,
         reason: (error && error.message) || "connection-failed",
       };
     }
   }
 
-  /** Load cloud project if present; otherwise upload the provided local project. */
   async function syncProject(localProject) {
     await connect();
-    const cloudProject = await loadProject();
-    if (cloudProject && cloudProject.files && Object.keys(cloudProject.files).length) {
-      return { project: cloudProject, source: "cloud" };
+    const activeId = getProjectFileId();
+    if (activeId) {
+      const cloudProject = await loadProjectById(activeId);
+      if (cloudProject && cloudProject.files && Object.keys(cloudProject.files).length) {
+        try {
+          await refreshProjectMeta(activeId);
+        } catch (_error) {
+          // Ignore.
+        }
+        return { project: cloudProject, source: "cloud", role: cachedRole };
+      }
+      // Shared/owned file exists but empty: upload local tree into that file.
+      await saveProject(localProject || { activeFile: "", folders: [], files: {} });
+      return { project: localProject || null, source: "uploaded", role: cachedRole };
     }
+
+    const ownedId = await findOwnedProjectFileId({ skipCache: true });
+    if (ownedId) {
+      setActiveProjectFileId(ownedId);
+      const cloudProject = await loadProjectById(ownedId);
+      if (cloudProject && cloudProject.files && Object.keys(cloudProject.files).length) {
+        await refreshProjectMeta(ownedId);
+        return { project: cloudProject, source: "cloud", role: cachedRole };
+      }
+    }
+
     await saveProject(localProject || { activeFile: "", folders: [], files: {} });
-    return { project: localProject || null, source: "uploaded" };
+    await refreshProjectMeta(getProjectFileId());
+    return { project: localProject || null, source: "uploaded", role: cachedRole || "owner" };
   }
 
   function hasAccessToken() {
@@ -539,19 +774,37 @@
     return Boolean(auth() && auth().isLoggedIn() && auth().getConfig().googleClientId);
   }
 
+  function buildProjectInvitePath(fileId) {
+    const id = fileId || getProjectFileId();
+    if (!id) {
+      return "/";
+    }
+    return "/?project=" + encodeURIComponent(id);
+  }
+
   hydrateTokenFromStorage();
   if (!cachedFileId) {
     cachedFileId = readStoredFileId();
+  }
+  if (!cachedFolderId) {
+    cachedFolderId = readStoredFolderId();
   }
 
   global.UndertwigCloud = {
     DRIVE_SCOPE,
     CLOUD_FILE_NAME,
+    CLOUD_FOLDER_NAME,
     isAvailable,
     hasAccessToken,
     connect,
     getAccessToken,
     getProjectFileId,
+    getProjectRole,
+    setActiveProjectFileId,
+    buildProjectInvitePath,
+    joinSharedProject,
+    shareProjectWithEmail,
+    refreshProjectMeta,
     probeConnection,
     syncProject,
     loadProject,

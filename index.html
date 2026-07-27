@@ -815,10 +815,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727c"></script>
-    <script src="auth.js?v=20260727c"></script>
-    <script src="cloud-storage.js?v=20260727c"></script>
-    <script src="invite.js?v=20260727c"></script>
+    <script src="auth-config.js?v=20260727d"></script>
+    <script src="auth.js?v=20260727d"></script>
+    <script src="cloud-storage.js?v=20260727d"></script>
+    <script src="invite.js?v=20260727d"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1038,7 +1038,12 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         if (mode === "connected") {
           cloudStatus.classList.add("is-connected");
           cloudStatusDot.textContent = "✓";
-          cloudStatusText.appendChild(document.createTextNode("Connected to Google Cloud "));
+          const role = UndertwigCloud.getProjectRole && UndertwigCloud.getProjectRole();
+          const label =
+            role === "writer" || role === "reader"
+              ? "Editing shared Google Drive project "
+              : "Connected to Google Cloud ";
+          cloudStatusText.appendChild(document.createTextNode(label));
           const link = document.createElement("a");
           link.href = driveProjectUrl(fileId || UndertwigCloud.getProjectFileId());
           link.target = "_blank";
@@ -1133,8 +1138,34 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
       }
 
-      function buildInviteLoginUrl() {
-        return new URL(UndertwigAuth.loginUrl("/"), window.location.href).href;
+      function buildInviteProjectUrl() {
+        const path = UndertwigCloud.buildProjectInvitePath();
+        // Collaborators sign in if needed, then land on the owner's shared project.
+        return new URL(UndertwigAuth.loginUrl(path), window.location.href).href;
+      }
+
+      function readProjectIdFromUrl() {
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const projectId = String(params.get("project") || "").trim();
+          return projectId || null;
+        } catch (_error) {
+          return null;
+        }
+      }
+
+      function clearProjectIdFromUrl() {
+        try {
+          const url = new URL(window.location.href);
+          if (!url.searchParams.has("project")) {
+            return;
+          }
+          url.searchParams.delete("project");
+          const next = url.pathname + (url.searchParams.toString() ? "?" + url.searchParams.toString() : "") + url.hash;
+          window.history.replaceState({}, "", next);
+        } catch (_error) {
+          // Ignore.
+        }
       }
 
       function resetInviteForm() {
@@ -1157,7 +1188,8 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       }
 
       function showCollaborateLoggedIn() {
-        collaborateMessage.textContent = "Invite someone to Undertwig by email.";
+        collaborateMessage.textContent =
+          "Invite someone to edit this project on your Google Drive. You remain the owner; they work in your shared project.";
         inviteForm.classList.remove("hidden");
         collaborateNote.classList.add("hidden");
         collaborateLoginLink.classList.add("hidden");
@@ -1171,7 +1203,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           accountWrap.classList.remove("hidden");
           accountLabel.textContent = session.name || session.email || "Account";
           accountMessage.textContent =
-            "Signed in as " + (session.email || session.name) + ". Projects save to Google Cloud storage.";
+            "Signed in as " +
+            (session.email || session.name) +
+            ". Your projects live in Google Drive; invites share your project with collaborators.";
           collaborateLoginLink.classList.add("hidden");
         } else {
           loginButton.classList.remove("hidden");
@@ -1224,12 +1258,24 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
         const submit = document.getElementById("inviteSubmit");
         submit.disabled = true;
-        setInviteStatus("Sending invitation…");
+        setInviteStatus("Sharing project and sending invitation…");
         try {
-          await UndertwigInvite.sendCollaborationInvite(email, buildInviteLoginUrl());
-          setInviteStatus("Invitation sent to " + email + ".", "success");
+          if (cloudStatusMode !== "connected" && !UndertwigCloud.hasAccessToken()) {
+            throw new Error("Connect Google Drive under the file tree before inviting collaborators.");
+          }
+          if (!UndertwigCloud.getProjectFileId()) {
+            setInviteStatus("Syncing your project to Google Drive…");
+            await initCloudProject({ force: true });
+          }
+          if (!UndertwigCloud.getProjectFileId()) {
+            throw new Error("Could not create a Drive project to share. Connect Google Drive and try again.");
+          }
+          await UndertwigCloud.shareProjectWithEmail(email, "writer");
+          const inviteUrl = buildInviteProjectUrl();
+          await UndertwigInvite.sendCollaborationInvite(email, inviteUrl);
+          setInviteStatus("Invitation sent to " + email + ". They will edit your Drive project.", "success");
           inviteEmail.value = "";
-          setStatus("Collaboration invite sent to " + email + ".");
+          setStatus("Shared project and invited " + email + ".");
         } catch (error) {
           setInviteStatus(
             (error && error.message) || "Could not send the invitation.",
@@ -1333,15 +1379,31 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
       async function initCloudProject(options) {
         const force = Boolean(options && options.force);
+        const sharedProjectId = readProjectIdFromUrl();
         if (!UndertwigCloud.isAvailable()) {
+          if (sharedProjectId) {
+            setStatus("Log in with Google to open the shared project invitation.", true, {
+              offerCloudLogin: true,
+            });
+          }
           renderCloudStatus("logged-out");
           return;
+        }
+
+        if (sharedProjectId) {
+          UndertwigCloud.setActiveProjectFileId(sharedProjectId);
         }
 
         // Without a stored Drive token, browsers will not complete OAuth without a click.
         // Show Connect immediately instead of hanging on "Checking…".
         if (!force && !UndertwigCloud.hasAccessToken()) {
           renderCloudStatus("disconnected");
+          if (sharedProjectId) {
+            setStatus(
+              "Click Connect under the file tree to open the shared project on the owner's Google Drive.",
+              true
+            );
+          }
           return;
         }
 
@@ -1387,8 +1449,30 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
               await UndertwigCloud.connect({ interactive: true });
             }
 
-            // Prove Drive access with a lightweight list call first, then update UI.
-            // Full project download/upload can be large and must not own the status spinner.
+            if (sharedProjectId) {
+              setStatus("Opening shared project from the owner's Google Drive…");
+              const sharedProject = await UndertwigCloud.joinSharedProject(sharedProjectId);
+              replaceProjectState(sharedProject);
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+              } catch (_error) {
+                // Local cache is optional.
+              }
+              render();
+              clearProjectIdFromUrl();
+              markConnected(sharedProjectId);
+              clearTimeout(failTimer);
+              const fileCount = Object.keys(state.files || {}).length;
+              setStatus(
+                "Joined shared project (" +
+                  fileCount +
+                  " file" +
+                  (fileCount === 1 ? "" : "s") +
+                  "). Edits save to the owner's Google Drive."
+              );
+              return;
+            }
+
             const probe = await UndertwigCloud.probeConnection();
             if (!probe.connected) {
               throw new Error(probe.reason || "Could not reach Google Drive.");
@@ -1432,7 +1516,6 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             if (!settled) {
               markDisconnected(message);
             } else {
-              // Drive is reachable; keep the green status and report sync trouble separately.
               setStatus(message, true);
             }
           } finally {
