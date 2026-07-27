@@ -816,10 +816,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727f"></script>
-    <script src="auth.js?v=20260727f"></script>
-    <script src="cloud-storage.js?v=20260727f"></script>
-    <script src="invite.js?v=20260727f"></script>
+    <script src="auth-config.js?v=20260727g"></script>
+    <script src="auth.js?v=20260727g"></script>
+    <script src="cloud-storage.js?v=20260727g"></script>
+    <script src="invite.js?v=20260727g"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1268,14 +1268,11 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             await UndertwigCloud.connect({ interactive: true });
           }
           await UndertwigCloud.saveProject(state, { projectName: projectName });
-          if (!UndertwigCloud.getProjectFolderId()) {
-            throw new Error("Could not create a Drive project folder to share. Connect Google Drive and try again.");
-          }
-          await UndertwigCloud.shareProjectWithEmail(email, "writer");
+          await UndertwigCloud.shareProjectWithEmail(email, "writer", projectName);
           const inviteUrl = buildInviteProjectUrl();
           await UndertwigInvite.sendCollaborationInvite(email, inviteUrl);
           setInviteStatus(
-            "Invitation sent to " + email + ". They can edit your “" + projectName + "” Drive folder.",
+            "Invitation sent to " + email + ". They can edit your “" + projectName + "” folder in your Drive.",
             "success"
           );
           inviteEmail.value = "";

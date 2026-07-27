@@ -339,6 +339,8 @@
         whenGoogleReady(
           () => {
             const nonce = UndertwigAuth.prepareSignInNonce();
+            // Incognito / third-party-cookie blocking requires FedCM for the GIS button.
+            // Classic non-FedCM mode often renders a button that does nothing when clicked.
             google.accounts.id.initialize({
               client_id: config.googleClientId,
               callback: handleCredentialResponse,
@@ -346,9 +348,7 @@
               auto_select: false,
               cancel_on_tap_outside: true,
               itp_support: true,
-              // Classic button flow is more reliable than FedCM button mode for
-              // static sites; keep auto-sign-in off for explicit user consent.
-              use_fedcm_for_button: false,
+              use_fedcm_for_button: true,
               button_auto_select: false,
             });
 
@@ -360,7 +360,12 @@
               text: "continue_with",
               width: 320,
               logo_alignment: "left",
+              // Prefer popup UX; FedCM still handles third-party cookie restrictions.
+              click_listener: () => {
+                setStatus("Opening Google sign-in…");
+              },
             });
+            setStatus("");
           },
           () => {
             setStatus("Google sign-in failed to load. Check your network and refresh.", "error");

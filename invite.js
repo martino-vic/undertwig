@@ -138,11 +138,13 @@
       inviterName +
       (inviterEmail ? " (" + inviterEmail + ")" : "") +
       " invited you to collaborate on their Undertwig LaTeX project.\n\n" +
-      "The project lives in their Google Drive. When you open the link and sign in with Google, " +
-      "you will edit that shared project (not a separate copy).\n\n" +
-      "Open this link:\n" +
+      "Important: the project stays in their Google Drive. When you open the link below and sign in, " +
+      "you get edit access to their shared project folder (you do not create a separate copy).\n\n" +
+      "Open this Undertwig link (preferred):\n" +
       projectUrl +
-      "\n\nIf you were not expecting this invitation, you can ignore this email.\n";
+      "\n\nIf Google Drive also emails you about a shared folder, you can accept that too — " +
+      "but always open the Undertwig link above to edit in the browser.\n\n" +
+      "If you were not expecting this invitation, you can ignore this email.\n";
 
     return (
       "From: " +
