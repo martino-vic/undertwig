@@ -318,7 +318,7 @@
     const expectedNonce = consumeNonce();
     await verifyJwtSignature(credential);
     const { payload } = splitJwt(credential);
-    assertValidClaims(payload, expectedNonce);
+    await assertValidClaims(payload, expectedNonce);
     const session = toPublicSession(payload);
     writeSession(session);
     return session;
