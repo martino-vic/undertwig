@@ -492,8 +492,8 @@
   }
 
   /**
-   * Full-page Google OAuth redirect (PKCE). Works in private windows where the
-   * GIS FedCM button often appears to do nothing.
+   * Full-page Google OAuth redirect (PKCE). Used as the primary login path so
+   * sign-in works in normal and private windows.
    */
   async function beginGoogleRedirectSignIn(nextPath) {
     const clientId = getConfig().googleClientId;
