@@ -608,6 +608,12 @@
         border-color: transparent;
       }
 
+      .invite-form button.invite-copy-link {
+        width: 100%;
+        padding: 8px 10px;
+        font-weight: 600;
+      }
+
       .invite-status {
         margin: 0;
         font-size: 12px;
@@ -990,6 +996,7 @@
                   <label for="inviteEmail">Invite by email</label>
                   <input id="inviteEmail" name="email" type="email" autocomplete="email" placeholder="colleague@example.com" required>
                   <button type="submit" id="inviteSubmit">Send invite</button>
+                  <button type="button" class="invite-copy-link" id="copyInviteLink">Copy invitation link</button>
                   <p class="invite-status" id="inviteStatus" aria-live="polite"></p>
                 </form>
                 <p class="hover-box-note" id="collaborateNote">Undertwig is free.</p>
@@ -1071,10 +1078,10 @@
       </div>
     </div>
 
-    <script src="auth-config.js?v=20260728l"></script>
-    <script src="auth.js?v=20260728l"></script>
-    <script src="cloud-storage.js?v=20260728l"></script>
-    <script src="invite.js?v=20260728l"></script>
+    <script src="auth-config.js?v=20260728m"></script>
+    <script src="auth.js?v=20260728m"></script>
+    <script src="cloud-storage.js?v=20260728m"></script>
+    <script src="invite.js?v=20260728m"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1335,6 +1342,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const inviteForm = document.getElementById("inviteForm");
       const inviteEmail = document.getElementById("inviteEmail");
       const inviteStatus = document.getElementById("inviteStatus");
+      const copyInviteLinkButton = document.getElementById("copyInviteLink");
       const loginButton = document.getElementById("loginButton");
       const accountWrap = document.getElementById("accountWrap");
       const accountButton = document.getElementById("accountButton");
@@ -1761,6 +1769,68 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         if (submit) {
           submit.disabled = false;
         }
+        if (copyInviteLinkButton) {
+          copyInviteLinkButton.disabled = false;
+          copyInviteLinkButton.textContent = "Copy invitation link";
+        }
+      }
+
+      async function copyTextToClipboard(text) {
+        const value = String(text || "");
+        if (!value) {
+          throw new Error("Nothing to copy.");
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(value);
+          return;
+        }
+        const field = document.createElement("textarea");
+        field.value = value;
+        field.setAttribute("readonly", "");
+        field.style.position = "fixed";
+        field.style.left = "-9999px";
+        document.body.appendChild(field);
+        field.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(field);
+        if (!ok) {
+          throw new Error("Could not copy to the clipboard.");
+        }
+      }
+
+      async function prepareInviteLink() {
+        const projectName = getActiveProjectName();
+        if (!projectName) {
+          throw new Error("Set a current project in the file tree before copying an invitation link.");
+        }
+        if (
+          UndertwigCloud.isCurrentProjectShared &&
+          UndertwigCloud.isCurrentProjectShared(projectName)
+        ) {
+          throw new Error("Only the project owner can create invitation links.");
+        }
+        if (!UndertwigCloud.hasAccessToken()) {
+          setInviteStatus("Connecting Google Drive…");
+          UndertwigAuth.beginGoogleDriveTokenSignIn("/");
+          throw new Error("Allow Google Drive access, then click Copy invitation link again.");
+        }
+
+        const active = state.files[state.activeFile];
+        if (active && !active.binary) {
+          active.content = editor.value;
+        }
+
+        setInviteStatus("Uploading “" + projectName + "” to Google Drive / Undertwig…");
+        await UndertwigCloud.saveProject(state, { projectName: projectName });
+        if (UndertwigCloud.setActiveProjectByName) {
+          UndertwigCloud.setActiveProjectByName(projectName);
+        }
+        const inviteUrl = buildInviteProjectUrl();
+        if (!UndertwigCloud.getProjectFileId || !UndertwigCloud.getProjectFileId()) {
+          throw new Error("Could not resolve the Google Drive folder for this project.");
+        }
+        renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+        return { projectName: projectName, inviteUrl: inviteUrl };
       }
 
       function showCollaborateLoggedOut() {
@@ -1872,6 +1942,41 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         event.stopPropagation();
       });
 
+      copyInviteLinkButton.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const session = UndertwigAuth.readSession();
+        if (!session) {
+          showCollaborateLoggedOut();
+          return;
+        }
+
+        copyInviteLinkButton.disabled = true;
+        const submit = document.getElementById("inviteSubmit");
+        if (submit) {
+          submit.disabled = true;
+        }
+        try {
+          const prepared = await prepareInviteLink();
+          await copyTextToClipboard(prepared.inviteUrl);
+          setInviteStatus(
+            "Invitation link copied. Share the Google Drive folder with your collaborator as an Editor if they don’t have access yet.",
+            "success"
+          );
+          setStatus("Copied invitation link for “" + prepared.projectName + "”.");
+        } catch (error) {
+          setInviteStatus(
+            (error && error.message) || "Could not copy the invitation link.",
+            "error"
+          );
+        } finally {
+          copyInviteLinkButton.disabled = false;
+          if (submit) {
+            submit.disabled = false;
+          }
+        }
+      });
+
       inviteForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -1889,6 +1994,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
         const submit = document.getElementById("inviteSubmit");
         submit.disabled = true;
+        if (copyInviteLinkButton) {
+          copyInviteLinkButton.disabled = true;
+        }
         try {
           const projectName = getActiveProjectName();
           if (!projectName) {
@@ -1926,6 +2034,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           );
         } finally {
           submit.disabled = false;
+          if (copyInviteLinkButton) {
+            copyInviteLinkButton.disabled = false;
+          }
         }
       });
 
