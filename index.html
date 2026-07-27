@@ -865,7 +865,7 @@
           <button id="uploadFolder" type="button">Upload folder</button>
           <button class="wide" id="downloadZip" type="button">Download ZIP</button>
           <button class="wide" id="newProject" type="button">New project</button>
-          <button class="wide" id="syncProject" type="button" title="Pull the current project from Google Drive into the file tree">Sync</button>
+          <button class="wide" id="syncProject" type="button" title="Load the current project from Google Drive into the file tree">Load</button>
         </div>
         <div class="tree" id="tree"></div>
         <div class="cloud-status is-logged-out" id="cloudStatus" role="status" aria-live="polite">
@@ -962,10 +962,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260728g"></script>
-    <script src="auth.js?v=20260728g"></script>
-    <script src="cloud-storage.js?v=20260728g"></script>
-    <script src="invite.js?v=20260728g"></script>
+    <script src="auth-config.js?v=20260728h"></script>
+    <script src="auth.js?v=20260728h"></script>
+    <script src="cloud-storage.js?v=20260728h"></script>
+    <script src="invite.js?v=20260728h"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1145,7 +1145,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       let convertSpinnerTimer = null;
       let convertSpinnerFrame = 0;
       const syncProjectButton = document.getElementById("syncProject");
-      const SYNC_BUTTON_LABEL = "Sync";
+      const SYNC_BUTTON_LABEL = "Load";
       let syncSpinnerTimer = null;
       let syncSpinnerFrame = 0;
       let syncInFlight = false;
@@ -3052,11 +3052,11 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           return;
         }
         if (!UndertwigAuth.isLoggedIn() || !UndertwigCloud.isAvailable()) {
-          setStatus("Log in with Google to sync from Drive.", true, { offerCloudLogin: true });
+          setStatus("Log in with Google to load from Drive.", true, { offerCloudLogin: true });
           return;
         }
         if (!UndertwigCloud.hasAccessToken()) {
-          setStatus("Connect Google Drive first, then click Sync.", true);
+          setStatus("Connect Google Drive first, then click Load.", true);
           try {
             UndertwigAuth.beginGoogleDriveTokenSignIn("/");
           } catch (error) {
@@ -3065,13 +3065,13 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           return;
         }
         if (!UndertwigCloud.pullProjectFromDrive) {
-          setStatus("Sync is not available. Hard-refresh the page and try again.", true);
+          setStatus("Load is not available. Hard-refresh the page and try again.", true);
           return;
         }
 
         const projectName = getActiveProjectName();
         if (!projectName) {
-          setStatus("Set a current project in the file tree before syncing.", true);
+          setStatus("Set a current project in the file tree before loading.", true);
           return;
         }
 
@@ -3081,10 +3081,10 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
 
         startSyncSpinner();
-        setStatus("Syncing “" + projectName + "” from Google Drive…");
+        setStatus("Loading “" + projectName + "” from Google Drive…");
         try {
           const pulled = await UndertwigCloud.pullProjectFromDrive(projectName, function (message) {
-            setStatus(message || "Syncing from Google Drive…");
+            setStatus(message || "Loading from Google Drive…");
           });
           applyPulledProject(pulled);
           try {
@@ -3105,7 +3105,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
                   return path === projectName || path.startsWith(projectName + "/");
                 }).length;
           setStatus(
-            "Synced “" +
+            "Loaded “" +
               projectName +
               "” from Google Drive (" +
               fileCount +
@@ -3114,7 +3114,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
               ")."
           );
         } catch (error) {
-          setStatus((error && error.message) || "Could not sync from Google Drive.", true);
+          setStatus((error && error.message) || "Could not load from Google Drive.", true);
         } finally {
           stopSyncSpinner();
         }
