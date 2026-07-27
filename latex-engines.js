@@ -589,6 +589,88 @@
     return bytes;
   }
 
+  function projectFileText(file) {
+    if (!file || file.content == null) {
+      return "";
+    }
+    if (file.binary) {
+      try {
+        return new TextDecoder("utf-8", { fatal: false }).decode(
+          base64ToBytes(file.content)
+        );
+      } catch (_error) {
+        return "";
+      }
+    }
+    return String(file.content);
+  }
+
+  // BusyTeX only ships bibtex8. For biblatex's default biber backend we must
+  // skip bibtex8 so a locally generated .bbl is not overwritten.
+  function detectBibliographyMode(projectFiles) {
+    let hasBiblatex = false;
+    let backendBibtex = false;
+    let backendBiber = false;
+    let hasClassicBibliography = false;
+    let hasPrintBibliography = false;
+    let hasBbl = false;
+    let hasBcf = false;
+
+    Object.keys(projectFiles || {}).forEach(function (path) {
+      const lower = String(path || "").toLowerCase();
+      if (lower.endsWith(".bbl")) {
+        hasBbl = true;
+      }
+      if (lower.endsWith(".bcf")) {
+        hasBcf = true;
+      }
+      if (
+        !lower.endsWith(".tex") &&
+        !lower.endsWith(".cls") &&
+        !lower.endsWith(".sty")
+      ) {
+        return;
+      }
+      const text = projectFileText(projectFiles[path]);
+      if (!text) {
+        return;
+      }
+      if (
+        /\\usepackage(?:\s*\[[^\]]*\])?\s*\{biblatex\}/.test(text) ||
+        /\\RequirePackage(?:\s*\[[^\]]*\])?\s*\{biblatex\}/.test(text)
+      ) {
+        hasBiblatex = true;
+      }
+      const optionBlocks = text.match(
+        /\\(?:usepackage|RequirePackage)\s*\[([^\]]*)\]\s*\{biblatex\}/g
+      );
+      if (optionBlocks) {
+        optionBlocks.forEach(function (block) {
+          if (/backend\s*=\s*bibtex/i.test(block)) {
+            backendBibtex = true;
+          }
+          if (/backend\s*=\s*biber/i.test(block)) {
+            backendBiber = true;
+          }
+        });
+      }
+      if (/\\bibliography\s*\{/.test(text)) {
+        hasClassicBibliography = true;
+      }
+      if (text.indexOf("\\printbibliography") !== -1) {
+        hasPrintBibliography = true;
+      }
+    });
+
+    if (backendBiber || hasBcf || (hasBiblatex && !backendBibtex)) {
+      return { mode: "biber", hasBbl: hasBbl, hasBcf: hasBcf };
+    }
+    if (backendBibtex || hasClassicBibliography || hasPrintBibliography) {
+      return { mode: "bibtex", hasBbl: hasBbl, hasBcf: hasBcf };
+    }
+    return { mode: null, hasBbl: hasBbl, hasBcf: hasBcf };
+  }
+
   function projectFilesToBusyTex(projectFiles) {
     return Object.keys(projectFiles || {})
       .sort()
@@ -693,7 +775,20 @@
         return ensureLuaLibertinus(notify);
       })
       .then(function () {
-        notify("Converting with LuaLaTeX…");
+        const bibliography = detectBibliographyMode(projectFiles);
+        if (bibliography.mode === "biber") {
+          if (bibliography.hasBbl) {
+            notify(
+              "Biber bibliography detected — using project .bbl (run biber locally when citations change)."
+            );
+          } else {
+            notify(
+              "Biber bibliography detected, but no .bbl found. Run `biber main` locally and import main.bbl."
+            );
+          }
+        } else {
+          notify("Converting with LuaLaTeX…");
+        }
         const files = mergeLuaEngineFiles(projectFiles);
         return new Promise(function (resolve, reject) {
           if (!luaWorker) {
@@ -739,7 +834,15 @@
           luaWorker.postMessage({
             files: files,
             main_tex_path: "main.tex",
-            bibtex: null,
+            // false: skip bibtex8 so a biber-generated .bbl is preserved
+            // true: run bibtex8 for classic BibTeX / backend=bibtex
+            // null: let BusyTeX auto-detect from \bibliography / \printbibliography
+            bibtex:
+              bibliography.mode === "biber"
+                ? false
+                : bibliography.mode === "bibtex"
+                  ? true
+                  : null,
             makeindex: null,
             rerun: true,
             verbose: "silent",
