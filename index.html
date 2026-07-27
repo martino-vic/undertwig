@@ -1441,7 +1441,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           }
         }
 
-        if (UndertwigCloud.isAvailable()) {
+        if (UndertwigCloud.isAvailable() && (cloudStatusMode === "connected" || UndertwigCloud.hasAccessToken())) {
           scheduleCloudSave(immediateCloud);
           if (!localSaved) {
             setStatus("Browser storage is full. Saving to Google Cloud storage…");
