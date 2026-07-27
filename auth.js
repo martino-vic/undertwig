@@ -3,6 +3,7 @@
   const NONCE_STORAGE_KEY = "undertwig-auth-nonce";
   const NEXT_STORAGE_KEY = "undertwig-auth-next";
   const OAUTH_STATE_KEY = "undertwig-auth-oauth-state";
+  const DRIVE_OAUTH_PENDING_KEY = "undertwig-drive-oauth-pending";
   // Must match cloud-storage.js so login can hand off a Drive token without Connect.
   const DRIVE_TOKEN_STORAGE_KEY = "undertwig-drive-token-v1";
   const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
@@ -487,8 +488,8 @@
   }
 
   /**
-   * Full-page Google OIDC sign-in that returns an ID token and Drive access token
-   * in the URL fragment. Avoids GIS FedCM and a separate Connect click after login.
+   * Full-page Google OIDC sign-in. Requests an ID token plus Drive access when Google
+   * returns both; otherwise login.html follows up with beginGoogleDriveTokenSignIn().
    */
   function beginGoogleIdTokenSignIn(nextPath) {
     const clientId = getConfig().googleClientId;
@@ -502,6 +503,7 @@
 
     try {
       sessionStorage.setItem(OAUTH_STATE_KEY, state);
+      sessionStorage.removeItem(DRIVE_OAUTH_PENDING_KEY);
     } catch (_error) {
       throw new Error("Could not start Google sign-in (session storage blocked).");
     }
@@ -509,7 +511,6 @@
     const url = new URL(GOOGLE_AUTH_URL);
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", loginRedirectUri());
-    // id_token for the Undertwig session; token for Google Drive without a second Connect step.
     url.searchParams.set("response_type", "id_token token");
     url.searchParams.set("scope", LOGIN_SCOPES);
     url.searchParams.set("nonce", nonce);
@@ -517,6 +518,55 @@
     url.searchParams.set("prompt", "select_account");
     url.searchParams.set("include_granted_scopes", "true");
     global.location.assign(url.toString());
+  }
+
+  /** Full-page Drive token grant (no popup / user-gesture requirement). */
+  function beginGoogleDriveTokenSignIn(nextPath) {
+    const clientId = getConfig().googleClientId;
+    if (!clientId) {
+      throw new Error("Google sign-in is not configured.");
+    }
+    if (!readSession()) {
+      throw new Error("Sign in before connecting Google Drive.");
+    }
+
+    const state = createOAuthState();
+    rememberLoginNext(nextPath);
+
+    try {
+      sessionStorage.setItem(OAUTH_STATE_KEY, state);
+      sessionStorage.setItem(DRIVE_OAUTH_PENDING_KEY, "1");
+    } catch (_error) {
+      throw new Error("Could not start Google Drive authorization (session storage blocked).");
+    }
+
+    const url = new URL(GOOGLE_AUTH_URL);
+    url.searchParams.set("client_id", clientId);
+    url.searchParams.set("redirect_uri", loginRedirectUri());
+    url.searchParams.set("response_type", "token");
+    url.searchParams.set("scope", DRIVE_FILE_SCOPE);
+    url.searchParams.set("state", state);
+    url.searchParams.set("prompt", "consent");
+    url.searchParams.set("include_granted_scopes", "true");
+    global.location.assign(url.toString());
+  }
+
+  function scopeIncludesDrive(scopeValue) {
+    const scope = String(scopeValue || "");
+    return scope.indexOf("drive.file") !== -1 || scope.indexOf(DRIVE_FILE_SCOPE) !== -1;
+  }
+
+  function hasStoredDriveAccessToken() {
+    try {
+      const raw = sessionStorage.getItem(DRIVE_TOKEN_STORAGE_KEY);
+      if (!raw) {
+        return false;
+      }
+      const data = JSON.parse(raw);
+      return Boolean(data && data.accessToken && Number(data.expiresAt) - 60000 > Date.now());
+    } catch (_error) {
+      return false;
+    }
   }
 
   function rememberDriveAccessToken(accessToken, expiresIn) {
@@ -567,6 +617,7 @@
       idToken: get("id_token"),
       accessToken: get("access_token"),
       expiresIn: get("expires_in"),
+      scope: get("scope"),
       error: get("error"),
       errorDescription: get("error_description"),
       state: get("state"),
@@ -592,9 +643,20 @@
     }
   }
 
+  function consumeDriveOauthPending() {
+    try {
+      const pending = sessionStorage.getItem(DRIVE_OAUTH_PENDING_KEY);
+      sessionStorage.removeItem(DRIVE_OAUTH_PENDING_KEY);
+      return Boolean(pending);
+    } catch (_error) {
+      return false;
+    }
+  }
+
   /**
-   * Complete sign-in when login.html is loaded as the OAuth redirect target.
-   * Returns { session, nextPath } or null for a normal page load.
+   * Complete sign-in / Drive token handoff when login.html is the OAuth redirect target.
+   * Returns null for a normal page load, or
+   * { session, nextPath, needsDriveToken?: boolean }.
    */
   async function completeGoogleIdTokenSignInIfPresent() {
     const oauth = readOAuthResponseParams();
@@ -604,6 +666,7 @@
 
     const nextPath = consumeLoginNext("/");
     clearOAuthResponseFromUrl(nextPath);
+    consumeDriveOauthPending();
 
     let expectedState = null;
     try {
@@ -617,6 +680,20 @@
       throw new Error(oauth.errorDescription || oauth.error || "Google sign-in was cancelled.");
     }
 
+    if (!expectedState || !oauth.state || expectedState !== oauth.state) {
+      throw new Error("Google sign-in could not be verified (invalid state). Try again.");
+    }
+
+    // Drive-only follow-up redirect (response_type=token).
+    if (!oauth.idToken && oauth.accessToken) {
+      const session = readSession();
+      if (!session) {
+        throw new Error("Sign in again, then connect Google Drive.");
+      }
+      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn);
+      return { session: session, nextPath: nextPath, needsDriveToken: false };
+    }
+
     if (!oauth.idToken) {
       throw new Error(
         "Google sign-in could not be completed. In Google Cloud Console, add this page as an Authorized redirect URI: " +
@@ -624,15 +701,14 @@
       );
     }
 
-    if (!expectedState || !oauth.state || expectedState !== oauth.state) {
-      throw new Error("Google sign-in could not be verified (invalid state). Try again.");
+    const session = await loginWithCredential(oauth.idToken);
+    if (oauth.accessToken && (!oauth.scope || scopeIncludesDrive(oauth.scope))) {
+      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn);
+      return { session: session, nextPath: nextPath, needsDriveToken: false };
     }
 
-    const session = await loginWithCredential(oauth.idToken);
-    if (oauth.accessToken) {
-      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn);
-    }
-    return { session: session, nextPath: nextPath };
+    // Hybrid login often returns only an ID token (or a token without Drive). Follow up.
+    return { session: session, nextPath: nextPath, needsDriveToken: true };
   }
 
   global.UndertwigAuth = {
@@ -648,7 +724,9 @@
     loginUrl,
     loginRedirectUri,
     beginGoogleIdTokenSignIn,
+    beginGoogleDriveTokenSignIn,
     completeGoogleIdTokenSignInIfPresent,
+    hasStoredDriveAccessToken,
     loadGoogleIdentityServices,
   };
 })(window);

@@ -867,10 +867,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727k"></script>
-    <script src="auth.js?v=20260727k"></script>
-    <script src="cloud-storage.js?v=20260727k"></script>
-    <script src="invite.js?v=20260727k"></script>
+    <script src="auth-config.js?v=20260727m"></script>
+    <script src="auth.js?v=20260727m"></script>
+    <script src="cloud-storage.js?v=20260727m"></script>
+    <script src="invite.js?v=20260727m"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1148,6 +1148,20 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       async function connectCloudStorage() {
         if (!UndertwigAuth.isLoggedIn()) {
           renderCloudStatus("logged-out");
+          return;
+        }
+        // Prefer a full-page Drive grant (no popup blocker). If we already have a token, sync now.
+        if (!UndertwigCloud.hasAccessToken()) {
+          setStatus("Redirecting to Google to connect Drive…");
+          try {
+            UndertwigAuth.beginGoogleDriveTokenSignIn("/");
+          } catch (error) {
+            renderCloudStatus("disconnected");
+            setStatus(
+              (error && error.message) || "Could not start Google Drive connection.",
+              true
+            );
+          }
           return;
         }
         setStatus("Connecting to Google Cloud storage…");
@@ -1643,9 +1657,13 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           }, force ? 130000 : 8000);
 
           try {
-            if (force) {
+            if (force && !UndertwigCloud.hasAccessToken()) {
               setStatus("Waiting for Google Drive permission — finish the popup if it appears…");
               await UndertwigCloud.connect({ interactive: true });
+            }
+
+            if (!sharedProjectId && UndertwigCloud.isCollaborator && UndertwigCloud.isCollaborator()) {
+              UndertwigCloud.clearCollaboratorState();
             }
 
             if (sharedProjectId) {

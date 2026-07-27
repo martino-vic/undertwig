@@ -489,10 +489,60 @@
     return response.json();
   }
 
+  function clearFolderCaches() {
+    cachedUndertwigFolderId = null;
+    projectFolderMap = {};
+    persistProjectMap();
+    writeActiveFolderId(null);
+    try {
+      localStorage.removeItem(UNDERTWIG_FOLDER_KEY);
+    } catch (_error) {
+      // Ignore.
+    }
+  }
+
+  function clearCollaboratorState() {
+    writeRole(null);
+    writeActiveFolderId(null);
+  }
+
+  function isDriveFolderMeta(meta) {
+    return Boolean(
+      meta &&
+        !meta.trashed &&
+        meta.mimeType === "application/vnd.google-apps.folder"
+    );
+  }
+
+  async function fetchDriveFileMeta(fileId, fields) {
+    const response = await driveFetch(
+      DRIVE_API +
+        "/files/" +
+        encodeURIComponent(fileId) +
+        "?fields=" +
+        encodeURIComponent(fields || "id,name,mimeType,trashed"),
+      { method: "GET" }
+    );
+    if (!response.ok) {
+      return null;
+    }
+    return response.json();
+  }
+
   async function ensureUndertwigFolder() {
     if (cachedUndertwigFolderId) {
-      return cachedUndertwigFolderId;
+      const meta = await fetchDriveFileMeta(cachedUndertwigFolderId, "id,trashed,mimeType");
+      if (isDriveFolderMeta(meta)) {
+        return cachedUndertwigFolderId;
+      }
+      cachedUndertwigFolderId = null;
+      try {
+        localStorage.removeItem(UNDERTWIG_FOLDER_KEY);
+      } catch (_error) {
+        // Ignore.
+      }
     }
+
     try {
       cachedUndertwigFolderId = localStorage.getItem(UNDERTWIG_FOLDER_KEY) || null;
     } catch (_error) {
@@ -500,15 +550,9 @@
     }
 
     if (cachedUndertwigFolderId) {
-      const check = await driveFetch(
-        DRIVE_API + "/files/" + encodeURIComponent(cachedUndertwigFolderId) + "?fields=id,trashed",
-        { method: "GET" }
-      );
-      if (check.ok) {
-        const meta = await check.json();
-        if (!meta.trashed) {
-          return cachedUndertwigFolderId;
-        }
+      const meta = await fetchDriveFileMeta(cachedUndertwigFolderId, "id,trashed,mimeType");
+      if (isDriveFolderMeta(meta)) {
+        return cachedUndertwigFolderId;
       }
       cachedUndertwigFolderId = null;
       try {
@@ -561,19 +605,16 @@
     }
     if (projectFolderMap[name]) {
       const id = projectFolderMap[name];
-      const check = await driveFetch(
-        DRIVE_API + "/files/" + encodeURIComponent(id) + "?fields=id,trashed",
-        { method: "GET" }
-      );
-      if (check.ok) {
-        const meta = await check.json();
-        if (!meta.trashed) {
-          writeActiveFolderId(id);
-          return id;
-        }
+      const meta = await fetchDriveFileMeta(id, "id,trashed,mimeType");
+      if (isDriveFolderMeta(meta)) {
+        writeActiveFolderId(id);
+        return id;
       }
       delete projectFolderMap[name];
       persistProjectMap();
+      if (cachedActiveFolderId === id) {
+        writeActiveFolderId(null);
+      }
     }
 
     const rootId = await ensureUndertwigFolder();
@@ -752,10 +793,23 @@
   }
 
   async function syncOneProject(state, projectName) {
-    const folderId = await ensureProjectFolder(projectName);
-    await syncFilesIntoExistingFolder(folderId, state, projectName);
-    writeRole("owner");
-    return folderId;
+    try {
+      const folderId = await ensureProjectFolder(projectName);
+      await syncFilesIntoExistingFolder(folderId, state, projectName);
+      writeRole("owner");
+      return folderId;
+    } catch (error) {
+      const message = (error && error.message) || "";
+      if (!/File not found|not found|404/i.test(message)) {
+        throw error;
+      }
+      // Stale cached IDs (often a legacy JSON file) — rebuild Undertwig folders once.
+      clearFolderCaches();
+      const folderId = await ensureProjectFolder(projectName);
+      await syncFilesIntoExistingFolder(folderId, state, projectName);
+      writeRole("owner");
+      return folderId;
+    }
   }
 
   async function saveProject(state, options) {
@@ -1064,23 +1118,36 @@
           return { connected: true, fileId: activeId, role: cachedRole, reason: "ok" };
         }
       }
+      // Stale collaborator role without a usable shared folder — fall back to owner workspace.
       if (isCollaborator()) {
-        return {
-          connected: false,
-          fileId: null,
-          role: cachedRole,
-          reason: "shared-folder-missing",
-        };
+        clearCollaboratorState();
       }
       const rootId = await ensureUndertwigFolder();
       writeRole("owner");
       return { connected: true, fileId: rootId, role: "owner", reason: "ready-no-project" };
     } catch (error) {
+      const message = (error && error.message) || "connection-failed";
+      if (/File not found|not found|404/i.test(message)) {
+        try {
+          clearFolderCaches();
+          clearCollaboratorState();
+          const rootId = await ensureUndertwigFolder();
+          writeRole("owner");
+          return { connected: true, fileId: rootId, role: "owner", reason: "rebuilt-root" };
+        } catch (retryError) {
+          return {
+            connected: false,
+            fileId: null,
+            role: null,
+            reason: (retryError && retryError.message) || message,
+          };
+        }
+      }
       return {
         connected: false,
         fileId: null,
         role: null,
-        reason: (error && error.message) || "connection-failed",
+        reason: message,
       };
     }
   }
@@ -1092,17 +1159,31 @@
     if (isCollaborator() && getProjectFolderId()) {
       const projectName =
         opts.projectName || inferProjectName(localState.activeFile) || listRootProjects(localState)[0];
-      await saveProject(localState, { projectName: projectName });
-      return {
-        project: localState,
-        source: "uploaded",
-        role: cachedRole,
-        folderId: getProjectFolderId(),
-      };
+      const sharedMeta = await refreshProjectMeta(getProjectFolderId());
+      if (!sharedMeta) {
+        clearCollaboratorState();
+      } else {
+        await saveProject(localState, { projectName: projectName });
+        return {
+          project: localState,
+          source: "uploaded",
+          role: cachedRole,
+          folderId: getProjectFolderId(),
+        };
+      }
     }
 
     // Owner path: ensure Undertwig exists and upload root projects.
-    await ensureUndertwigFolder();
+    try {
+      await ensureUndertwigFolder();
+    } catch (error) {
+      const message = (error && error.message) || "";
+      if (!/File not found|not found|404/i.test(message)) {
+        throw error;
+      }
+      clearFolderCaches();
+      await ensureUndertwigFolder();
+    }
     const projects = listRootProjects(localState);
     if (!projects.length) {
       writeRole("owner");
@@ -1202,5 +1283,7 @@
     listRootProjects,
     inferProjectName,
     clearToken,
+    clearFolderCaches,
+    clearCollaboratorState,
   };
 })(window);
