@@ -1,6 +1,6 @@
 # Compliance Checklist
 
-Use this checklist before any monetized or public release.
+Use this checklist before any public release.
 
 ## Engine and dependencies
 
@@ -21,11 +21,11 @@ Use this checklist before any monetized or public release.
 - [x] Project `LICENSE` exists.
 - [x] `THIRD_PARTY_NOTICES.md` exists.
 - [x] In-app links expose License, Notices, and Compliance pages.
-- [ ] Terms of Service and Privacy Policy are published before paid accounts, cloud sync, or server-side file storage.
+- [ ] Terms of Service and Privacy Policy are published before accounts, cloud sync, or server-side file storage.
 
 ## Release gate
 
-Before shipping a paid feature:
+Before shipping a broader public release:
 
 1. Confirm no AGPL runtime is introduced without an explicit AGPL product decision.
 2. Update notices, licenses, versions, and hashes for every newly shipped third-party asset.
