@@ -955,10 +955,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260728d"></script>
-    <script src="auth.js?v=20260728d"></script>
-    <script src="cloud-storage.js?v=20260728d"></script>
-    <script src="invite.js?v=20260728d"></script>
+    <script src="auth-config.js?v=20260728e"></script>
+    <script src="auth.js?v=20260728e"></script>
+    <script src="cloud-storage.js?v=20260728e"></script>
+    <script src="invite.js?v=20260728e"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1202,6 +1202,8 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       let cloudSaveTimer = null;
       let cloudSaveInFlight = false;
       let cloudStatusMode = "logged-out";
+      // Declared early: boot used to call initCloudProject before this existed (TDZ), so invite sync never ran.
+      let cloudInitPromise = null;
       const COLLAPSED_FOLDERS_KEY = "undertwig-tree-collapsed-v1";
       let collapsedFolders = loadCollapsedFolders();
 
@@ -1680,9 +1682,6 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
       });
 
-      refreshAuthUi();
-      initCloudProject();
-
       document.getElementById("collapseExplorer").addEventListener("click", () => {
         app.classList.toggle("explorer-collapsed");
         document.getElementById("collapseExplorer").textContent = app.classList.contains("explorer-collapsed") ? ">" : "<";
@@ -1993,8 +1992,6 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
         return true;
       }
-
-      let cloudInitPromise = null;
 
       async function initCloudProject(options) {
         const force = Boolean(options && options.force);
@@ -3339,8 +3336,13 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           return;
         }
 
+
         status.textContent = message;
       }
+
+      // Boot after all declarations so invite sync can run (see cloudInitPromise TDZ note).
+      refreshAuthUi();
+      initCloudProject();
     </script>
   </body>
 </html>
