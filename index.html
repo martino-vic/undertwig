@@ -1252,12 +1252,12 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           renderCloudStatus("logged-out");
           return;
         }
-        // Don't clobber a live check or a confirmed connection.
-        if (cloudStatusMode === "connected" || cloudStatusMode === "connecting") {
+        if (cloudStatusMode === "connected") {
           return;
         }
         if (UndertwigCloud.hasAccessToken()) {
-          renderCloudStatus("connecting");
+          // Token from login ⇒ treat as connected immediately; verify/sync in the background.
+          renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
           initCloudProject();
           return;
         }
@@ -1269,7 +1269,6 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           renderCloudStatus("logged-out");
           return;
         }
-        // No Drive token yet — one full-page Google grant, then the editor will verify.
         if (!UndertwigCloud.hasAccessToken()) {
           setStatus("Redirecting to Google to connect Drive…");
           try {
@@ -1283,8 +1282,8 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           }
           return;
         }
-        renderCloudStatus("connecting");
-        setStatus("Checking Google Drive connection…");
+        renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+        setStatus("Connected. Syncing with Google Drive…");
         try {
           await initCloudProject({ force: true });
         } catch (error) {
@@ -1717,7 +1716,6 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           UndertwigCloud.setActiveProjectFileId(sharedProjectId);
         }
 
-        // No token yet: don't hang on silent GIS popups — show Retry until the user grants Drive.
         if (!UndertwigCloud.hasAccessToken()) {
           renderCloudStatus("disconnected");
           if (sharedProjectId) {
@@ -1729,50 +1727,14 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           return;
         }
 
-        if (cloudInitPromise) {
-          if (!force) {
-            return cloudInitPromise;
-          }
-          // Don't wait forever on a stuck previous check.
-          try {
-            await Promise.race([
-              cloudInitPromise,
-              new Promise((_, reject) =>
-                setTimeout(() => reject(new Error("Previous Drive check timed out.")), 3000)
-              ),
-            ]);
-          } catch (_error) {
-            cloudInitPromise = null;
-          }
+        // Always show Connected as soon as we have a Drive token from login.
+        renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+
+        if (cloudInitPromise && !force) {
+          return cloudInitPromise;
         }
 
         cloudInitPromise = (async () => {
-          if (cloudStatusMode !== "connected") {
-            renderCloudStatus("connecting");
-          }
-
-          let settled = false;
-          const markDisconnected = (message) => {
-            if (settled && cloudStatusMode === "connected") {
-              if (message) {
-                setStatus(message, true);
-              }
-              return;
-            }
-            settled = true;
-            renderCloudStatus("disconnected");
-            if (message) {
-              setStatus(message, true);
-            }
-          };
-          const markConnected = (fileId) => {
-            settled = true;
-            renderCloudStatus("connected", fileId || UndertwigCloud.getProjectFileId());
-          };
-          const failTimer = setTimeout(() => {
-            markDisconnected("Could not reach Google Drive. Check your connection, then click Retry.");
-          }, 10000);
-
           try {
             if (!sharedProjectId && UndertwigCloud.isCollaborator && UndertwigCloud.isCollaborator()) {
               UndertwigCloud.clearCollaboratorState();
@@ -1780,7 +1742,14 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
             if (sharedProjectId) {
               setStatus("Opening shared project from the owner's Google Drive…");
-              const sharedProject = await UndertwigCloud.joinSharedProject(sharedProjectId);
+              const sharedProject = await Promise.race([
+                UndertwigCloud.joinSharedProject(sharedProjectId),
+                new Promise(function (_, reject) {
+                  setTimeout(function () {
+                    reject(new Error("Opening the shared project timed out."));
+                  }, 15000);
+                }),
+              ]);
               replaceProjectState(sharedProject);
               try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -1789,8 +1758,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
               }
               render();
               clearProjectIdFromUrl();
-              markConnected(sharedProjectId);
-              clearTimeout(failTimer);
+              renderCloudStatus("connected", sharedProjectId);
               const fileCount = Object.keys(state.files || {}).length;
               setStatus(
                 "Joined shared project (" +
@@ -1806,29 +1774,28 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             if (!verify || !verify.ok) {
               const reason = verify && verify.reason;
               if (reason === "no-token" || reason === "unauthorized") {
-                throw new Error("Google Drive permission expired. Click Retry to connect again.");
+                renderCloudStatus("disconnected");
+                setStatus("Google Drive permission expired. Click Retry to connect again.", true);
+                return;
               }
               if (reason === "timeout" || reason === "network") {
-                throw new Error("No response from Google Drive. Check your internet connection.");
+                renderCloudStatus("disconnected");
+                setStatus("No response from Google Drive. Check your internet connection, then click Retry.", true);
+                return;
               }
-              throw new Error("Could not verify Google Drive access.");
+              renderCloudStatus("disconnected");
+              setStatus("Could not verify Google Drive access. Click Retry.", true);
+              return;
             }
 
-            markConnected(verify.fileId || UndertwigCloud.getProjectFileId());
-            clearTimeout(failTimer);
+            renderCloudStatus("connected", verify.fileId || UndertwigCloud.getProjectFileId());
             setStatus("Connected to Google Drive. Syncing projects…");
 
-            // Sync in the background so the status can stay Connected.
-            Promise.resolve()
-              .then(() =>
-                UndertwigCloud.syncProject(state, {
-                  projectName: getActiveProjectName() || undefined,
-                })
-              )
-              .then(() => {
-                if (cloudStatusMode !== "connected") {
-                  return;
-                }
+            try {
+              await UndertwigCloud.syncProject(state, {
+                projectName: getActiveProjectName() || undefined,
+              });
+              if (cloudStatusMode === "connected") {
                 const fileCount = Object.keys(state.files || {}).length;
                 setStatus(
                   "Synced " +
@@ -1838,33 +1805,33 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
                     " to Google Drive / Undertwig."
                 );
                 renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
-              })
-              .catch((syncError) => {
-                if (cloudStatusMode === "connected") {
-                  setStatus(
-                    `Connected, but sync failed: ${
-                      syncError && syncError.message ? syncError.message : syncError
-                    }`,
-                    true
-                  );
-                }
-              });
-          } catch (error) {
-            const message = `Could not reach Google Drive: ${
-              error && error.message ? error.message : error
-            }`;
-            if (!settled) {
-              markDisconnected(message);
-            } else {
-              setStatus(message, true);
+              }
+            } catch (syncError) {
+              if (cloudStatusMode === "connected") {
+                setStatus(
+                  `Connected, but sync failed: ${
+                    syncError && syncError.message ? syncError.message : syncError
+                  }`,
+                  true
+                );
+              }
             }
+          } catch (error) {
+            renderCloudStatus("disconnected");
+            setStatus(
+              `Could not reach Google Drive: ${error && error.message ? error.message : error}`,
+              true
+            );
           } finally {
-            clearTimeout(failTimer);
             cloudInitPromise = null;
           }
         })();
 
         return cloudInitPromise;
+      }
+
+      function forgetLocalDriveAssumption() {
+        // Status already cleared via UndertwigCloud when token is unauthorized.
       }
 
       function persistProject(options) {
