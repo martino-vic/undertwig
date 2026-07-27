@@ -8,6 +8,7 @@ Local editing and conversion run in the browser: projects stay on the device by 
 
 - Collapsible file explorer
 - Create and upload files or folders
+- Drag files into folders or back to the project root
 - LaTeX source editor
 - Convert button with local PDF preview
 - Compiler log panel

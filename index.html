@@ -231,6 +231,24 @@
         white-space: nowrap;
       }
 
+      .tree-row[draggable="true"] {
+        cursor: grab;
+      }
+
+      .tree-row.dragging {
+        opacity: 0.45;
+      }
+
+      .tree-row.drop-target {
+        background: rgba(47, 143, 107, 0.22);
+        outline: 1px dashed var(--brand);
+      }
+
+      .tree.drop-root {
+        box-shadow: inset 0 0 0 1px var(--brand);
+        background: rgba(47, 143, 107, 0.08);
+      }
+
       .collapsed-rail {
         display: none;
         align-items: center;
@@ -675,6 +693,7 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
       const accountLabel = document.getElementById("accountLabel");
       const accountMessage = document.getElementById("accountMessage");
       const accountLogout = document.getElementById("accountLogout");
+      let dragSourcePath = null;
 
       function closeHoverBoxes() {
         collaborateBox.classList.add("hidden");
@@ -832,6 +851,28 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
         root.children.forEach((node) => tree.appendChild(renderNode(node, 0)));
       }
 
+      tree.addEventListener("dragover", (event) => {
+        if (!dragSourcePath) return;
+        if (event.target !== tree) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        tree.classList.add("drop-root");
+      });
+
+      tree.addEventListener("dragleave", (event) => {
+        if (event.target === tree) {
+          tree.classList.remove("drop-root");
+        }
+      });
+
+      tree.addEventListener("drop", (event) => {
+        if (!dragSourcePath) return;
+        if (event.target !== tree) return;
+        event.preventDefault();
+        tree.classList.remove("drop-root");
+        moveFile(dragSourcePath, "");
+      });
+
       function buildTree() {
         const root = { name: "", path: "", type: "folder", children: new Map() };
 
@@ -881,16 +922,58 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
         row.type = "button";
         row.className = `tree-row${state.activeFile === node.path ? " active" : ""}`;
         row.style.paddingLeft = `${8 + depth * 16}px`;
+        row.dataset.path = node.path;
+        row.dataset.type = node.type;
         row.innerHTML = `<span class="tree-icon">${node.type === "folder" ? ">" : "-"}</span><span class="tree-name"></span>`;
         row.querySelector(".tree-name").textContent = node.name;
 
         if (node.type === "file") {
+          row.draggable = true;
           row.addEventListener("click", () => {
             state.activeFile = node.path;
             persistProject();
             render();
           });
+          row.addEventListener("dragstart", (event) => {
+            dragSourcePath = node.path;
+            event.dataTransfer.setData("text/plain", node.path);
+            event.dataTransfer.effectAllowed = "move";
+            row.classList.add("dragging");
+          });
+          row.addEventListener("dragend", () => {
+            dragSourcePath = null;
+            row.classList.remove("dragging");
+            clearDropIndicators();
+          });
         }
+
+        row.addEventListener("dragover", (event) => {
+          if (!dragSourcePath) return;
+          if (node.type === "file" && dragSourcePath === node.path) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+          row.classList.add("drop-target");
+          tree.classList.remove("drop-root");
+        });
+
+        row.addEventListener("dragleave", (event) => {
+          if (!row.contains(event.relatedTarget)) {
+            row.classList.remove("drop-target");
+          }
+        });
+
+        row.addEventListener("drop", (event) => {
+          if (!dragSourcePath) return;
+          event.preventDefault();
+          event.stopPropagation();
+          row.classList.remove("drop-target");
+          if (node.type === "folder") {
+            moveFile(dragSourcePath, node.path);
+          } else if (dragSourcePath !== node.path) {
+            moveFile(dragSourcePath, parentFolder(node.path));
+          }
+        });
 
         const deleteButton = document.createElement("button");
         deleteButton.type = "button";
@@ -914,6 +997,58 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
           node.children.forEach((child) => wrapper.appendChild(renderNode(child, depth + 1)));
         }
         return wrapper;
+      }
+
+      function clearDropIndicators() {
+        tree.classList.remove("drop-root");
+        tree.querySelectorAll(".drop-target").forEach((element) => {
+          element.classList.remove("drop-target");
+        });
+      }
+
+      function parentFolder(path) {
+        const parts = normalizePath(path).split("/").filter(Boolean);
+        parts.pop();
+        return parts.join("/");
+      }
+
+      function moveFile(sourcePath, targetFolder) {
+        sourcePath = normalizePath(sourcePath);
+        targetFolder = normalizePath(targetFolder || "");
+        const file = state.files[sourcePath];
+        if (!file) return;
+
+        const fileName = sourcePath.split("/").pop();
+        const destination = targetFolder ? `${targetFolder}/${fileName}` : fileName;
+
+        if (destination === sourcePath) {
+          setStatus(`${sourcePath} is already in that location.`);
+          return;
+        }
+
+        if (state.files[destination]) {
+          setStatus(`A file already exists at ${destination}.`, true);
+          return;
+        }
+
+        state.files[destination] = {
+          name: fileName,
+          content: file.content,
+          binary: Boolean(file.binary)
+        };
+        delete state.files[sourcePath];
+
+        if (targetFolder) {
+          ensureFoldersForPath(destination);
+        }
+
+        if (state.activeFile === sourcePath) {
+          state.activeFile = destination;
+        }
+
+        persistProject();
+        render();
+        setStatus(`Moved ${sourcePath} → ${destination}.`);
       }
 
       function deleteFile(path) {
