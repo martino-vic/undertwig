@@ -28,10 +28,19 @@ Sign-in is available at [`login.html`](login.html) and supports Google accounts 
 
 1. Create an OAuth 2.0 Web client ID in Google Cloud Console.
 2. Add authorized JavaScript origins for `https://undertwig.com` (and `http://localhost` for local testing).
-3. Put the client ID in [`auth-config.js`](auth-config.js).
+3. Put the client ID in [`auth-config.js`](auth-config.js). Never put a client secret in the repo.
 
-Signed-in session details are stored in the browser under `undertwig-auth-v1`.
+Security/privacy controls in the current client:
 
+- Cryptographic nonce bound to the Google ID token
+- Signature verification against Google’s JWKS
+- Audience, issuer, expiry, and `email_verified` checks
+- Same-origin-only post-login redirects
+- Minimal profile stored locally; raw ID token is not persisted
+- Session cleared when the Google credential expires
+- Logout clears local state and best-effort revokes the Google grant
+
+Signed-in session details are stored in the browser under `undertwig-auth-v2`.
 ## Project layout
 
 - `index.html` — app UI and conversion workflow

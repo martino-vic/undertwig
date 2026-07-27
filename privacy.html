@@ -141,10 +141,10 @@
         on your device unless you export it, clear site data, or otherwise share it.
       </p>
       <p>
-        If you sign in, a small account session (such as your Google account email,
-        display name, profile image URL, and account identifier) is also stored in
-        local storage under a key such as <code>undertwig-auth-v1</code> so the
-        editor can keep you signed in on that browser.
+        If you sign in, a minimal account session is stored in local storage under a key
+        such as <code>undertwig-auth-v2</code>: Google subject identifier, verified email,
+        display name, optional profile image URL, and an expiry time. The raw Google ID
+        token is verified in the browser and is not kept after sign-in.
       </p>
       <p>
         Generated PDFs are created locally in your browser and are not uploaded to
@@ -154,15 +154,19 @@
       <h2>Google account sign-in</h2>
       <p>
         Collaboration and related signed-in features require a Google account.
-        Sign-in uses Google Identity Services. When you choose “Continue with Google,”
-        Google authenticates you and may share with Undertwig basic profile details
-        such as your name, email address, language, and profile picture, subject to
-        your Google account settings and Google’s own policies.
+        Sign-in uses Google Identity Services in your browser. When you choose
+        “Continue with Google,” Google authenticates you and may share with Undertwig
+        basic profile details such as your name, email address, and profile picture,
+        subject to your Google account settings and Google’s own policies.
       </p>
       <p>
-        Undertwig currently uses that profile information only to establish and
-        display your signed-in session in the browser. We do not offer other
-        sign-in providers. Google’s handling of your account is governed by
+        Undertwig verifies the Google ID token’s signature against Google’s published
+        signing keys, checks issuer, audience, expiry, email verification, and a one-time
+        nonce, then keeps only the minimal profile fields needed to show your signed-in
+        state. Sign-in sessions expire when the Google credential expires. Logging out
+        clears the local session and attempts to revoke the Google sign-in grant for this
+        site. We do not offer other sign-in providers. Google’s handling of your account
+        is governed by
         <a href="https://policies.google.com/privacy">Google’s Privacy Policy</a>.
       </p>
 
@@ -175,9 +179,10 @@
           server logs for security, reliability, and abuse prevention.
         </li>
         <li>
-          <strong>Google sign-in.</strong> Loading the login page contacts Google’s
-          Identity Services scripts and domains so you can authenticate. Google may
-          process technical and account data as described in its policies.
+          <strong>Google sign-in.</strong> The login page loads Google Identity Services.
+          During sign-in verification, the browser may request Google’s public signing
+          keys. Logging out may contact Google to revoke the site’s sign-in grant.
+          The editor itself does not load Google’s sign-in script on every visit.
         </li>
         <li>
           <strong>Optional package fetching.</strong> When a document needs TeX packages

@@ -204,6 +204,8 @@
 
       footer a:hover { color: var(--text); }
     </style>
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta http-equiv="Permissions-Policy" content="identity-credentials-get=(self)">
     <script src="auth-config.js"></script>
     <script src="auth.js"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -256,7 +258,7 @@
 
     <script>
       const params = new URLSearchParams(window.location.search);
-      const nextPath = params.get("next") || "/";
+      const nextPath = UndertwigAuth.safeNextPath(params.get("next") || "/");
       const statusEl = document.getElementById("status");
       const googleSection = document.getElementById("googleSection");
       const signedIn = document.getElementById("signedIn");
@@ -280,25 +282,30 @@
         const avatar = document.getElementById("avatar");
         if (session.picture) {
           avatar.src = session.picture;
-          avatar.alt = session.name || session.email || "Account";
+          avatar.alt = "";
+          avatar.referrerPolicy = "no-referrer";
           avatar.style.display = "block";
         } else {
+          avatar.removeAttribute("src");
           avatar.style.display = "none";
         }
         setStatus("You are signed in with Google.", "ok");
       }
 
       function redirectAfterLogin() {
-        window.location.href = nextPath;
+        window.location.replace(nextPath);
       }
 
-      function handleCredentialResponse(response) {
+      async function handleCredentialResponse(response) {
         try {
-          UndertwigAuth.loginWithCredential(response.credential);
+          setStatus("Verifying Google sign-in…");
+          await UndertwigAuth.loginWithCredential(response.credential);
           setStatus("Signed in. Redirecting…", "ok");
           redirectAfterLogin();
         } catch (error) {
+          UndertwigAuth.logout();
           setStatus(error.message || "Google sign-in failed.", "error");
+          initGoogleButton();
         }
       }
 
@@ -330,19 +337,26 @@
 
         whenGoogleReady(
           () => {
+            const nonce = UndertwigAuth.prepareSignInNonce();
             google.accounts.id.initialize({
               client_id: config.googleClientId,
               callback: handleCredentialResponse,
+              nonce: nonce,
               auto_select: false,
               cancel_on_tap_outside: true,
+              itp_support: true,
+              use_fedcm_for_button: true,
+              button_auto_select: false,
             });
 
+            document.getElementById("googleButton").replaceChildren();
             google.accounts.id.renderButton(document.getElementById("googleButton"), {
               theme: "outline",
               size: "large",
               shape: "rectangular",
               text: "continue_with",
               width: 320,
+              logo_alignment: "left",
             });
           },
           () => {
@@ -351,9 +365,10 @@
         );
       }
 
-      document.getElementById("logoutButton").addEventListener("click", () => {
-        UndertwigAuth.logout();
-        window.location.reload();
+      document.getElementById("logoutButton").addEventListener("click", async () => {
+        setStatus("Signing out…");
+        await UndertwigAuth.logoutAndRevoke();
+        window.location.replace("login.html?next=" + encodeURIComponent(nextPath));
       });
 
       const existing = UndertwigAuth.readSession();

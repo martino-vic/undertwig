@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Undertwig LaTeX Editor</title>
     <style>
       :root {
@@ -724,9 +725,9 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
         accountButton.setAttribute("aria-expanded", "true");
       });
 
-      accountLogout.addEventListener("click", (event) => {
+      accountLogout.addEventListener("click", async (event) => {
         event.preventDefault();
-        UndertwigAuth.logout();
+        await UndertwigAuth.logoutAndRevoke();
         refreshAuthUi();
       });
 

@@ -26,15 +26,17 @@ and are not redistributed as part of this project.
 ## Google Identity Services
 
 - Loaded at runtime from: `https://accounts.google.com/gsi/client`
-- Used by: `login.html` for Google-only sign-in
+- Used by: `login.html` for Google-only sign-in (and briefly on logout when revoking access)
+- Token key discovery: `https://www.googleapis.com/oauth2/v3/certs`
 - License / terms: Google APIs Terms of Service and Google Identity Services terms
   (see https://developers.google.com/identity and https://policies.google.com/terms)
 - Notes:
   - The Google script is not vendored in this repository; the browser loads it from Google.
-  - Undertwig stores a local session profile derived from the Google credential in
-    `localStorage` (`undertwig-auth-v1`).
-  - Configure the OAuth 2.0 Web client ID in `auth-config.js`.
-
+  - Undertwig verifies ID token signatures with Web Crypto against Google’s JWKS, checks
+    audience/issuer/expiry/email_verified/nonce, and stores only a minimal local profile
+    in `localStorage` (`undertwig-auth-v2`). The raw ID token is not persisted.
+  - Configure the OAuth 2.0 Web client ID in `auth-config.js`. Never ship a client secret
+    in this static site.
 ## Future dependency rules
 
 Before adding any dependency or hosted runtime asset, record:
