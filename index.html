@@ -533,8 +533,30 @@
         border-color: #4b6073;
       }
 
-      .engine-wrap {
+      .engine-wrap,
+      .bib-wrap {
         position: relative;
+      }
+
+      .bib-button {
+        min-height: 36px;
+        padding: 0 14px;
+        border-color: transparent;
+        background: #2f9e44;
+        color: #fff;
+        font-weight: 700;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .bib-button:hover {
+        background: #37b24d;
+        border-color: transparent;
+      }
+
+      .bib-button:disabled {
+        opacity: 0.75;
+        cursor: wait;
       }
 
       .engine-menu {
@@ -1079,6 +1101,14 @@
               </svg>
               Save
             </button>
+            <div class="bib-wrap">
+              <button class="engine-button" id="bibTool" type="button" aria-haspopup="listbox" aria-expanded="false" title="Choose bibliography tool">BibTeX</button>
+              <div class="engine-menu hidden" id="bibToolMenu" role="listbox" aria-label="Bibliography tool">
+                <button type="button" role="option" data-bib="bibtex" aria-selected="true">BibTeX</button>
+                <button type="button" role="option" data-bib="biber" aria-selected="false">Biber</button>
+              </div>
+            </div>
+            <button class="bib-button" id="runBibliography" type="button" title="Run bibliography tool on main">Bibliography</button>
             <div class="engine-wrap">
               <button class="engine-button" id="latexEngine" type="button" aria-haspopup="listbox" aria-expanded="false" title="Choose the local LaTeX engine">pdfLaTeX</button>
               <div class="engine-menu hidden" id="engineMenu" role="listbox" aria-label="LaTeX engine">
@@ -1157,7 +1187,7 @@
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
-    <script src="latex-engines.js?v=20260728ad"></script>
+    <script src="latex-engines.js?v=20260728ae"></script>
     <script>
       const DEMO_FIGURE_PNG_BASE64 =
         "iVBORw0KGgoAAAANSUhEUgAAAPAAAACMCAIAAADN17N/AAAD20lEQVR42u3dMU4UURjAcdjsAaigIlzBwsKSTisSL8ARKI2cAGPpEbyACZV2lhQUXIHSW1hMMpkMy26YN/PeN+/9/pUxsM6yv/38Zncdj09Oz4+kWtr4EQhoCWgJaAloAS0BLQEtAS0BLaAloCWgJaAloNVS24Vu9+L2yg9X+3u+u5/9No/n/YA/xyorezbQKCsC63lAv9T878dfj5D2d3ZzObvpVNAjyhwrXXYK6w3NKt5ITsr6ul3igKRphF4uIfkmdP80olmzj+rJQ3qTqFlaqGnGNnM9paQI6+sm5alDs6ItHj7LoaoCWm2Dtm8o8tZhQsvKIQEtAS0BLaClOtoWP4L0D1gFzGuaLYKukvLwrmHd0MpRseam7iPQbT3STNe/crT2GJ/dXEbbPZ4eH/Z/wbv3H4CmObTpg4hf++J14d4eqep2Ov78+/v+7/r16cvLW1iF7KygW14o8w/pEeWDiF/74h53d4PBWZvQlU/lNznej7uTHZw10NVqTqe8U3bPOqZpoFGeyDrmqPZZDpqT9pA3vXgCtCJqjmzaylGJ5pyUd64fQXYPE5rmeVgHmdNA01yVaaBprso00Os+C3RsQNdTnPEc53iAtmxUtXgATXNVpoFWVQFtPFc1pIGWCS3jOeqQBlomtAS02tk3Cm4dQMuEloCWgNZaF+hSazTQqqoK/03hn+tvQY/sOum7h5fnmn2IWjkkoCWgpaZ36I8/v8Y8sMlXH13vqxwmtAS0BLSAloBWct11EBd6Y2XRumPOeR1HoGVCS0BLQGvFa3T+BRpomdAS0Gpt6yiybwAtE1qGdNTxDLRMaBnSUccz0ExXpRnodRfNdITjAXrFQ9qxAW3xqHbZAJrp2jQDzXRVmo+qvIxBg6afHh86VZkvddA/keLs9CZ0VeeIOUd1QM25QU++0koFLX3fM5uOqdnKUeGcXnr9CEu5zMrR5pDOea+Ho3reaT28wbAvhG+LPLpnN5c0ZxjVw4E6eWCPnhWR39MptnK0Y7rg30hD1iOXB3HvHO3BKRfeoVswHWG/6hUO/6OTN60iq3Ac4qSwe7yrZB3wVGHo8uD/4rMuxFFAt3yaGAd3ZXljRUBLQEtAS0ALaKlR0M93990vmnr7WpnrdfXeTGiZ0FKDoG0dirlvzDChmdZCmrOuHBOeOlIGY5v0P8+QVoRlo2s743H43JyK765JO/ToaWRUaxbNKQvt8cnpefoBXdxejX7HtNaEqZx+bjYP6J2mpQxngUuBxlplKS8CmmwVcbw4aKlIPsshoCWgJaAloAW0BLQEtAS0BLSAloCWgJaAlg71HwSpsZ+X/NyHAAAAAElFTkSuQmCC";
@@ -1320,7 +1350,21 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
       const STORAGE_KEY = "undertwig-latex-workspace-v2";
       const LEGACY_STORAGE_KEY = "undertwig-latex-project-v1";
-      const TEXT_EXTENSIONS = new Set(["tex", "bib", "cls", "sty", "txt", "md", "csv", "json", "log"]);
+      const TEXT_EXTENSIONS = new Set([
+        "tex",
+        "bib",
+        "bbl",
+        "blg",
+        "aux",
+        "bcf",
+        "cls",
+        "sty",
+        "txt",
+        "md",
+        "csv",
+        "json",
+        "log",
+      ]);
       const state = loadProject();
       let engine = null;
       let pdfUrl = null;
@@ -1331,6 +1375,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const status = document.getElementById("status");
       const convertButton = document.getElementById("convert");
       const convertBusy = document.getElementById("convertBusy");
+      const bibToolButton = document.getElementById("bibTool");
+      const bibToolMenu = document.getElementById("bibToolMenu");
+      const bibliographyButton = document.getElementById("runBibliography");
       const latexEngineButton = document.getElementById("latexEngine");
       const engineMenu = document.getElementById("engineMenu");
       const CONVERT_SPINNER_FRAMES = ["|", "/", "-", "\\"];
@@ -1798,6 +1845,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         collaborateButton.setAttribute("aria-expanded", "false");
         accountButton.setAttribute("aria-expanded", "false");
         closeEngineMenu();
+        closeBibToolMenu();
       }
 
       function closeEngineMenu() {
@@ -1806,6 +1854,14 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
         engineMenu.classList.add("hidden");
         latexEngineButton.setAttribute("aria-expanded", "false");
+      }
+
+      function closeBibToolMenu() {
+        if (!bibToolMenu || !bibToolButton) {
+          return;
+        }
+        bibToolMenu.classList.add("hidden");
+        bibToolButton.setAttribute("aria-expanded", "false");
       }
 
       function syncEngineMenuUi() {
@@ -1820,6 +1876,22 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         );
         engineMenu.querySelectorAll("[data-engine]").forEach((button) => {
           const id = button.getAttribute("data-engine");
+          button.setAttribute("aria-selected", id === selected ? "true" : "false");
+        });
+      }
+
+      function syncBibToolMenuUi() {
+        if (!UndertwigEngines || !bibToolButton || !bibToolMenu) {
+          return;
+        }
+        const selected = UndertwigEngines.getSelectedBibTool();
+        bibToolButton.textContent = UndertwigEngines.getSelectedBibToolLabel();
+        bibToolButton.setAttribute(
+          "aria-label",
+          "Bibliography tool: " + UndertwigEngines.getSelectedBibToolLabel()
+        );
+        bibToolMenu.querySelectorAll("[data-bib]").forEach((button) => {
+          const id = button.getAttribute("data-bib");
           button.setAttribute("aria-selected", id === selected ? "true" : "false");
         });
       }
@@ -2237,6 +2309,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       folderInput.addEventListener("change", () => handleUpload(folderInput.files, true));
       projectFolderInput.addEventListener("change", () => handleImportNewProject(projectFolderInput.files));
       convertButton.addEventListener("click", compileProject);
+      bibliographyButton.addEventListener("click", runProjectBibliography);
 
       latexEngineButton.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -2262,7 +2335,32 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         setStatus("LaTeX engine set to " + UndertwigEngines.getSelectedEngineLabel() + ".");
       });
 
+      bibToolButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const open = !bibToolMenu.classList.contains("hidden");
+        closeHoverBoxes();
+        if (open) {
+          return;
+        }
+        bibToolMenu.classList.remove("hidden");
+        bibToolButton.setAttribute("aria-expanded", "true");
+      });
+
+      bibToolMenu.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const option = event.target.closest("[data-bib]");
+        if (!option) {
+          return;
+        }
+        const id = option.getAttribute("data-bib");
+        UndertwigEngines.setSelectedBibTool(id);
+        syncBibToolMenuUi();
+        closeBibToolMenu();
+        setStatus("Bibliography tool set to " + UndertwigEngines.getSelectedBibToolLabel() + ".");
+      });
+
       syncEngineMenuUi();
+      syncBibToolMenuUi();
 
       editor.addEventListener("input", () => {
         const file = state.files[state.activeFile];
@@ -3999,13 +4097,11 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         return message || "unknown read error";
       }
 
-      async function compileProject() {
+      function collectActiveProjectFiles() {
         const project = getActiveProjectName();
         if (!project) {
-          setStatus("Set a current project before converting.", true);
-          return;
+          return { project: null, projectFiles: null };
         }
-
         const prefix = project + "/";
         const projectFiles = {};
         Object.entries(state.files).forEach(([path, file]) => {
@@ -4013,6 +4109,41 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             projectFiles[path.slice(prefix.length)] = file;
           }
         });
+        return { project, prefix, projectFiles };
+      }
+
+      function writeProjectOutputs(prefix, outputs) {
+        if (!outputs || typeof outputs !== "object") {
+          return 0;
+        }
+        let written = 0;
+        Object.entries(outputs).forEach(([relPath, contents]) => {
+          const path = normalizePath(prefix + String(relPath).replace(/^\/+/, ""));
+          if (!path || contents == null) {
+            return;
+          }
+          const name = path.split("/").pop();
+          ensureFoldersForPath(path);
+          state.files[path] = {
+            name,
+            content: String(contents),
+            binary: false,
+          };
+          written += 1;
+        });
+        if (written > 0) {
+          persistProject();
+          render();
+        }
+        return written;
+      }
+
+      async function compileProject() {
+        const { project, projectFiles } = collectActiveProjectFiles();
+        if (!project) {
+          setStatus("Set a current project before converting.", true);
+          return;
+        }
 
         if (!projectFiles["main.tex"]) {
           setStatus("Create a main.tex file in this project before converting.", true);
@@ -4021,6 +4152,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
         const engineLabel = UndertwigEngines.getSelectedEngineLabel();
         convertButton.disabled = true;
+        bibliographyButton.disabled = true;
         convertButton.setAttribute("aria-busy", "true");
         startConvertSpinner();
         setStatus("Loading " + engineLabel + "…");
@@ -4067,7 +4199,66 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           setStatus(`Conversion failed: ${error && error.message ? error.message : error}`, true);
         } finally {
           convertButton.disabled = false;
+          bibliographyButton.disabled = false;
           convertButton.removeAttribute("aria-busy");
+          stopConvertSpinner();
+        }
+      }
+
+      async function runProjectBibliography() {
+        const { project, prefix, projectFiles } = collectActiveProjectFiles();
+        if (!project) {
+          setStatus("Set a current project before running bibliography.", true);
+          return;
+        }
+        if (!projectFiles["main.tex"]) {
+          setStatus("Create a main.tex file in this project before running bibliography.", true);
+          return;
+        }
+
+        const toolLabel = UndertwigEngines.getSelectedBibToolLabel();
+        convertButton.disabled = true;
+        bibliographyButton.disabled = true;
+        bibliographyButton.setAttribute("aria-busy", "true");
+        startConvertSpinner();
+        setStatus("Running " + toolLabel + "…");
+        compileLog.textContent = "";
+        logPanel.classList.add("hidden");
+
+        try {
+          const result = await UndertwigEngines.runBibliography(projectFiles, {
+            onProgress: function (message) {
+              setStatus(message || "Running " + toolLabel + "…");
+            },
+          });
+
+          compileLog.textContent = (result && result.log) || "No bibliography log returned.";
+          logPanel.classList.remove("hidden");
+
+          const written = writeProjectOutputs(prefix, result && result.outputs);
+          if (!result || !result.ok) {
+            setLogCollapsed(false);
+            setStatus(
+              toolLabel + " failed. Check the log below the preview.",
+              true
+            );
+            return;
+          }
+
+          setStatus(
+            toolLabel +
+              " finished" +
+              (written ? " and wrote " + written + " file(s) into the project." : ".")
+          );
+        } catch (error) {
+          setStatus(
+            `Bibliography failed: ${error && error.message ? error.message : error}`,
+            true
+          );
+        } finally {
+          convertButton.disabled = false;
+          bibliographyButton.disabled = false;
+          bibliographyButton.removeAttribute("aria-busy");
           stopConvertSpinner();
         }
       }

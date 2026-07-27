@@ -1,1 +1,119 @@
-importScripts("busytex_pipeline.js"),self.pipeline=null,onmessage=async({data:{files:e,main_tex_path:t,bibtex:i,makeindex:s,rerun:a,busytex_wasm:l,busytex_js:n,preload_data_packages_js:p,data_packages_js:r,texmf_local:o,preload:c,verbose:_,driver:g,remote_endpoint:d,shell_escape:f,load_shell_handler_script:x,read_project_files:m,write_texlive_remote_files:h,write_texlive_remote_misses:k}})=>{if(l&&n&&p)try{self.pipeline=new BusytexPipeline(n,l,r,p,o,e=>postMessage({print:e}),e=>postMessage({initialized:e}),c,BusytexPipeline.ScriptLoaderWorker)}catch(e){postMessage({exception:"Exception during initialization: "+e.toString()+"\nStack:\n"+e.stack})}else if(x)try{importScripts(x),self.handler_ready&&await self.handler_ready,postMessage({shell_handler_script_loaded:x})}catch(e){postMessage({exception:"Exception loading shell handler script: "+e.toString()+"\nStack:\n"+e.stack})}else if(m&&self.pipeline)try{postMessage({project_files:await self.pipeline.read_project_files(m.dir||null)})}catch(e){postMessage({exception:"Exception reading project files: "+e.toString()+"\nStack:\n"+e.stack})}else if(h&&self.pipeline)try{await self.pipeline.write_texlive_remote_files(h),postMessage({texlive_remote_written:!0})}catch(e){postMessage({exception:"Exception writing remote files: "+e.toString()+"\nStack:\n"+e.stack})}else if(k&&self.pipeline)try{await self.pipeline.write_texlive_remote_misses(k),postMessage({texlive_remote_misses_written:!0})}catch(e){postMessage({exception:"Exception writing remote misses: "+e.toString()+"\nStack:\n"+e.stack})}else if(e&&self.pipeline)try{postMessage(await self.pipeline.compile(e,t,i,s,a,_,g,r,d,!0===f))}catch(e){postMessage({exception:"Exception during compilation: "+e.toString()+"\nStack:\n"+e.stack})}};
+importScripts("busytex_pipeline.js");
+importScripts("busytex_bibtool.js");
+
+self.pipeline = null;
+
+onmessage = async ({ data }) => {
+  const {
+    files,
+    main_tex_path,
+    bibtex,
+    makeindex,
+    rerun,
+    busytex_wasm,
+    busytex_js,
+    preload_data_packages_js,
+    data_packages_js,
+    texmf_local,
+    preload,
+    verbose,
+    driver,
+    remote_endpoint,
+    shell_escape,
+    load_shell_handler_script,
+    read_project_files,
+    write_texlive_remote_files,
+    write_texlive_remote_misses,
+    run_bibtool,
+    bib_tool,
+    main_job_path,
+  } = data || {};
+
+  try {
+    if (busytex_wasm && busytex_js && preload_data_packages_js) {
+      self.pipeline = new BusytexPipeline(
+        busytex_js,
+        busytex_wasm,
+        data_packages_js,
+        preload_data_packages_js,
+        texmf_local,
+        (message) => postMessage({ print: message }),
+        (info) => postMessage({ initialized: info }),
+        preload,
+        BusytexPipeline.ScriptLoaderWorker
+      );
+      return;
+    }
+
+    if (load_shell_handler_script) {
+      importScripts(load_shell_handler_script);
+      if (self.handler_ready) {
+        await self.handler_ready;
+      }
+      postMessage({ shell_handler_script_loaded: load_shell_handler_script });
+      return;
+    }
+
+    if (!self.pipeline) {
+      throw new Error("BusyTeX pipeline is not initialized.");
+    }
+
+    if (read_project_files) {
+      postMessage({
+        project_files: await self.pipeline.read_project_files(
+          read_project_files.dir || null
+        ),
+      });
+      return;
+    }
+
+    if (write_texlive_remote_files) {
+      await self.pipeline.write_texlive_remote_files(write_texlive_remote_files);
+      postMessage({ texlive_remote_written: true });
+      return;
+    }
+
+    if (write_texlive_remote_misses) {
+      await self.pipeline.write_texlive_remote_misses(write_texlive_remote_misses);
+      postMessage({ texlive_remote_misses_written: true });
+      return;
+    }
+
+    if (run_bibtool) {
+      postMessage(
+        await self.pipeline.runBibTool(
+          files || [],
+          main_job_path || main_tex_path || "main.tex",
+          bib_tool || "bibtex"
+        )
+      );
+      return;
+    }
+
+    if (files) {
+      postMessage(
+        await self.pipeline.compile(
+          files,
+          main_tex_path,
+          bibtex,
+          makeindex,
+          rerun,
+          verbose,
+          driver,
+          data_packages_js,
+          remote_endpoint,
+          shell_escape === true
+        )
+      );
+      return;
+    }
+  } catch (error) {
+    postMessage({
+      exception:
+        "Exception: " +
+        error.toString() +
+        "\nStack:\n" +
+        (error && error.stack ? error.stack : ""),
+    });
+  }
+};

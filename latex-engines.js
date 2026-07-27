@@ -1,10 +1,17 @@
 (function (global) {
   const ENGINE_STORAGE_KEY = "undertwig-latex-engine-v1";
+  const BIB_STORAGE_KEY = "undertwig-bib-tool-v1";
   const PDF = "pdflatex";
   const LUA = "lualatex";
+  const BIBTEX = "bibtex";
+  const BIBER = "biber";
   const LABELS = {
     pdflatex: "pdfLaTeX",
     lualatex: "LuaLaTeX",
+  };
+  const BIB_LABELS = {
+    bibtex: "BibTeX",
+    biber: "Biber",
   };
   // Same-origin patched BusyTeX core (1 GiB WASM heap). TeX Live data stays on TeXlyre CDN.
   const BUSYTEX_CORE = new URL("vendor/busytex/", global.location.href).href.replace(
@@ -13,7 +20,7 @@
   );
   const BUSYTEX_TEXLIVE =
     "https://texlyre.github.io/texlyre-busytex/core/busytex";
-  const BUSYTEX_WORKER = "vendor/busytex/busytex_worker.js";
+  const BUSYTEX_WORKER = "vendor/busytex/busytex_worker.js?v=20260728ae";
   // BusyTeX kpse_remote expects GET /<format_id>/<filename> (not the pdftex/ prefix).
   const TEXLIVE_REMOTE = "https://texlive2026.texlyre.org/";
   const TEXLIVE_TEX_FORMAT = 26;
@@ -155,6 +162,7 @@
     /\\(setmainfont|setsansfont|setmonofont)(?:\s*\[[^\]]*\])?\s*\{(Libertinus(?: Serif| Sans| Mono|Serif|Sans|Mono)?)\}(?:\s*\[[^\]]*\])?/g;
 
   let selectedEngine = readStoredEngine();
+  let selectedBibTool = readStoredBibTool();
   let luaWorker = null;
   let luaReady = false;
   let luaInitPromise = null;
@@ -209,6 +217,48 @@
     return [
       { id: PDF, label: LABELS.pdflatex },
       { id: LUA, label: LABELS.lualatex },
+    ];
+  }
+
+  function readStoredBibTool() {
+    try {
+      const value = String(localStorage.getItem(BIB_STORAGE_KEY) || "").trim();
+      if (value === BIBER || value === BIBTEX) {
+        return value;
+      }
+    } catch (_error) {
+      // Ignore.
+    }
+    return BIBTEX;
+  }
+
+  function persistBibTool(id) {
+    try {
+      localStorage.setItem(BIB_STORAGE_KEY, id);
+    } catch (_error) {
+      // Ignore.
+    }
+  }
+
+  function getSelectedBibTool() {
+    return selectedBibTool;
+  }
+
+  function getSelectedBibToolLabel() {
+    return BIB_LABELS[selectedBibTool] || BIB_LABELS.bibtex;
+  }
+
+  function setSelectedBibTool(id) {
+    const next = id === BIBER ? BIBER : BIBTEX;
+    selectedBibTool = next;
+    persistBibTool(selectedBibTool);
+    return selectedBibTool;
+  }
+
+  function listBibTools() {
+    return [
+      { id: BIBTEX, label: BIB_LABELS.bibtex },
+      { id: BIBER, label: BIB_LABELS.biber },
     ];
   }
 
@@ -739,7 +789,9 @@
           luaWorker.postMessage({
             files: files,
             main_tex_path: "main.tex",
-            bibtex: false,
+            // Auto-run bibtex8 only when the toolbar bibliography tool is BibTeX.
+            // Biber documents must use the Bibliography button / a prebuilt .bbl.
+            bibtex: selectedBibTool === BIBTEX,
             makeindex: null,
             rerun: true,
             verbose: "silent",
@@ -759,15 +811,111 @@
     return compileWithPdfLaTeX(projectFiles, options || {});
   }
 
+  function runBibliography(projectFiles, options) {
+    const notify = options && options.onProgress ? options.onProgress : function () {};
+    const tool = selectedBibTool;
+    const toolLabel = getSelectedBibToolLabel();
+
+    if (tool === BIBER) {
+      notify("Biber is not available in the browser…");
+      return Promise.resolve({
+        ok: false,
+        tool: BIBER,
+        label: toolLabel,
+        log:
+          "Biber is not available in the browser WebAssembly toolchain.\n" +
+          "Run `biber main` locally (same folder as main.tex), then Import the resulting main.bbl into this project and Convert again.",
+        outputs: {},
+      });
+    }
+
+    return ensureLuaWorker(function (message) {
+      const text = String(message || "");
+      if (/Preparing|Downloading|complete/i.test(text)) {
+        notify("Downloading LuaLaTeX assets… " + text);
+      } else {
+        notify(text);
+      }
+    })
+      .then(function () {
+        return ensureLuaTexJa(notify);
+      })
+      .then(function () {
+        return ensureLuaLibertinus(notify);
+      })
+      .then(function () {
+        notify("Running " + toolLabel + "…");
+        const files = mergeLuaEngineFiles(projectFiles);
+        return new Promise(function (resolve, reject) {
+          if (!luaWorker) {
+            reject(new Error("LuaLaTeX worker is not ready."));
+            return;
+          }
+
+          const timeout = setTimeout(function () {
+            reject(new Error(toolLabel + " timed out."));
+          }, 300000);
+
+          luaWorker.onmessage = function (event) {
+            const data = event && event.data ? event.data : {};
+            if (data.print && typeof notify === "function") {
+              notify(String(data.print));
+            }
+            if (data.tool || data.outputs || data.log) {
+              clearTimeout(timeout);
+              resolve({
+                ok: Boolean(data.ok),
+                tool: data.tool || tool,
+                label: toolLabel,
+                log: data.log || "No bibliography log returned.",
+                outputs: data.outputs || {},
+                exit_code: data.exit_code,
+              });
+              return;
+            }
+            if (data.exception) {
+              clearTimeout(timeout);
+              reject(new Error(String(data.exception)));
+            }
+          };
+
+          luaWorker.onerror = function (error) {
+            clearTimeout(timeout);
+            reject(
+              new Error(
+                (error && error.message) || toolLabel + " worker failed."
+              )
+            );
+          };
+
+          luaWorker.postMessage({
+            run_bibtool: true,
+            bib_tool: tool,
+            files: files,
+            main_tex_path: "main.tex",
+            main_job_path: "main.tex",
+          });
+        });
+      });
+  }
+
   global.UndertwigEngines = {
     PDF: PDF,
     LUA: LUA,
+    BIBTEX: BIBTEX,
+    BIBER: BIBER,
     LABELS: LABELS,
+    BIB_LABELS: BIB_LABELS,
     getSelectedEngine: getSelectedEngine,
     getSelectedEngineLabel: getSelectedEngineLabel,
     setSelectedEngine: setSelectedEngine,
     listEngines: listEngines,
+    getSelectedBibTool: getSelectedBibTool,
+    getSelectedBibToolLabel: getSelectedBibToolLabel,
+    setSelectedBibTool: setSelectedBibTool,
+    listBibTools: listBibTools,
     compileProjectFiles: compileProjectFiles,
+    runBibliography: runBibliography,
     closeLuaWorker: closeLuaWorker,
   };
 })(window);
