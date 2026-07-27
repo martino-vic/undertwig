@@ -1,4 +1,4 @@
-/* Extends BusytexPipeline with a bibliography-only pass (bibtex8). */
+/* Extends BusytexPipeline with bibliography helpers (bibtex8 + .bcf prep). */
 (function (global) {
   if (typeof BusytexPipeline === "undefined" || !BusytexPipeline.prototype) {
     return;
@@ -11,29 +11,7 @@
     return relativeDir + "/" + name;
   }
 
-  BusytexPipeline.prototype.runBibTool = async function (files, mainTexPath, tool) {
-    const chosen = String(tool || "bibtex").toLowerCase();
-    if (chosen === "biber") {
-      return {
-        ok: false,
-        exit_code: 1,
-        tool: "biber",
-        log:
-          "Biber is not available in the browser WebAssembly toolchain.\n" +
-          "Run `biber main` locally (same folder as main.tex), then Import the resulting main.bbl into this project and Convert again.",
-        outputs: {},
-      };
-    }
-
-    if (!this.Module) {
-      this.Module = this.reload_module_if_needed(
-        true,
-        this.env,
-        this.project_dir,
-        this.preload_data_packages_js
-      );
-    }
-    const Module = await this.Module;
+  BusytexPipeline.prototype._mountProjectFiles = function (Module, files) {
     const FS = Module.FS;
     const PATH = Module.PATH;
 
@@ -60,6 +38,106 @@
         FS.writeFile(absolute, entry.contents);
       }
     }
+  };
+
+  BusytexPipeline.prototype._ensureModule = async function () {
+    if (!this.Module) {
+      this.Module = this.reload_module_if_needed(
+        true,
+        this.env,
+        this.project_dir,
+        this.preload_data_packages_js
+      );
+    }
+    return this.Module;
+  };
+
+  BusytexPipeline.prototype._runOneLuaPass = function (Module, mainFile) {
+    const latexArgs = [
+      "luahblatex",
+      "-synctex=1",
+      "--no-shell-escape",
+      "--interaction=nonstopmode",
+      "--halt-on-error",
+      "--output-format=pdf",
+      "--fmt",
+      this.fmt.luahbtex,
+      "--nosocket",
+      mainFile,
+    ];
+    this.print("$ busytex " + latexArgs.join(" "));
+    const latexResult = Module.callMainWithRedirects(latexArgs, true);
+    this.print("$ echo $?");
+    this.print(String(latexResult.exit_code) + "\n");
+    return latexResult;
+  };
+
+  /**
+   * Ensure <job>.bcf exists (one LuaLaTeX pass if needed) and return it so
+   * the main thread can feed typeward's Biber WASM.
+   */
+  BusytexPipeline.prototype.prepareBiberControlFile = async function (files, mainTexPath) {
+    const Module = await this._ensureModule();
+    const FS = Module.FS;
+    const PATH = Module.PATH;
+
+    this._mountProjectFiles(Module, files);
+
+    const relativeDir = PATH.dirname(mainTexPath || "main.tex");
+    const job = PATH.basename(mainTexPath || "main.tex").replace(/\.tex$/i, "");
+    const mainFile = PATH.basename(mainTexPath || "main.tex");
+    const workDir = PATH.join(this.project_dir, relativeDir === "." ? "" : relativeDir);
+    FS.chdir(workDir || this.project_dir);
+
+    const bcfName = job + ".bcf";
+    const auxName = job + ".aux";
+    let latexLog = "";
+
+    if (!FS.analyzePath(bcfName).exists) {
+      this.print("$ # missing " + bcfName + ", running one LuaLaTeX pass first");
+      const latexResult = this._runOneLuaPass(Module, mainFile);
+      latexLog = [latexResult.stdout || "", latexResult.stderr || ""].join("\n");
+    }
+
+    const outputs = {};
+    if (FS.analyzePath(bcfName).exists) {
+      outputs[projectRel(relativeDir, bcfName)] = this.read_all_text(FS, bcfName);
+    }
+    if (FS.analyzePath(auxName).exists) {
+      outputs[projectRel(relativeDir, auxName)] = this.read_all_text(FS, auxName);
+    }
+
+    const hasBcf = Object.keys(outputs).some(function (key) {
+      return key.endsWith(".bcf");
+    });
+
+    return {
+      ok: hasBcf,
+      exit_code: hasBcf ? 0 : 1,
+      tool: "prepare_bcf",
+      log: hasBcf
+        ? "$ prepared " + bcfName + " for biber\n" + latexLog
+        : "Could not create " +
+          bcfName +
+          ".\n" +
+          "Convert once with a biblatex document, then run Bibliography (Biber).\n\n" +
+          latexLog,
+      outputs: outputs,
+    };
+  };
+
+  BusytexPipeline.prototype.runBibTool = async function (files, mainTexPath, tool) {
+    const chosen = String(tool || "bibtex").toLowerCase();
+    if (chosen === "biber") {
+      // Biber runs on the main thread via typeward's WASM; BusyTeX only prepares .bcf.
+      return this.prepareBiberControlFile(files, mainTexPath);
+    }
+
+    const Module = await this._ensureModule();
+    const FS = Module.FS;
+    const PATH = Module.PATH;
+
+    this._mountProjectFiles(Module, files);
 
     const relativeDir = PATH.dirname(mainTexPath || "main.tex");
     const job = PATH.basename(mainTexPath || "main.tex").replace(/\.tex$/i, "");
@@ -70,22 +148,7 @@
     const auxName = job + ".aux";
     if (!FS.analyzePath(auxName).exists) {
       this.print("$ # missing " + auxName + ", running one LuaLaTeX pass first");
-      const latexArgs = [
-        "luahblatex",
-        "-synctex=1",
-        "--no-shell-escape",
-        "--interaction=nonstopmode",
-        "--halt-on-error",
-        "--output-format=pdf",
-        "--fmt",
-        this.fmt.luahbtex,
-        "--nosocket",
-        mainFile,
-      ];
-      this.print("$ busytex " + latexArgs.join(" "));
-      const latexResult = Module.callMainWithRedirects(latexArgs, true);
-      this.print("$ echo $?");
-      this.print(String(latexResult.exit_code) + "\n");
+      const latexResult = this._runOneLuaPass(Module, mainFile);
       if (!FS.analyzePath(auxName).exists) {
         return {
           ok: false,

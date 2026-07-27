@@ -20,7 +20,7 @@
   );
   const BUSYTEX_TEXLIVE =
     "https://texlyre.github.io/texlyre-busytex/core/busytex";
-  const BUSYTEX_WORKER = "vendor/busytex/busytex_worker.js?v=20260728ae";
+  const BUSYTEX_WORKER = "vendor/busytex/busytex_worker.js?v=20260728af";
   // BusyTeX kpse_remote expects GET /<format_id>/<filename> (not the pdftex/ prefix).
   const TEXLIVE_REMOTE = "https://texlive2026.texlyre.org/";
   const TEXLIVE_TEX_FORMAT = 26;
@@ -811,23 +811,108 @@
     return compileWithPdfLaTeX(projectFiles, options || {});
   }
 
+  function postBibToolToWorker(files, tool, notify) {
+    return new Promise(function (resolve, reject) {
+      if (!luaWorker) {
+        reject(new Error("LuaLaTeX worker is not ready."));
+        return;
+      }
+
+      const timeout = setTimeout(function () {
+        reject(new Error("Bibliography helper timed out."));
+      }, 300000);
+
+      luaWorker.onmessage = function (event) {
+        const data = event && event.data ? event.data : {};
+        if (data.print && typeof notify === "function") {
+          notify(String(data.print));
+        }
+        if (data.tool || data.outputs || data.log) {
+          clearTimeout(timeout);
+          resolve(data);
+          return;
+        }
+        if (data.exception) {
+          clearTimeout(timeout);
+          reject(new Error(String(data.exception)));
+        }
+      };
+
+      luaWorker.onerror = function (error) {
+        clearTimeout(timeout);
+        reject(
+          new Error((error && error.message) || "Bibliography worker failed.")
+        );
+      };
+
+      luaWorker.postMessage({
+        run_bibtool: true,
+        bib_tool: tool,
+        files: files,
+        main_tex_path: "main.tex",
+        main_job_path: "main.tex",
+      });
+    });
+  }
+
+  function projectFilesToTypeward(projectFiles) {
+    return Object.keys(projectFiles || {})
+      .sort()
+      .filter(function (path) {
+        const file = projectFiles[path];
+        if (file && file.binary) {
+          return false;
+        }
+        return /\.(bcf|bib|tex|aux|blg|bbl)$/i.test(path);
+      })
+      .map(function (path) {
+        const file = projectFiles[path];
+        return {
+          path: path,
+          content: file && file.content != null ? String(file.content) : "",
+        };
+      });
+  }
+
+  function mergePreparedOutputs(projectFiles, outputs) {
+    const next = Object.assign({}, projectFiles || {});
+    Object.keys(outputs || {}).forEach(function (relPath) {
+      const key = String(relPath).replace(/^\/+/, "");
+      if (!key || outputs[relPath] == null) {
+        return;
+      }
+      next[key] = {
+        name: key.split("/").pop(),
+        content: String(outputs[relPath]),
+        binary: false,
+      };
+    });
+    return next;
+  }
+
+  function runTypewardBiber(projectFiles, notify) {
+    notify("Loading Biber WASM (typeward)…");
+    const moduleUrl = new URL(
+      "vendor/texlive-wasm/run-biber.js?v=20260728af",
+      global.location.href
+    ).href;
+    return import(moduleUrl).then(function (mod) {
+      if (!mod || typeof mod.runBiber !== "function") {
+        throw new Error("Biber WASM module failed to load.");
+      }
+      notify("Running Biber…");
+      return mod.runBiber({
+        jobname: "main",
+        files: projectFilesToTypeward(projectFiles),
+        timeoutMs: 300000,
+      });
+    });
+  }
+
   function runBibliography(projectFiles, options) {
     const notify = options && options.onProgress ? options.onProgress : function () {};
     const tool = selectedBibTool;
     const toolLabel = getSelectedBibToolLabel();
-
-    if (tool === BIBER) {
-      notify("Biber is not available in the browser…");
-      return Promise.resolve({
-        ok: false,
-        tool: BIBER,
-        label: toolLabel,
-        log:
-          "Biber is not available in the browser WebAssembly toolchain.\n" +
-          "Run `biber main` locally (same folder as main.tex), then Import the resulting main.bbl into this project and Convert again.",
-        outputs: {},
-      });
-    }
 
     return ensureLuaWorker(function (message) {
       const text = String(message || "");
@@ -844,56 +929,51 @@
         return ensureLuaLibertinus(notify);
       })
       .then(function () {
-        notify("Running " + toolLabel + "…");
         const files = mergeLuaEngineFiles(projectFiles);
-        return new Promise(function (resolve, reject) {
-          if (!luaWorker) {
-            reject(new Error("LuaLaTeX worker is not ready."));
-            return;
+        if (tool !== BIBER) {
+          notify("Running " + toolLabel + "…");
+          return postBibToolToWorker(files, tool, notify).then(function (data) {
+            return {
+              ok: Boolean(data.ok),
+              tool: data.tool || tool,
+              label: toolLabel,
+              log: data.log || "No bibliography log returned.",
+              outputs: data.outputs || {},
+              exit_code: data.exit_code,
+            };
+          });
+        }
+
+        notify("Preparing Biber control file (.bcf)…");
+        return postBibToolToWorker(files, BIBER, notify).then(function (prep) {
+          const preparedFiles = mergePreparedOutputs(projectFiles, prep && prep.outputs);
+          const hasBcf = Object.keys(preparedFiles).some(function (path) {
+            return /(^|\/)main\.bcf$/i.test(path) || /\.bcf$/i.test(path);
+          });
+          if (!hasBcf) {
+            return {
+              ok: false,
+              tool: BIBER,
+              label: toolLabel,
+              log: (prep && prep.log) || "Missing main.bcf for Biber.",
+              outputs: (prep && prep.outputs) || {},
+              exit_code: 1,
+            };
           }
 
-          const timeout = setTimeout(function () {
-            reject(new Error(toolLabel + " timed out."));
-          }, 300000);
-
-          luaWorker.onmessage = function (event) {
-            const data = event && event.data ? event.data : {};
-            if (data.print && typeof notify === "function") {
-              notify(String(data.print));
-            }
-            if (data.tool || data.outputs || data.log) {
-              clearTimeout(timeout);
-              resolve({
-                ok: Boolean(data.ok),
-                tool: data.tool || tool,
-                label: toolLabel,
-                log: data.log || "No bibliography log returned.",
-                outputs: data.outputs || {},
-                exit_code: data.exit_code,
-              });
-              return;
-            }
-            if (data.exception) {
-              clearTimeout(timeout);
-              reject(new Error(String(data.exception)));
-            }
-          };
-
-          luaWorker.onerror = function (error) {
-            clearTimeout(timeout);
-            reject(
-              new Error(
-                (error && error.message) || toolLabel + " worker failed."
-              )
-            );
-          };
-
-          luaWorker.postMessage({
-            run_bibtool: true,
-            bib_tool: tool,
-            files: files,
-            main_tex_path: "main.tex",
-            main_job_path: "main.tex",
+          return runTypewardBiber(preparedFiles, notify).then(function (result) {
+            const outputs = Object.assign({}, (prep && prep.outputs) || {}, result.outputs || {});
+            return {
+              ok: Boolean(result.ok),
+              tool: BIBER,
+              label: toolLabel,
+              log:
+                ((prep && prep.log) || "") +
+                "\n\n" +
+                ((result && result.log) || "No Biber log returned."),
+              outputs: outputs,
+              exit_code: result.exit_code,
+            };
           });
         });
       });

@@ -1,0 +1,6 @@
+{
+  "name": "undertwig-vendored-texlive-wasm-biber",
+  "private": true,
+  "type": "module",
+  "description": "Vendored typeward Biber WASM + JS wrapper for Undertwig"
+}
