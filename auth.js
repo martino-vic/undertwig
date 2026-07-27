@@ -8,6 +8,25 @@
   const DRIVE_TOKEN_STORAGE_KEY = "undertwig-drive-token-v1";
   const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
   const LOGIN_SCOPES = "openid email profile " + DRIVE_FILE_SCOPE;
+
+  function scopeIncludesDriveFile(scope) {
+    const parts = String(scope || "")
+      .replace(/\+/g, " ")
+      .split(/\s+/)
+      .filter(Boolean);
+    for (let i = 0; i < parts.length; i += 1) {
+      let part = parts[i];
+      try {
+        part = decodeURIComponent(part);
+      } catch (_error) {
+        // Keep raw part.
+      }
+      if (part === DRIVE_FILE_SCOPE) {
+        return true;
+      }
+    }
+    return false;
+  }
   const GOOGLE_ISSUERS = new Set([
     "https://accounts.google.com",
     "accounts.google.com",
@@ -565,9 +584,13 @@
     }
   }
 
-  function rememberDriveAccessToken(accessToken, expiresIn) {
+  function rememberDriveAccessToken(accessToken, expiresIn, scope) {
     if (!accessToken) {
-      return;
+      return false;
+    }
+    // Reject tokens that only have openid/profile or legacy drive.appdata — saves need drive.file.
+    if (scope != null && String(scope).trim() !== "" && !scopeIncludesDriveFile(scope)) {
+      return false;
     }
     const expiresAt = Date.now() + (Number(expiresIn) || 3600) * 1000;
     try {
@@ -576,6 +599,7 @@
         JSON.stringify({
           accessToken: String(accessToken),
           expiresAt: expiresAt,
+          scope: scope ? String(scope) : undefined,
         })
       );
     } catch (_error) {
@@ -586,11 +610,13 @@
         global.UndertwigCloud.acceptTokenResponse({
           access_token: String(accessToken),
           expires_in: Number(expiresIn) || 3600,
+          scope: scope || undefined,
         });
       } catch (_error) {
         // Ignore when cloud helpers are not on this page.
       }
     }
+    return true;
   }
 
   function readOAuthResponseParams() {
@@ -685,7 +711,13 @@
       if (!session) {
         throw new Error("Sign in again, then connect Google Drive.");
       }
-      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn);
+      if (!rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn, oauth.scope)) {
+        throw new Error(
+          "Google did not grant Drive file access. In Google Cloud Console → Data Access, add scope " +
+            DRIVE_FILE_SCOPE +
+            ", then click Retry and allow Drive access."
+        );
+      }
       return { session: session, nextPath: nextPath };
     }
 
@@ -698,7 +730,7 @@
 
     const session = await loginWithCredential(oauth.idToken);
     if (oauth.accessToken) {
-      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn);
+      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn, oauth.scope);
     }
     return { session: session, nextPath: nextPath };
   }

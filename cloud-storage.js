@@ -18,6 +18,7 @@
 
   let memoryAccessToken = null;
   let memoryTokenExpiresAt = 0;
+  let memoryTokenScope = null;
   let cachedUndertwigFolderId = null;
   let cachedActiveFolderId = null;
   let cachedRole = null;
@@ -73,21 +74,28 @@
         sessionStorage.removeItem(TOKEN_STORAGE_KEY);
         return null;
       }
+      // Drop legacy tokens that only recorded openid/appdata (no drive.file).
+      if (data.scope != null && String(data.scope).trim() !== "" && !scopeIncludesDriveFile(data.scope)) {
+        sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+        return null;
+      }
       return {
         accessToken: String(data.accessToken),
         expiresAt: Number(data.expiresAt),
+        scope: data.scope ? String(data.scope) : null,
       };
     } catch (_error) {
       return null;
     }
   }
 
-  function writeStoredToken(accessToken, expiresAt) {
+  function writeStoredToken(accessToken, expiresAt, scope) {
     try {
-      sessionStorage.setItem(
-        TOKEN_STORAGE_KEY,
-        JSON.stringify({ accessToken: accessToken, expiresAt: expiresAt })
-      );
+      const payload = { accessToken: accessToken, expiresAt: expiresAt };
+      if (scope) {
+        payload.scope = String(scope);
+      }
+      sessionStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(payload));
     } catch (_error) {
       // Ignore.
     }
@@ -148,9 +156,35 @@
     return cachedRole === "writer" || cachedRole === "reader";
   }
 
+  function scopeIncludesDriveFile(scope) {
+    const parts = String(scope || "")
+      .replace(/\+/g, " ")
+      .split(/\s+/)
+      .filter(Boolean);
+    for (let i = 0; i < parts.length; i += 1) {
+      let part = parts[i];
+      try {
+        part = decodeURIComponent(part);
+      } catch (_error) {
+        // Keep raw part.
+      }
+      if (part === DRIVE_SCOPE) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function isInsufficientScopeMessage(message) {
+    return /insufficient (authentication )?scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions/i.test(
+      String(message || "")
+    );
+  }
+
   function forgetAccessToken() {
     memoryAccessToken = null;
     memoryTokenExpiresAt = 0;
+    memoryTokenScope = null;
     try {
       sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     } catch (_error) {
@@ -186,14 +220,26 @@
     }
     memoryAccessToken = stored.accessToken;
     memoryTokenExpiresAt = stored.expiresAt;
+    memoryTokenScope = stored.scope || null;
     return true;
   }
 
   function rememberToken(tokenResponse) {
+    if (
+      tokenResponse.scope != null &&
+      String(tokenResponse.scope).trim() !== "" &&
+      !scopeIncludesDriveFile(tokenResponse.scope)
+    ) {
+      forgetAccessToken();
+      throw new Error(
+        "Google did not grant Drive file access (drive.file). Click Retry and allow access to Google Drive files created by Undertwig."
+      );
+    }
     memoryAccessToken = tokenResponse.access_token;
     const expiresIn = Number(tokenResponse.expires_in) || 3600;
     memoryTokenExpiresAt = Date.now() + expiresIn * 1000;
-    writeStoredToken(memoryAccessToken, memoryTokenExpiresAt);
+    memoryTokenScope = tokenResponse.scope ? String(tokenResponse.scope) : memoryTokenScope;
+    writeStoredToken(memoryAccessToken, memoryTokenExpiresAt, memoryTokenScope);
     return memoryAccessToken;
   }
 
@@ -439,6 +485,17 @@
       await getAccessToken({ forcePrompt: false, timeoutMs: SILENT_TOKEN_TIMEOUT_MS });
       return driveFetch(url, init, true);
     }
+
+    if (response.status === 403) {
+      const detail = await readDriveError(response.clone(), "Google Drive permission denied.");
+      if (isInsufficientScopeMessage(detail)) {
+        forgetAccessToken();
+        throw new Error(
+          "Request had insufficient authentication scopes. Undertwig needs Google Drive file access. Click Retry to grant it again."
+        );
+      }
+    }
+
     return response;
   }
 
@@ -1297,7 +1354,7 @@
   }
 
   /**
-   * Fast reachability check using the stored Drive token only (no GIS, no folder setup).
+   * Confirm the stored token includes drive.file (not only openid / legacy appdata).
    * Always settles within 5 seconds.
    */
   async function verifyDriveAccess() {
@@ -1305,18 +1362,23 @@
       return { ok: false, reason: "no-token", fileId: null };
     }
 
+    if (memoryTokenScope && !scopeIncludesDriveFile(memoryTokenScope)) {
+      forgetAccessToken();
+      return { ok: false, reason: "missing-scope", fileId: null };
+    }
+
     const token = memoryAccessToken;
     const fileId = getProjectFolderId() || cachedUndertwigFolderId || null;
 
     try {
       const response = await Promise.race([
-        fetch(DRIVE_API + "/about?fields=user", {
-          method: "GET",
-          credentials: "omit",
-          headers: {
-            Authorization: "Bearer " + token,
-          },
-        }),
+        fetch(
+          "https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=" + encodeURIComponent(token),
+          {
+            method: "GET",
+            credentials: "omit",
+          }
+        ),
         new Promise(function (_, reject) {
           setTimeout(function () {
             const error = new Error("timeout");
@@ -1326,14 +1388,23 @@
         }),
       ]);
 
-      if (response.status === 401 || response.status === 403) {
-        forgetAccessToken();
-        return { ok: false, reason: "unauthorized", fileId: null };
-      }
       if (!response.ok) {
+        if (response.status === 400 || response.status === 401) {
+          forgetAccessToken();
+          return { ok: false, reason: "unauthorized", fileId: null };
+        }
         return { ok: false, reason: "http-" + response.status, fileId: null };
       }
 
+      const payload = await response.json();
+      const scope = payload && payload.scope;
+      if (!scopeIncludesDriveFile(scope)) {
+        forgetAccessToken();
+        return { ok: false, reason: "missing-scope", fileId: null };
+      }
+
+      memoryTokenScope = String(scope);
+      writeStoredToken(memoryAccessToken, memoryTokenExpiresAt, memoryTokenScope);
       writeRole(cachedRole || "owner");
       return { ok: true, reason: "ok", fileId: fileId };
     } catch (error) {

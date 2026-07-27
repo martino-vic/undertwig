@@ -911,10 +911,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727r"></script>
-    <script src="auth.js?v=20260727r"></script>
-    <script src="cloud-storage.js?v=20260727r"></script>
-    <script src="invite.js?v=20260727r"></script>
+    <script src="auth-config.js?v=20260727s"></script>
+    <script src="auth.js?v=20260727s"></script>
+    <script src="cloud-storage.js?v=20260727s"></script>
+    <script src="invite.js?v=20260727s"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1342,10 +1342,18 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             setStatusStorageFull();
           }
         } catch (error) {
-          setStatus(
-            (error && error.message) || "Could not save the project.",
-            true
-          );
+          const message = (error && error.message) || "Could not save the project.";
+          if (/insufficient authentication scopes/i.test(message)) {
+            renderCloudStatus("disconnected");
+            setStatus("Drive permission is outdated. Redirecting to Google to grant file access…", true);
+            try {
+              UndertwigAuth.beginGoogleDriveTokenSignIn("/");
+            } catch (_redirectError) {
+              setStatus(message + " Click Retry under the file tree.", true);
+            }
+            return;
+          }
+          setStatus(message, true);
         } finally {
           saveButton.disabled = false;
         }
@@ -1773,6 +1781,14 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             const verify = await UndertwigCloud.verifyDriveAccess();
             if (!verify || !verify.ok) {
               const reason = verify && verify.reason;
+              if (reason === "missing-scope") {
+                renderCloudStatus("disconnected");
+                setStatus(
+                  "Google Drive needs an updated permission (file access). Click Retry to grant it.",
+                  true
+                );
+                return;
+              }
               if (reason === "no-token" || reason === "unauthorized") {
                 renderCloudStatus("disconnected");
                 setStatus("Google Drive permission expired. Click Retry to connect again.", true);
