@@ -178,6 +178,46 @@
         color: #f5fffb;
       }
 
+      .tree-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin: 2px 0;
+      }
+
+      .tree-item .tree-row {
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+      }
+
+      .tree-delete {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        flex: 0 0 auto;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1;
+        opacity: 0;
+      }
+
+      .tree-item:hover .tree-delete,
+      .tree-item:focus-within .tree-delete {
+        opacity: 1;
+      }
+
+      .tree-delete:hover {
+        background: rgba(225, 132, 132, 0.18);
+        color: var(--danger);
+        border-color: transparent;
+      }
+
       .tree-icon {
         width: 18px;
         color: var(--muted);
@@ -619,6 +659,9 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
 
       function renderNode(node, depth) {
         const wrapper = document.createElement("div");
+        const item = document.createElement("div");
+        item.className = "tree-item";
+
         const row = document.createElement("button");
         row.type = "button";
         row.className = `tree-row${state.activeFile === node.path ? " active" : ""}`;
@@ -632,13 +675,44 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
             persistProject();
             render();
           });
+
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "tree-delete";
+          deleteButton.title = `Delete ${node.name}`;
+          deleteButton.setAttribute("aria-label", `Delete ${node.path}`);
+          deleteButton.textContent = "x";
+          deleteButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            deleteFile(node.path);
+          });
+          item.appendChild(row);
+          item.appendChild(deleteButton);
+        } else {
+          item.appendChild(row);
         }
 
-        wrapper.appendChild(row);
+        wrapper.appendChild(item);
         if (node.type === "folder") {
           node.children.forEach((child) => wrapper.appendChild(renderNode(child, depth + 1)));
         }
         return wrapper;
+      }
+
+      function deleteFile(path) {
+        if (!state.files[path]) return;
+        if (!confirm(`Delete ${path}?`)) return;
+
+        delete state.files[path];
+
+        if (state.activeFile === path) {
+          const remaining = Object.keys(state.files).sort();
+          state.activeFile = remaining.includes("main.tex") ? "main.tex" : (remaining[0] || "");
+        }
+
+        persistProject();
+        render();
+        setStatus(`Deleted ${path}.`);
       }
 
       function createFile() {
