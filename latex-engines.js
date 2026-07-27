@@ -125,6 +125,28 @@
       "  UprightFont = LibertinusMono-Regular,\n" +
       "}\n",
   };
+  // Compile-time rewrite: BusyTeX cannot resolve OS font family names.
+  const LIBERTINUS_SETMAIN =
+    "\\setmainfont{LibertinusSerif-Regular.otf}[\n" +
+    "  Path=./,\n" +
+    "  BoldFont=LibertinusSerif-Bold.otf,\n" +
+    "  ItalicFont=LibertinusSerif-Italic.otf,\n" +
+    "  BoldItalicFont=LibertinusSerif-BoldItalic.otf,\n" +
+    "  FontFace={sb}{n}{LibertinusSerif-Semibold.otf},\n" +
+    "  FontFace={sb}{it}{LibertinusSerif-SemiboldItalic.otf}\n" +
+    "]";
+  const LIBERTINUS_SETSANS =
+    "\\setsansfont{LibertinusSans-Regular.otf}[\n" +
+    "  Path=./,\n" +
+    "  BoldFont=LibertinusSans-Bold.otf,\n" +
+    "  ItalicFont=LibertinusSans-Italic.otf\n" +
+    "]";
+  const LIBERTINUS_SETMONO =
+    "\\setmonofont{LibertinusMono-Regular.otf}[\n" +
+    "  Path=./\n" +
+    "]";
+  const LIBERTINUS_FONT_COMMAND =
+    /\\(setmainfont|setsansfont|setmonofont)(?:\s*\[[^\]]*\])?\s*\{(Libertinus(?: Serif| Sans| Mono|Serif|Sans|Mono)?)\}(?:\s*\[[^\]]*\])?/g;
 
   let selectedEngine = readStoredEngine();
   let luaWorker = null;
@@ -401,8 +423,51 @@
     return luaLibertinusPromise;
   }
 
+  function rewriteLibertinusFontCommands(content) {
+    if (typeof content !== "string" || content.indexOf("Libertinus") === -1) {
+      return content;
+    }
+    return content.replace(LIBERTINUS_FONT_COMMAND, function (_match, command, family) {
+      const normalized = String(family || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+      if (command === "setmainfont" && (normalized === "libertinus serif" || normalized === "libertinusserif")) {
+        return LIBERTINUS_SETMAIN;
+      }
+      if (command === "setsansfont" && (normalized === "libertinus sans" || normalized === "libertinussans")) {
+        return LIBERTINUS_SETSANS;
+      }
+      if (command === "setmonofont" && (normalized === "libertinus mono" || normalized === "libertinusmono")) {
+        return LIBERTINUS_SETMONO;
+      }
+      // Fall back: any setmainfont{Libertinus...} → serif files.
+      if (command === "setmainfont" && normalized.indexOf("libertinus") === 0) {
+        return LIBERTINUS_SETMAIN;
+      }
+      if (command === "setsansfont" && normalized.indexOf("libertinus") === 0) {
+        return LIBERTINUS_SETSANS;
+      }
+      if (command === "setmonofont" && normalized.indexOf("libertinus") === 0) {
+        return LIBERTINUS_SETMONO;
+      }
+      return _match;
+    });
+  }
+
   function mergeLuaEngineFiles(projectFiles) {
-    const files = projectFilesToBusyTex(projectFiles);
+    const files = projectFilesToBusyTex(projectFiles).map(function (file) {
+      if (
+        typeof file.contents === "string" &&
+        /\.(tex|cls|sty)$/i.test(file.path || "")
+      ) {
+        return {
+          path: file.path,
+          contents: rewriteLibertinusFontCommands(file.contents),
+        };
+      }
+      return file;
+    });
     const seen = {};
     files.forEach(function (file) {
       seen[file.path] = true;
