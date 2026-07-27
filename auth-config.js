@@ -1,6 +1,6 @@
-// Public OAuth 2.0 Web client ID (safe to expose in a static front-end).
-// Keep the client secret in Google Cloud Console only — never ship it here.
+// Public OAuth 2.0 Web client ID for the undertwig Google Cloud project.
+// Safe to expose in a static front-end. Never ship a client secret here.
 window.UNDERTWIG_AUTH_CONFIG = {
   googleClientId:
-    "1000981997436-tk9pa10vg9b0tgi2893jp1bpdiffeerk.apps.googleusercontent.com",
+    "800443995990-dejumfn1f6254h326ln6d1hr16l017fu.apps.googleusercontent.com",
 };

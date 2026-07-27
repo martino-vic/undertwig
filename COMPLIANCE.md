@@ -26,10 +26,10 @@ Use this checklist before any public release.
 - [x] In-app links expose Privacy, Terms, and Source pages.
 - [x] Privacy Policy and Terms of Use are published for the public site.
 - [x] Privacy and Terms cover Google-only sign-in and collaboration gating.
-- [x] Production Google OAuth client ID is configured in `auth-config.js`.
+- [x] Production Google OAuth client ID is configured in `auth-config.js` (undertwig GCP project).
 - [x] Client-side Google ID token verification (JWKS, nonce, claim checks) is enabled.
 - [ ] Confirm authorized JavaScript origins in Google Cloud include `https://undertwig.com`.
-- [ ] Publish the OAuth consent screen (or keep test users listed) before broad sign-in use.
+- [ ] Keep OAuth consent screen test users listed while status is Testing, or publish when ready.
 - [ ] Revisit Privacy and Terms before adding cloud sync, analytics, or server-side file storage.
 ## Release gate
 
