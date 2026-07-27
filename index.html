@@ -1071,10 +1071,10 @@
       </div>
     </div>
 
-    <script src="auth-config.js?v=20260728i"></script>
-    <script src="auth.js?v=20260728i"></script>
-    <script src="cloud-storage.js?v=20260728i"></script>
-    <script src="invite.js?v=20260728i"></script>
+    <script src="auth-config.js?v=20260728j"></script>
+    <script src="auth.js?v=20260728j"></script>
+    <script src="cloud-storage.js?v=20260728j"></script>
+    <script src="invite.js?v=20260728j"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -3020,7 +3020,6 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           setStatus("Only files in the current project can be deleted.", true);
           return;
         }
-        if (!confirm(`Delete ${path}?`)) return;
 
         delete state.files[path];
 
@@ -3047,7 +3046,6 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         );
 
         if (!nestedFiles.length && !hasFolderEntry) return;
-        if (!confirm(`Delete folder ${path} and everything inside it?`)) return;
 
         nestedFiles.forEach((filePath) => {
           delete state.files[filePath];
