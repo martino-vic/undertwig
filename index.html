@@ -733,6 +733,7 @@
           <button id="uploadFiles" type="button">Upload files</button>
           <button id="uploadFolder" type="button">Upload folder</button>
           <button class="wide" id="downloadZip" type="button">Download ZIP</button>
+          <button class="wide" id="uploadToDrive" type="button">Upload to Google Drive</button>
         </div>
         <div class="tree" id="tree"></div>
         <div class="cloud-status is-logged-out" id="cloudStatus" role="status" aria-live="polite">
@@ -816,10 +817,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727i"></script>
-    <script src="auth.js?v=20260727i"></script>
-    <script src="cloud-storage.js?v=20260727i"></script>
-    <script src="invite.js?v=20260727i"></script>
+    <script src="auth-config.js?v=20260727j"></script>
+    <script src="auth.js?v=20260727j"></script>
+    <script src="cloud-storage.js?v=20260727j"></script>
+    <script src="invite.js?v=20260727j"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1110,6 +1111,55 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
       }
 
+      async function uploadToGoogleDrive() {
+        const button = document.getElementById("uploadToDrive");
+        if (!UndertwigAuth.isLoggedIn()) {
+          setStatus("Log in with Google to upload to Google Drive.", true, {
+            offerCloudLogin: true,
+          });
+          return;
+        }
+
+        const projectName = getActiveProjectName();
+        if (!projectName && !(UndertwigCloud.listRootProjects && UndertwigCloud.listRootProjects(state).length)) {
+          setStatus("Create a project folder before uploading to Google Drive.", true);
+          return;
+        }
+
+        button.disabled = true;
+        try {
+          // Open the permission popup from this click when needed.
+          if (!UndertwigCloud.hasAccessToken()) {
+            setStatus("Allow Google Drive permission if a popup appears…");
+            UndertwigInvite.preload();
+            await UndertwigCloud.connect({ interactive: true });
+          }
+
+          setStatus(
+            projectName
+              ? "Uploading “" + projectName + "” to Google Drive…"
+              : "Uploading projects to Google Drive…"
+          );
+          await UndertwigCloud.saveProject(state, {
+            projectName: projectName || undefined,
+          });
+          renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+          setStatus(
+            projectName
+              ? "Uploaded “" + projectName + "” to Google Drive / Undertwig."
+              : "Uploaded projects to Google Drive / Undertwig."
+          );
+        } catch (error) {
+          renderCloudStatus("disconnected");
+          setStatus(
+            (error && error.message) || "Could not upload to Google Drive.",
+            true
+          );
+        } finally {
+          button.disabled = false;
+        }
+      }
+
       function closeHoverBoxes() {
         collaborateBox.classList.add("hidden");
         accountBox.classList.add("hidden");
@@ -1339,6 +1389,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       document.getElementById("newFolder").addEventListener("click", createFolder);
       document.getElementById("uploadFiles").addEventListener("click", () => fileInput.click());
       document.getElementById("downloadZip").addEventListener("click", downloadProjectZip);
+      document.getElementById("uploadToDrive").addEventListener("click", uploadToGoogleDrive);
       document.getElementById("uploadFolder").addEventListener("click", () => {
         if (!supportsFolderUpload()) {
           setStatus(
