@@ -3,18 +3,788 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Undertwig</title>
+    <title>Undertwig LaTeX Editor</title>
     <style>
+      :root {
+        color-scheme: dark;
+        --bg: #10161d;
+        --panel: #18212b;
+        --panel-soft: #202b36;
+        --panel-strong: #273545;
+        --border: #334455;
+        --text: #e8edf3;
+        --muted: #96a4b3;
+        --brand: #2f8f6b;
+        --brand-strong: #39a57d;
+        --danger: #e18484;
+        --shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
-        display: grid;
         min-height: 100vh;
         margin: 0;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      button,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel-soft);
+        color: var(--text);
+        cursor: pointer;
+        transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+      }
+
+      button:hover {
+        background: var(--panel-strong);
+        border-color: #4b6073;
+      }
+
+      button:active {
+        transform: translateY(1px);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .app {
+        display: grid;
+        grid-template-columns: 286px minmax(360px, 1fr) minmax(360px, 1fr);
+        height: 100vh;
+      }
+
+      .app.explorer-collapsed {
+        grid-template-columns: 48px minmax(360px, 1fr) minmax(360px, 1fr);
+      }
+
+      .sidebar {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        border-right: 1px solid var(--border);
+        background: #121b24;
+      }
+
+      .sidebar-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 54px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .brand {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .brand strong {
+        font-size: 15px;
+        letter-spacing: 0.01em;
+      }
+
+      .brand span {
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .collapse-button {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        flex: 0 0 auto;
         place-items: center;
-        font-family: system-ui, sans-serif;
+        padding: 0;
+      }
+
+      .sidebar-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .sidebar-actions button {
+        min-height: 34px;
+        padding: 0 9px;
+        font-size: 12px;
+      }
+
+      .tree {
+        flex: 1;
+        overflow: auto;
+        padding: 10px 8px 16px;
+      }
+
+      .tree-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        margin: 2px 0;
+        padding: 7px 8px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text);
+        text-align: left;
+      }
+
+      .tree-row:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .tree-row.active {
+        background: rgba(47, 143, 107, 0.2);
+        color: #f5fffb;
+      }
+
+      .tree-icon {
+        width: 18px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .tree-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .collapsed-rail {
+        display: none;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 0;
+        writing-mode: vertical-rl;
+      }
+
+      .app.explorer-collapsed .brand,
+      .app.explorer-collapsed .sidebar-actions,
+      .app.explorer-collapsed .tree {
+        display: none;
+      }
+
+      .app.explorer-collapsed .sidebar-head {
+        justify-content: center;
+        padding: 0;
+      }
+
+      .app.explorer-collapsed .collapsed-rail {
+        display: flex;
+      }
+
+      .workspace,
+      .preview {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        background: var(--panel);
+      }
+
+      .workspace {
+        border-right: 1px solid var(--border);
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 54px;
+        gap: 16px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--border);
+        background: #16202a;
+      }
+
+      .file-title,
+      .preview-title {
+        min-width: 0;
+      }
+
+      .file-title strong,
+      .preview-title strong {
+        display: block;
+        overflow: hidden;
+        font-size: 14px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .file-title span,
+      .preview-title span {
+        display: block;
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .convert-button {
+        min-height: 36px;
+        padding: 0 16px;
+        border-color: transparent;
+        background: var(--brand);
+        font-weight: 700;
+      }
+
+      .convert-button:hover {
+        background: var(--brand-strong);
+        border-color: transparent;
+      }
+
+      .editor-wrap {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+      }
+
+      #editor {
+        width: 100%;
+        height: 100%;
+        resize: none;
+        border: 0;
+        outline: none;
+        padding: 22px 24px;
+        background: #111820;
+        color: #f3f7fb;
+        font: 14px/1.6 "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        tab-size: 2;
+      }
+
+      #editor:disabled {
+        color: var(--muted);
+      }
+
+      .statusbar {
+        min-height: 36px;
+        padding: 8px 16px;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .statusbar.error {
+        color: var(--danger);
+      }
+
+      .viewer {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        background: #0c1117;
+      }
+
+      #pdfFrame {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: #232a31;
+      }
+
+      .empty-preview {
+        position: absolute;
+        inset: 22px;
+        display: grid;
+        place-items: center;
+        border: 1px dashed var(--border);
+        border-radius: 14px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .log {
+        max-height: 132px;
+        overflow: auto;
+        border-top: 1px solid var(--border);
+        background: #0f151c;
+      }
+
+      .log pre {
+        margin: 0;
+        padding: 12px 16px;
+        color: #c7d1dc;
+        font: 12px/1.45 "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        white-space: pre-wrap;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      @media (max-width: 920px) {
+        body {
+          overflow: auto;
+        }
+
+        .app,
+        .app.explorer-collapsed {
+          grid-template-columns: 1fr;
+          grid-template-rows: auto minmax(520px, 70vh) minmax(520px, 70vh);
+          height: auto;
+          min-height: 100vh;
+        }
+
+        .sidebar,
+        .workspace {
+          border-right: 0;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .app.explorer-collapsed .sidebar-actions,
+        .app.explorer-collapsed .tree,
+        .app.explorer-collapsed .brand {
+          display: initial;
+        }
+
+        .app.explorer-collapsed .sidebar-actions {
+          display: grid;
+        }
+
+        .app.explorer-collapsed .tree {
+          display: block;
+        }
+
+        .collapsed-rail {
+          display: none !important;
+        }
       }
     </style>
   </head>
   <body>
-    <main>hi</main>
+    <main class="app" id="app">
+      <aside class="sidebar" aria-label="Project file explorer">
+        <div class="sidebar-head">
+          <div class="brand">
+            <strong>Undertwig</strong>
+            <span>Local LaTeX workspace</span>
+          </div>
+          <button class="collapse-button" id="collapseExplorer" type="button" aria-label="Collapse file explorer">&lt;</button>
+        </div>
+        <div class="collapsed-rail" aria-hidden="true">Files</div>
+        <div class="sidebar-actions">
+          <button id="newFile" type="button">New file</button>
+          <button id="newFolder" type="button">New folder</button>
+          <button id="uploadFiles" type="button">Upload files</button>
+          <button id="uploadFolder" type="button">Upload folder</button>
+        </div>
+        <div class="tree" id="tree"></div>
+      </aside>
+
+      <section class="workspace" aria-label="LaTeX source editor">
+        <div class="topbar">
+          <div class="file-title">
+            <strong id="activeFileName">main.tex</strong>
+            <span id="activeFileMeta">Write LaTeX, then convert locally</span>
+          </div>
+          <button class="convert-button" id="convert" type="button">Convert</button>
+        </div>
+        <div class="editor-wrap">
+          <textarea id="editor" spellcheck="false"></textarea>
+        </div>
+        <div class="statusbar" id="status">Ready. Conversion runs locally in your browser through WebAssembly.</div>
+      </section>
+
+      <section class="preview" aria-label="PDF preview">
+        <div class="topbar">
+          <div class="preview-title">
+            <strong>PDF preview</strong>
+            <span id="previewMeta">No PDF generated yet</span>
+          </div>
+        </div>
+        <div class="viewer">
+          <iframe id="pdfFrame" title="Compiled PDF preview"></iframe>
+          <div class="empty-preview" id="emptyPreview">
+            <div>
+              <strong>Compile to preview</strong>
+              <p>Your PDF will appear here after conversion.</p>
+            </div>
+          </div>
+        </div>
+        <div class="log hidden" id="logPanel">
+          <pre id="compileLog"></pre>
+        </div>
+      </section>
+
+      <input class="hidden" id="fileInput" type="file" multiple>
+      <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
+    </main>
+
+    <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
+    <script>
+      const DEFAULT_TEX = String.raw`\documentclass{article}
+\usepackage{amsmath}
+
+\title{Undertwig Local LaTeX}
+\author{Version One}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Hello}
+This document is compiled locally in your browser with WebAssembly.
+
+\[
+  e^{i\pi} + 1 = 0
+\]
+
+\end{document}
+`;
+
+      const STORAGE_KEY = "undertwig-latex-project-v1";
+      const TEXT_EXTENSIONS = new Set(["tex", "bib", "cls", "sty", "txt", "md", "csv", "json", "log"]);
+      const state = loadProject();
+      let engine = null;
+      let pdfUrl = null;
+
+      const app = document.getElementById("app");
+      const tree = document.getElementById("tree");
+      const editor = document.getElementById("editor");
+      const status = document.getElementById("status");
+      const convertButton = document.getElementById("convert");
+      const activeFileName = document.getElementById("activeFileName");
+      const activeFileMeta = document.getElementById("activeFileMeta");
+      const fileInput = document.getElementById("fileInput");
+      const folderInput = document.getElementById("folderInput");
+      const pdfFrame = document.getElementById("pdfFrame");
+      const emptyPreview = document.getElementById("emptyPreview");
+      const previewMeta = document.getElementById("previewMeta");
+      const logPanel = document.getElementById("logPanel");
+      const compileLog = document.getElementById("compileLog");
+
+      document.getElementById("collapseExplorer").addEventListener("click", () => {
+        app.classList.toggle("explorer-collapsed");
+        document.getElementById("collapseExplorer").textContent = app.classList.contains("explorer-collapsed") ? ">" : "<";
+      });
+
+      document.getElementById("newFile").addEventListener("click", createFile);
+      document.getElementById("newFolder").addEventListener("click", createFolder);
+      document.getElementById("uploadFiles").addEventListener("click", () => fileInput.click());
+      document.getElementById("uploadFolder").addEventListener("click", () => folderInput.click());
+      fileInput.addEventListener("change", () => handleUpload(fileInput.files));
+      folderInput.addEventListener("change", () => handleUpload(folderInput.files, true));
+      convertButton.addEventListener("click", compileProject);
+
+      editor.addEventListener("input", () => {
+        const file = state.files[state.activeFile];
+        if (!file || file.binary) return;
+        file.content = editor.value;
+        persistProject();
+        updateMeta();
+      });
+
+      render();
+
+      function loadProject() {
+        try {
+          const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+          if (stored && stored.files && stored.activeFile) return stored;
+        } catch (_) {
+          // Fall back to the starter document when stored data is unavailable.
+        }
+
+        return {
+          activeFile: "main.tex",
+          folders: [],
+          files: {
+            "main.tex": {
+              name: "main.tex",
+              content: DEFAULT_TEX,
+              binary: false
+            }
+          }
+        };
+      }
+
+      function persistProject() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      }
+
+      function render() {
+        renderTree();
+        const file = state.files[state.activeFile];
+        activeFileName.textContent = state.activeFile;
+        editor.disabled = Boolean(file && file.binary);
+        editor.value = file ? (file.binary ? "Binary asset selected. Uploads are available to LaTeX during conversion." : file.content) : "";
+        updateMeta();
+      }
+
+      function updateMeta() {
+        const file = state.files[state.activeFile];
+        if (!file) {
+          activeFileMeta.textContent = "No file selected";
+          return;
+        }
+
+        const size = file.binary ? base64ToBytes(file.content).byteLength : new Blob([file.content]).size;
+        activeFileMeta.textContent = `${file.binary ? "Asset" : "Text"} file, ${formatBytes(size)}`;
+      }
+
+      function renderTree() {
+        tree.textContent = "";
+        const root = buildTree();
+        root.children.forEach((node) => tree.appendChild(renderNode(node, 0)));
+      }
+
+      function buildTree() {
+        const root = { name: "", path: "", type: "folder", children: new Map() };
+
+        state.folders.forEach((folderPath) => {
+          addPath(root, folderPath, "folder");
+        });
+
+        Object.keys(state.files).forEach((filePath) => {
+          addPath(root, filePath, "file");
+        });
+
+        sortNode(root);
+        return root;
+      }
+
+      function addPath(root, fullPath, type) {
+        const parts = fullPath.split("/").filter(Boolean);
+        let current = root;
+        parts.forEach((part, index) => {
+          const path = parts.slice(0, index + 1).join("/");
+          const nodeType = index === parts.length - 1 ? type : "folder";
+          if (!current.children.has(part)) {
+            current.children.set(part, { name: part, path, type: nodeType, children: new Map() });
+          }
+          current = current.children.get(part);
+        });
+      }
+
+      function sortNode(node) {
+        node.children = [...node.children.values()]
+          .sort((a, b) => {
+            if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          });
+
+        node.children.forEach((child) => {
+          if (child.type === "folder") sortNode(child);
+        });
+      }
+
+      function renderNode(node, depth) {
+        const wrapper = document.createElement("div");
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = `tree-row${state.activeFile === node.path ? " active" : ""}`;
+        row.style.paddingLeft = `${8 + depth * 16}px`;
+        row.innerHTML = `<span class="tree-icon">${node.type === "folder" ? ">" : "-"}</span><span class="tree-name"></span>`;
+        row.querySelector(".tree-name").textContent = node.name;
+
+        if (node.type === "file") {
+          row.addEventListener("click", () => {
+            state.activeFile = node.path;
+            persistProject();
+            render();
+          });
+        }
+
+        wrapper.appendChild(row);
+        if (node.type === "folder") {
+          node.children.forEach((child) => wrapper.appendChild(renderNode(child, depth + 1)));
+        }
+        return wrapper;
+      }
+
+      function createFile() {
+        const path = normalizePath(prompt("New file path", suggestedPath("untitled.tex")));
+        if (!path) return;
+        if (state.files[path]) {
+          setStatus(`A file already exists at ${path}.`, true);
+          return;
+        }
+        ensureFoldersForPath(path);
+        state.files[path] = {
+          name: path.split("/").pop(),
+          content: path.endsWith(".tex") ? "\\section{New section}\n" : "",
+          binary: false
+        };
+        state.activeFile = path;
+        persistProject();
+        render();
+        setStatus(`Created ${path}.`);
+      }
+
+      function createFolder() {
+        const path = normalizePath(prompt("New folder path", suggestedPath("sections")));
+        if (!path) return;
+        addFolder(path);
+        persistProject();
+        renderTree();
+        setStatus(`Created folder ${path}.`);
+      }
+
+      function suggestedPath(name) {
+        const activeFolder = state.activeFile.includes("/") ? state.activeFile.split("/").slice(0, -1).join("/") : "";
+        return activeFolder ? `${activeFolder}/${name}` : name;
+      }
+
+      async function handleUpload(fileList, preserveFolders = false) {
+        const files = [...fileList];
+        if (!files.length) return;
+
+        for (const file of files) {
+          const rawPath = preserveFolders && file.webkitRelativePath ? file.webkitRelativePath : file.name;
+          const path = normalizePath(rawPath);
+          if (!path) continue;
+          ensureFoldersForPath(path);
+          const binary = !isTextFile(path);
+          const content = binary ? bytesToBase64(new Uint8Array(await file.arrayBuffer())) : await file.text();
+          state.files[path] = { name: file.name, content, binary };
+        }
+
+        state.activeFile = normalizePath((preserveFolders && files[0].webkitRelativePath) || files[0].name) || state.activeFile;
+        fileInput.value = "";
+        folderInput.value = "";
+        persistProject();
+        render();
+        setStatus(`Uploaded ${files.length} ${files.length === 1 ? "file" : "files"}.`);
+      }
+
+      async function compileProject() {
+        if (!state.files["main.tex"]) {
+          setStatus("Create a main.tex file before converting.", true);
+          return;
+        }
+
+        convertButton.disabled = true;
+        setStatus("Loading local WebAssembly LaTeX engine...");
+        compileLog.textContent = "";
+        logPanel.classList.add("hidden");
+
+        try {
+          if (engine) engine.closeWorker();
+          engine = new PdfTeXEngine();
+          await engine.loadEngine();
+
+          const folders = collectFolders();
+          folders.forEach((folder) => engine.makeMemFSFolder(folder));
+
+          Object.entries(state.files).forEach(([path, file]) => {
+            const content = file.binary ? base64ToBytes(file.content) : file.content;
+            engine.writeMemFSFile(path, content);
+          });
+
+          setStatus("Converting with PdfTeX in the browser...");
+          engine.setEngineMainFile("main.tex");
+          const result = await engine.compileLaTeX();
+          compileLog.textContent = result.log || "No compiler log returned.";
+          logPanel.classList.remove("hidden");
+
+          if (result.status !== 0 || !result.pdf) {
+            setStatus("Conversion failed. Check the compiler log below the preview.", true);
+            return;
+          }
+
+          if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+          pdfUrl = URL.createObjectURL(new Blob([result.pdf], { type: "application/pdf" }));
+          pdfFrame.src = pdfUrl;
+          emptyPreview.classList.add("hidden");
+          previewMeta.textContent = `Generated ${new Date().toLocaleTimeString()}`;
+          setStatus("PDF generated locally.");
+        } catch (error) {
+          setStatus(`Conversion failed: ${error && error.message ? error.message : error}`, true);
+        } finally {
+          convertButton.disabled = false;
+        }
+      }
+
+      function collectFolders() {
+        const folders = new Set(state.folders);
+        Object.keys(state.files).forEach(ensureFoldersForPathInSet);
+        return [...folders].sort((a, b) => a.split("/").length - b.split("/").length);
+
+        function ensureFoldersForPathInSet(path) {
+          const parts = path.split("/");
+          parts.pop();
+          let current = "";
+          parts.forEach((part) => {
+            current = current ? `${current}/${part}` : part;
+            folders.add(current);
+          });
+        }
+      }
+
+      function ensureFoldersForPath(path) {
+        const parts = path.split("/");
+        parts.pop();
+        let current = "";
+        parts.forEach((part) => {
+          current = current ? `${current}/${part}` : part;
+          addFolder(current);
+        });
+      }
+
+      function addFolder(path) {
+        path = normalizePath(path);
+        if (path && !state.folders.includes(path)) state.folders.push(path);
+      }
+
+      function normalizePath(path) {
+        return (path || "")
+          .replace(/\\/g, "/")
+          .split("/")
+          .filter((part) => part && part !== "." && part !== "..")
+          .join("/");
+      }
+
+      function isTextFile(path) {
+        const extension = path.split(".").pop().toLowerCase();
+        return TEXT_EXTENSIONS.has(extension);
+      }
+
+      function bytesToBase64(bytes) {
+        let binary = "";
+        bytes.forEach((byte) => {
+          binary += String.fromCharCode(byte);
+        });
+        return btoa(binary);
+      }
+
+      function base64ToBytes(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+        return bytes;
+      }
+
+      function formatBytes(bytes) {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+      }
+
+      function setStatus(message, isError = false) {
+        status.textContent = message;
+        status.classList.toggle("error", isError);
+      }
+    </script>
   </body>
 </html>
