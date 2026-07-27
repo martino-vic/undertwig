@@ -519,6 +519,20 @@
         cursor: wait;
       }
 
+      .engine-button {
+        min-height: 36px;
+        padding: 0 12px;
+        font-weight: 600;
+        font-variant-ligatures: none;
+        white-space: nowrap;
+        cursor: default;
+      }
+
+      .engine-button:hover {
+        background: var(--panel-soft);
+        border-color: var(--border);
+      }
+
       .convert-busy {
         display: inline-flex;
         align-items: center;
@@ -1020,6 +1034,7 @@
               </svg>
               Save
             </button>
+            <button class="engine-button" id="latexEngine" type="button" title="Local SwiftLaTeX engine (pdfTeX + LaTeX format)" aria-label="LaTeX engine: pdfLaTeX">pdfLaTeX</button>
             <button class="convert-button" id="convert" type="button">Convert</button>
             <span class="convert-busy hidden" id="convertBusy" aria-hidden="true" title="Converting…">|</span>
           </div>
