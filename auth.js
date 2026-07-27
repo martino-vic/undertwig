@@ -10,22 +10,10 @@
   const LOGIN_SCOPES = "openid email profile " + DRIVE_FILE_SCOPE;
 
   function scopeIncludesDriveFile(scope) {
-    const parts = String(scope || "")
-      .replace(/\+/g, " ")
-      .split(/\s+/)
-      .filter(Boolean);
-    for (let i = 0; i < parts.length; i += 1) {
-      let part = parts[i];
-      try {
-        part = decodeURIComponent(part);
-      } catch (_error) {
-        // Keep raw part.
-      }
-      if (part === DRIVE_FILE_SCOPE) {
-        return true;
-      }
-    }
-    return false;
+    // Google may return full URLs or (rarely) short names; accept either form of drive.file.
+    return /(?:^|[\s+])(?:https:\/\/www\.googleapis\.com\/auth\/)?drive\.file(?:[\s+]|$)/i.test(
+      String(scope || "").replace(/\+/g, " ")
+    );
   }
   const GOOGLE_ISSUERS = new Set([
     "https://accounts.google.com",
@@ -588,10 +576,6 @@
     if (!accessToken) {
       return false;
     }
-    // Reject tokens that only have openid/profile or legacy drive.appdata — saves need drive.file.
-    if (scope != null && String(scope).trim() !== "" && !scopeIncludesDriveFile(scope)) {
-      return false;
-    }
     const expiresAt = Date.now() + (Number(expiresIn) || 3600) * 1000;
     try {
       sessionStorage.setItem(
@@ -711,13 +695,19 @@
       if (!session) {
         throw new Error("Sign in again, then connect Google Drive.");
       }
-      if (!rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn, oauth.scope)) {
+      if (oauth.scope && !scopeIncludesDriveFile(oauth.scope)) {
+        try {
+          sessionStorage.removeItem(DRIVE_TOKEN_STORAGE_KEY);
+        } catch (_error) {
+          // Ignore.
+        }
         throw new Error(
           "Google did not grant Drive file access. In Google Cloud Console → Data Access, add scope " +
             DRIVE_FILE_SCOPE +
             ", then click Retry and allow Drive access."
         );
       }
+      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn, oauth.scope);
       return { session: session, nextPath: nextPath };
     }
 

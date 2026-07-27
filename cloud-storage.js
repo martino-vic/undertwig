@@ -74,11 +74,6 @@
         sessionStorage.removeItem(TOKEN_STORAGE_KEY);
         return null;
       }
-      // Drop legacy tokens that only recorded openid/appdata (no drive.file).
-      if (data.scope != null && String(data.scope).trim() !== "" && !scopeIncludesDriveFile(data.scope)) {
-        sessionStorage.removeItem(TOKEN_STORAGE_KEY);
-        return null;
-      }
       return {
         accessToken: String(data.accessToken),
         expiresAt: Number(data.expiresAt),
@@ -157,22 +152,10 @@
   }
 
   function scopeIncludesDriveFile(scope) {
-    const parts = String(scope || "")
-      .replace(/\+/g, " ")
-      .split(/\s+/)
-      .filter(Boolean);
-    for (let i = 0; i < parts.length; i += 1) {
-      let part = parts[i];
-      try {
-        part = decodeURIComponent(part);
-      } catch (_error) {
-        // Keep raw part.
-      }
-      if (part === DRIVE_SCOPE) {
-        return true;
-      }
-    }
-    return false;
+    // Google may return full URLs or short names; accept either form of drive.file.
+    return /(?:^|[\s+])(?:https:\/\/www\.googleapis\.com\/auth\/)?drive\.file(?:[\s+]|$)/i.test(
+      String(scope || "").replace(/\+/g, " ")
+    );
   }
 
   function isInsufficientScopeMessage(message) {
@@ -225,16 +208,6 @@
   }
 
   function rememberToken(tokenResponse) {
-    if (
-      tokenResponse.scope != null &&
-      String(tokenResponse.scope).trim() !== "" &&
-      !scopeIncludesDriveFile(tokenResponse.scope)
-    ) {
-      forgetAccessToken();
-      throw new Error(
-        "Google did not grant Drive file access (drive.file). Click Retry and allow access to Google Drive files created by Undertwig."
-      );
-    }
     memoryAccessToken = tokenResponse.access_token;
     const expiresIn = Number(tokenResponse.expires_in) || 3600;
     memoryTokenExpiresAt = Date.now() + expiresIn * 1000;
@@ -1354,31 +1327,28 @@
   }
 
   /**
-   * Confirm the stored token includes drive.file (not only openid / legacy appdata).
-   * Always settles within 5 seconds.
+   * Confirm the stored token can use My Drive (drive.file), not only openid / appdata.
+   * Uses Drive files.list — always settles within 5 seconds.
    */
   async function verifyDriveAccess() {
     if (!hydrateTokenFromStorage()) {
       return { ok: false, reason: "no-token", fileId: null };
     }
 
-    if (memoryTokenScope && !scopeIncludesDriveFile(memoryTokenScope)) {
-      forgetAccessToken();
-      return { ok: false, reason: "missing-scope", fileId: null };
-    }
-
     const token = memoryAccessToken;
     const fileId = getProjectFolderId() || cachedUndertwigFolderId || null;
 
     try {
+      // spaces=drive requires drive.file (or broader). drive.appdata-only tokens fail here
+      // even though /about may succeed — that was the false "Connected" bug.
       const response = await Promise.race([
-        fetch(
-          "https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=" + encodeURIComponent(token),
-          {
-            method: "GET",
-            credentials: "omit",
-          }
-        ),
+        fetch(DRIVE_API + "/files?pageSize=1&spaces=drive&fields=files(id)", {
+          method: "GET",
+          credentials: "omit",
+          headers: {
+            Authorization: "Bearer " + token,
+          },
+        }),
         new Promise(function (_, reject) {
           setTimeout(function () {
             const error = new Error("timeout");
@@ -1388,23 +1358,27 @@
         }),
       ]);
 
+      if (response.status === 401) {
+        forgetAccessToken();
+        return { ok: false, reason: "unauthorized", fileId: null };
+      }
+      if (response.status === 403) {
+        const detail = await readDriveError(response, "Google Drive permission denied.");
+        forgetAccessToken();
+        return {
+          ok: false,
+          reason: isInsufficientScopeMessage(detail) ? "missing-scope" : "unauthorized",
+          fileId: null,
+        };
+      }
       if (!response.ok) {
-        if (response.status === 400 || response.status === 401) {
-          forgetAccessToken();
-          return { ok: false, reason: "unauthorized", fileId: null };
-        }
         return { ok: false, reason: "http-" + response.status, fileId: null };
       }
 
-      const payload = await response.json();
-      const scope = payload && payload.scope;
-      if (!scopeIncludesDriveFile(scope)) {
-        forgetAccessToken();
-        return { ok: false, reason: "missing-scope", fileId: null };
+      if (!memoryTokenScope || !scopeIncludesDriveFile(memoryTokenScope)) {
+        memoryTokenScope = DRIVE_SCOPE;
+        writeStoredToken(memoryAccessToken, memoryTokenExpiresAt, memoryTokenScope);
       }
-
-      memoryTokenScope = String(scope);
-      writeStoredToken(memoryAccessToken, memoryTokenExpiresAt, memoryTokenScope);
       writeRole(cachedRole || "owner");
       return { ok: true, reason: "ok", fileId: fileId };
     } catch (error) {
