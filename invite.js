@@ -1,6 +1,8 @@
 (function (global) {
   const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
   const GMAIL_SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
+  const INTERACTIVE_TOKEN_TIMEOUT_MS = 120000;
+  const SILENT_TOKEN_TIMEOUT_MS = 4000;
 
   let memoryAccessToken = null;
   let memoryTokenExpiresAt = 0;
@@ -51,6 +53,10 @@
     memoryTokenExpiresAt = 0;
   }
 
+  function hasAccessToken() {
+    return Boolean(memoryAccessToken && memoryTokenExpiresAt - 60000 > Date.now());
+  }
+
   function describeOauthError(response) {
     if (response.error === "access_denied") {
       return "Gmail send permission was denied.";
@@ -58,16 +64,13 @@
     if (response.error === "popup_closed_by_user") {
       return "Gmail permission popup was closed.";
     }
+    if (response.error === "popup_failed_to_open") {
+      return "Browser blocked the Gmail permission popup. Allow popups, then try again.";
+    }
     return response.error_description || response.error || "Gmail authorization failed.";
   }
 
-  async function getGmailAccessToken(options) {
-    const forcePrompt = Boolean(options && options.forcePrompt);
-    const now = Date.now();
-    if (!forcePrompt && memoryAccessToken && memoryTokenExpiresAt - 60000 > now) {
-      return memoryAccessToken;
-    }
-
+  async function requestGmailToken(forcePrompt, timeoutMs) {
     const session = auth().readSession();
     if (!session) {
       throw new Error("Sign in to send collaboration invites.");
@@ -79,8 +82,27 @@
     }
 
     await ensureGisOauth();
+    const waitMs = Number(timeoutMs) > 0 ? Number(timeoutMs) : SILENT_TOKEN_TIMEOUT_MS;
 
     const token = await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (handler, value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        handler(value);
+      };
+      const timer = setTimeout(() => {
+        finish(
+          reject,
+          new Error(
+            "Gmail authorization timed out. Allow the Google popup (and Brave Shields/popups), then try inviting again."
+          )
+        );
+      }, waitMs);
+
       try {
         const client = global.google.accounts.oauth2.initTokenClient({
           client_id: clientId,
@@ -89,22 +111,33 @@
           hint: session.email,
           callback: (response) => {
             if (response && response.error) {
-              reject(new Error(describeOauthError(response)));
+              finish(reject, new Error(describeOauthError(response)));
               return;
             }
             if (!response || !response.access_token) {
-              reject(new Error("Google did not return a Gmail access token."));
+              finish(reject, new Error("Google did not return a Gmail access token."));
               return;
             }
-            resolve(response);
+            finish(resolve, response);
           },
           error_callback: (error) => {
-            reject(new Error((error && error.message) || "Gmail authorization failed."));
+            const message =
+              (error && (error.message || error.type)) || "Gmail authorization failed.";
+            if (/popup/i.test(message)) {
+              finish(
+                reject,
+                new Error(
+                  "Browser blocked the Gmail permission popup. Allow popups for this site, then click Send invite again."
+                )
+              );
+              return;
+            }
+            finish(reject, new Error(message));
           },
         });
         client.requestAccessToken();
       } catch (error) {
-        reject(error);
+        finish(reject, error);
       }
     });
 
@@ -112,6 +145,38 @@
     const expiresIn = Number(token.expires_in) || 3600;
     memoryTokenExpiresAt = Date.now() + expiresIn * 1000;
     return memoryAccessToken;
+  }
+
+  async function getGmailAccessToken(options) {
+    const opts = options || {};
+    const forcePrompt = Boolean(opts.forcePrompt);
+    const interactive = Boolean(opts.interactive);
+    if (!forcePrompt && !interactive && hasAccessToken()) {
+      return memoryAccessToken;
+    }
+
+    try {
+      if (interactive && !forcePrompt) {
+        return await requestGmailToken(false, INTERACTIVE_TOKEN_TIMEOUT_MS);
+      }
+      return await requestGmailToken(
+        forcePrompt,
+        forcePrompt || interactive ? INTERACTIVE_TOKEN_TIMEOUT_MS : SILENT_TOKEN_TIMEOUT_MS
+      );
+    } catch (error) {
+      if (interactive && !forcePrompt) {
+        return requestGmailToken(true, INTERACTIVE_TOKEN_TIMEOUT_MS);
+      }
+      throw error;
+    }
+  }
+
+  /** Call from a click handler before long uploads so the Gmail popup is not blocked. */
+  async function connect(options) {
+    return getGmailAccessToken({
+      interactive: true,
+      forcePrompt: Boolean(options && options.forcePrompt),
+    });
   }
 
   function encodeUtf8Base64Url(text) {
@@ -180,7 +245,8 @@
     const rawMessage = buildInviteMessage(email, session, projectUrl);
     const raw = encodeUtf8Base64Url(rawMessage);
 
-    let token = await getGmailAccessToken();
+    // Prefer an already-prepared token from connect(); do not open a popup after a long upload.
+    let token = await getGmailAccessToken({ interactive: false });
     let response = await fetch(GMAIL_SEND_URL, {
       method: "POST",
       credentials: "omit",
@@ -193,7 +259,8 @@
 
     if (response.status === 401) {
       clearToken();
-      token = await getGmailAccessToken({ forcePrompt: true });
+      // Last resort; may fail if the browser no longer treats this as a user gesture.
+      token = await getGmailAccessToken({ interactive: true, forcePrompt: true });
       response = await fetch(GMAIL_SEND_URL, {
         method: "POST",
         credentials: "omit",
@@ -223,6 +290,8 @@
 
   global.UndertwigInvite = {
     GMAIL_SEND_SCOPE,
+    hasAccessToken,
+    connect,
     sendCollaborationInvite,
     clearToken,
   };
