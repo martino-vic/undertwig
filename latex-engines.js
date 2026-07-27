@@ -739,7 +739,7 @@
           luaWorker.postMessage({
             files: files,
             main_tex_path: "main.tex",
-            bibtex: null,
+            bibtex: false,
             makeindex: null,
             rerun: true,
             verbose: "silent",
