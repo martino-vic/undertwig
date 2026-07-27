@@ -727,6 +727,7 @@
         </div>
         <div class="collapsed-rail" aria-hidden="true">Files</div>
         <div class="sidebar-actions">
+          <button id="newProject" type="button">+ New project</button>
           <button id="newFile" type="button">New file</button>
           <button id="newFolder" type="button">New folder</button>
           <button id="uploadFiles" type="button">Upload files</button>
@@ -815,10 +816,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727e"></script>
-    <script src="auth.js?v=20260727e"></script>
-    <script src="cloud-storage.js?v=20260727e"></script>
-    <script src="invite.js?v=20260727e"></script>
+    <script src="auth-config.js?v=20260727f"></script>
+    <script src="auth.js?v=20260727f"></script>
+    <script src="cloud-storage.js?v=20260727f"></script>
+    <script src="invite.js?v=20260727f"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -945,31 +946,33 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 `;
 
       function createDefaultProject() {
+        const root = "SampleProject";
         return {
-          activeFile: "main.tex",
-          folders: ["sections", "figures"],
+          version: 2,
+          activeFile: root + "/main.tex",
+          folders: [root, root + "/sections", root + "/figures"],
           files: {
-            "main.tex": {
+            [root + "/main.tex"]: {
               name: "main.tex",
               content: DEFAULT_MAIN_TEX,
               binary: false
             },
-            "macros.tex": {
+            [root + "/macros.tex"]: {
               name: "macros.tex",
               content: DEFAULT_MACROS_TEX,
               binary: false
             },
-            "sections/introduction.tex": {
+            [root + "/sections/introduction.tex"]: {
               name: "introduction.tex",
               content: DEFAULT_INTRODUCTION_TEX,
               binary: false
             },
-            "sections/results.tex": {
+            [root + "/sections/results.tex"]: {
               name: "results.tex",
               content: DEFAULT_RESULTS_TEX,
               binary: false
             },
-            "figures/diagram.png": {
+            [root + "/figures/diagram.png"]: {
               name: "diagram.png",
               content: DEMO_FIGURE_PNG_BASE64,
               binary: true
@@ -978,7 +981,8 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         };
       }
 
-      const STORAGE_KEY = "undertwig-latex-project-v1";
+      const STORAGE_KEY = "undertwig-latex-workspace-v2";
+      const LEGACY_STORAGE_KEY = "undertwig-latex-project-v1";
       const TEXT_EXTENSIONS = new Set(["tex", "bib", "cls", "sty", "txt", "md", "csv", "json", "log"]);
       const state = loadProject();
       let engine = null;
@@ -1179,7 +1183,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
       function showCollaborateLoggedIn() {
         collaborateMessage.textContent =
-          "Invite someone to edit this project on your Google Drive. You remain the owner; they work in your shared project.";
+          "Invite someone to edit the active project folder on your Google Drive (Undertwig / " +
+          (getActiveProjectName() || "…") +
+          "). You remain the owner.";
         inviteForm.classList.remove("hidden");
         collaborateNote.classList.add("hidden");
         collaborateLoginLink.classList.add("hidden");
@@ -1253,19 +1259,28 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           if (cloudStatusMode !== "connected" && !UndertwigCloud.hasAccessToken()) {
             throw new Error("Connect Google Drive under the file tree before inviting collaborators.");
           }
-          if (!UndertwigCloud.getProjectFileId()) {
-            setInviteStatus("Syncing your project to Google Drive…");
-            await initCloudProject({ force: true });
+          const projectName = getActiveProjectName();
+          if (!projectName) {
+            throw new Error("Select a file inside a project folder before inviting collaborators.");
           }
-          if (!UndertwigCloud.getProjectFileId()) {
-            throw new Error("Could not create a Drive project to share. Connect Google Drive and try again.");
+          setInviteStatus("Uploading “" + projectName + "” to Google Drive / Undertwig…");
+          if (!UndertwigCloud.hasAccessToken()) {
+            await UndertwigCloud.connect({ interactive: true });
+          }
+          await UndertwigCloud.saveProject(state, { projectName: projectName });
+          if (!UndertwigCloud.getProjectFolderId()) {
+            throw new Error("Could not create a Drive project folder to share. Connect Google Drive and try again.");
           }
           await UndertwigCloud.shareProjectWithEmail(email, "writer");
           const inviteUrl = buildInviteProjectUrl();
           await UndertwigInvite.sendCollaborationInvite(email, inviteUrl);
-          setInviteStatus("Invitation sent to " + email + ". They will edit your Drive project.", "success");
+          setInviteStatus(
+            "Invitation sent to " + email + ". They can edit your “" + projectName + "” Drive folder.",
+            "success"
+          );
           inviteEmail.value = "";
-          setStatus("Shared project and invited " + email + ".");
+          setStatus("Shared “" + projectName + "” and invited " + email + ".");
+          renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
         } catch (error) {
           setInviteStatus(
             (error && error.message) || "Could not send the invitation.",
@@ -1320,6 +1335,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         document.getElementById("collapseExplorer").textContent = app.classList.contains("explorer-collapsed") ? ">" : "<";
       });
 
+      document.getElementById("newProject").addEventListener("click", createProject);
       document.getElementById("newFile").addEventListener("click", createFile);
       document.getElementById("newFolder").addEventListener("click", createFolder);
       document.getElementById("uploadFiles").addEventListener("click", () => fileInput.click());
@@ -1351,7 +1367,24 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       function loadProject() {
         try {
           const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-          if (stored && stored.files && stored.activeFile) return stored;
+          if (stored && stored.files && stored.activeFile) {
+            return normalizeWorkspace(stored);
+          }
+        } catch (_) {
+          // Fall through to legacy / default.
+        }
+
+        try {
+          const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY));
+          if (legacy && legacy.files && legacy.activeFile) {
+            const migrated = migrateLegacyWorkspace(legacy);
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+            } catch (_error) {
+              // Ignore.
+            }
+            return migrated;
+          }
         } catch (_) {
           // Fall back to the starter document when stored data is unavailable.
         }
@@ -1359,10 +1392,61 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         return createDefaultProject();
       }
 
+      function migrateLegacyWorkspace(legacy) {
+        // Old workspaces had files at root; wrap them into SampleProject/.
+        const root = "SampleProject";
+        const files = {};
+        const folders = new Set([root]);
+        Object.keys(legacy.files || {}).forEach((path) => {
+          const next = root + "/" + path;
+          files[next] = legacy.files[path];
+        });
+        (legacy.folders || []).forEach((path) => {
+          folders.add(root + "/" + path);
+        });
+        const active = legacy.activeFile ? root + "/" + legacy.activeFile : root + "/main.tex";
+        return normalizeWorkspace({
+          version: 2,
+          activeFile: active,
+          folders: Array.from(folders),
+          files: files,
+        });
+      }
+
+      function normalizeWorkspace(workspace) {
+        const next = {
+          version: 2,
+          activeFile: workspace.activeFile || "",
+          folders: Array.isArray(workspace.folders) ? workspace.folders.slice() : [],
+          files: workspace.files || {},
+        };
+        // Ensure every root project exists as a folder entry.
+        Object.keys(next.files).forEach((path) => {
+          const root = path.split("/")[0];
+          if (root && !next.folders.includes(root)) {
+            next.folders.push(root);
+          }
+        });
+        return next;
+      }
+
       function replaceProjectState(nextState) {
-        state.activeFile = nextState.activeFile || "";
-        state.folders = Array.isArray(nextState.folders) ? nextState.folders : [];
-        state.files = nextState.files || {};
+        const normalized = normalizeWorkspace(nextState);
+        state.activeFile = normalized.activeFile || "";
+        state.folders = normalized.folders;
+        state.files = normalized.files;
+        state.version = 2;
+      }
+
+      function getActiveProjectName() {
+        const path = state.activeFile || "";
+        if (path.includes("/")) {
+          return path.split("/")[0];
+        }
+        const roots = UndertwigCloud.listRootProjects
+          ? UndertwigCloud.listRootProjects(state)
+          : [];
+        return roots[0] || "";
       }
 
       let cloudInitPromise = null;
@@ -1473,37 +1557,20 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             if (!probe.connected) {
               throw new Error(probe.reason || "Could not reach Google Drive.");
             }
-            markConnected(probe.fileId);
+            markConnected(probe.fileId || UndertwigCloud.getProjectFileId());
             clearTimeout(failTimer);
-            setStatus("Connected to Google Cloud storage. Syncing project files…");
+            setStatus("Connected. Uploading projects to your Undertwig Drive folder…");
 
-            const result = await UndertwigCloud.syncProject(state);
-            if (result.source === "cloud" && result.project) {
-              replaceProjectState(result.project);
-              try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-              } catch (_error) {
-                // Local cache is optional when cloud storage is available.
-              }
-              render();
-              const fileCount = Object.keys(state.files || {}).length;
-              setStatus(
-                "Loaded " +
-                  fileCount +
-                  " file" +
-                  (fileCount === 1 ? "" : "s") +
-                  " from Google Cloud storage."
-              );
-            } else {
-              const fileCount = Object.keys(state.files || {}).length;
-              setStatus(
-                "Synced " +
-                  fileCount +
-                  " file" +
-                  (fileCount === 1 ? "" : "s") +
-                  " to Google Cloud storage (free)."
-              );
-            }
+            const activeProject = getActiveProjectName();
+            await UndertwigCloud.syncProject(state, { projectName: activeProject || undefined });
+            const fileCount = Object.keys(state.files || {}).length;
+            setStatus(
+              "Synced " +
+                fileCount +
+                " file" +
+                (fileCount === 1 ? "" : "s") +
+                " to Google Drive / Undertwig."
+            );
             renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
           } catch (error) {
             const message = `Could not sync with Google Cloud storage: ${
@@ -1566,7 +1633,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           }
           cloudSaveInFlight = true;
           try {
-            await UndertwigCloud.saveProject(state);
+            await UndertwigCloud.saveProject(state, {
+              projectName: getActiveProjectName() || undefined,
+            });
             renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
           } catch (error) {
             renderCloudStatus("disconnected");
@@ -1868,8 +1937,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         delete state.files[path];
 
         if (state.activeFile === path) {
-          const remaining = Object.keys(state.files).sort();
-          state.activeFile = remaining.includes("main.tex") ? "main.tex" : (remaining[0] || "");
+          state.activeFile = pickFallbackActiveFile(path.split("/")[0]);
         }
 
         persistProject({ immediateCloud: true });
@@ -1904,14 +1972,29 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         });
         persistCollapsedFolders();
 
-        if (!state.activeFile || state.activeFile.startsWith(prefix)) {
-          const remaining = Object.keys(state.files).sort();
-          state.activeFile = remaining.includes("main.tex") ? "main.tex" : (remaining[0] || "");
+        if (!state.activeFile || state.activeFile === path || state.activeFile.startsWith(prefix)) {
+          const parentProject = path.includes("/") ? path.split("/")[0] : "";
+          state.activeFile = pickFallbackActiveFile(parentProject);
         }
 
         persistProject({ immediateCloud: true });
         render();
         setStatus(`Deleted folder ${path}.`);
+      }
+
+      function pickFallbackActiveFile(preferProject) {
+        const remaining = Object.keys(state.files).sort();
+        if (preferProject) {
+          const preferred = preferProject + "/main.tex";
+          if (remaining.includes(preferred)) {
+            return preferred;
+          }
+          const inProject = remaining.filter((path) => path.startsWith(preferProject + "/"));
+          if (inProject.length) {
+            return inProject[0];
+          }
+        }
+        return remaining[0] || "";
       }
 
       function downloadProjectZip() {
@@ -2071,9 +2154,34 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         return (crc ^ 0xffffffff) >>> 0;
       }
 
+      function createProject() {
+        const raw = prompt("New project name", "NewProject");
+        if (raw === null) {
+          return;
+        }
+        const name = normalizePath(String(raw).trim().replace(/[\\/]+/g, "-"));
+        if (!name || name.includes("/")) {
+          setStatus("Enter a single project folder name (no slashes).", true);
+          return;
+        }
+        if ((state.folders || []).includes(name) || Object.keys(state.files).some((path) => path === name || path.startsWith(name + "/"))) {
+          setStatus(`A project named ${name} already exists.`, true);
+          return;
+        }
+        addFolder(name);
+        state.activeFile = "";
+        persistProject({ immediateCloud: true });
+        render();
+        setStatus(`Created project folder ${name}. Add files inside it to sync to Google Drive / Undertwig / ${name}.`);
+      }
+
       function createFile() {
         const path = normalizePath(prompt("New file path", suggestedPath("untitled.tex")));
         if (!path) return;
+        if (!path.includes("/")) {
+          setStatus("Create files inside a project folder (for example SampleProject/notes.tex).", true);
+          return;
+        }
         if (state.files[path]) {
           setStatus(`A file already exists at ${path}.`, true);
           return;
@@ -2093,6 +2201,10 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       function createFolder() {
         const path = normalizePath(prompt("New folder path", suggestedPath("sections")));
         if (!path) return;
+        if (!path.includes("/")) {
+          setStatus("Use “+ New project” to create a root project folder.", true);
+          return;
+        }
         addFolder(path);
         persistProject({ immediateCloud: true });
         renderTree();
@@ -2100,8 +2212,14 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       }
 
       function suggestedPath(name) {
-        const activeFolder = state.activeFile.includes("/") ? state.activeFile.split("/").slice(0, -1).join("/") : "";
-        return activeFolder ? `${activeFolder}/${name}` : name;
+        const project = getActiveProjectName();
+        if (!project) {
+          return "SampleProject/" + name;
+        }
+        const activeFolder = state.activeFile.includes("/")
+          ? state.activeFile.split("/").slice(0, -1).join("/")
+          : project;
+        return activeFolder ? `${activeFolder}/${name}` : `${project}/${name}`;
       }
 
       async function handleUpload(fileList, preserveFolders = false) {
@@ -2135,7 +2253,11 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           const label = file.webkitRelativePath || file.name || "file";
           try {
             const rawPath = preserveFolders && file.webkitRelativePath ? file.webkitRelativePath : file.name;
-            const path = normalizePath(rawPath);
+            let path = normalizePath(rawPath);
+            if (path && !path.includes("/")) {
+              const project = getActiveProjectName() || "SampleProject";
+              path = project + "/" + path;
+            }
             if (!path) {
               failures.push(`${label} (invalid path)`);
               continue;
@@ -2229,8 +2351,22 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       }
 
       async function compileProject() {
-        if (!state.files["main.tex"]) {
-          setStatus("Create a main.tex file before converting.", true);
+        const project = getActiveProjectName();
+        if (!project) {
+          setStatus("Select a file inside a project folder before converting.", true);
+          return;
+        }
+
+        const prefix = project + "/";
+        const projectFiles = {};
+        Object.entries(state.files).forEach(([path, file]) => {
+          if (path.startsWith(prefix)) {
+            projectFiles[path.slice(prefix.length)] = file;
+          }
+        });
+
+        if (!projectFiles["main.tex"]) {
+          setStatus("Create a main.tex file in this project before converting.", true);
           return;
         }
 
@@ -2244,10 +2380,21 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           engine = new PdfTeXEngine();
           await engine.loadEngine();
 
-          const folders = collectFolders();
-          folders.forEach((folder) => engine.makeMemFSFolder(folder));
+          const folders = new Set();
+          Object.keys(projectFiles).forEach((path) => {
+            const parts = path.split("/");
+            parts.pop();
+            let current = "";
+            parts.forEach((part) => {
+              current = current ? `${current}/${part}` : part;
+              folders.add(current);
+            });
+          });
+          [...folders]
+            .sort((a, b) => a.split("/").length - b.split("/").length)
+            .forEach((folder) => engine.makeMemFSFolder(folder));
 
-          Object.entries(state.files).forEach(([path, file]) => {
+          Object.entries(projectFiles).forEach(([path, file]) => {
             const content = file.binary ? base64ToBytes(file.content) : file.content;
             engine.writeMemFSFile(path, content);
           });
