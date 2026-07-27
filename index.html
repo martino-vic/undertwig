@@ -675,18 +675,69 @@
       }
 
       .log {
-        max-height: 132px;
-        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        flex: 0 0 auto;
+        max-height: 280px;
         border-top: 1px solid var(--border);
         background: #0f151c;
       }
 
+      .log.is-collapsed {
+        max-height: none;
+      }
+
+      .log-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 36px;
+        padding: 0 10px 0 16px;
+        border-bottom: 1px solid transparent;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .log:not(.is-collapsed) .log-head {
+        border-bottom-color: var(--border);
+      }
+
+      .log-head strong {
+        color: #d7e0ea;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+
+      .log-toggle {
+        min-height: 28px;
+        padding: 0 10px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: var(--panel-soft);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .log-toggle:hover {
+        background: var(--panel-strong);
+        border-color: #4b6073;
+      }
+
       .log pre {
         margin: 0;
-        padding: 12px 16px;
+        padding: 14px 16px 16px;
+        overflow: auto;
         color: #c7d1dc;
-        font: 12px/1.45 "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font: 12px/1.5 "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
         white-space: pre-wrap;
+      }
+
+      .log.is-collapsed pre {
+        display: none;
       }
 
       .hidden {
@@ -842,6 +893,12 @@
           </div>
         </div>
         <div class="log hidden" id="logPanel">
+          <div class="log-head">
+            <strong>Compiler log</strong>
+            <button class="log-toggle" id="toggleLog" type="button" aria-expanded="true" aria-controls="compileLog">
+              Collapse
+            </button>
+          </div>
           <pre id="compileLog"></pre>
         </div>
       </section>
@@ -1062,6 +1119,17 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const previewMeta = document.getElementById("previewMeta");
       const logPanel = document.getElementById("logPanel");
       const compileLog = document.getElementById("compileLog");
+      const toggleLogButton = document.getElementById("toggleLog");
+
+      function setLogCollapsed(collapsed) {
+        logPanel.classList.toggle("is-collapsed", Boolean(collapsed));
+        toggleLogButton.textContent = collapsed ? "Expand" : "Collapse";
+        toggleLogButton.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      }
+
+      toggleLogButton.addEventListener("click", () => {
+        setLogCollapsed(!logPanel.classList.contains("is-collapsed"));
+      });
       const collaborateButton = document.getElementById("collaborate");
       const collaborateBox = document.getElementById("collaborateBox");
       const collaborateMessage = document.getElementById("collaborateMessage");
@@ -2595,8 +2663,12 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
           compileLog.textContent = (result && result.log) || "No compiler log returned.";
           logPanel.classList.remove("hidden");
+          const failed = !result || result.status !== 0 || !result.pdf;
+          if (failed) {
+            setLogCollapsed(false);
+          }
 
-          if (!result || result.status !== 0 || !result.pdf) {
+          if (failed) {
             setStatus("Conversion failed. Check the compiler log below the preview.", true);
             return;
           }
