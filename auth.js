@@ -1,11 +1,14 @@
 (function (global) {
   const AUTH_STORAGE_KEY = "undertwig-auth-v2";
   const NONCE_STORAGE_KEY = "undertwig-auth-nonce";
+  const NEXT_STORAGE_KEY = "undertwig-auth-next";
+  const OAUTH_STATE_KEY = "undertwig-auth-oauth-state";
   const GOOGLE_ISSUERS = new Set([
     "https://accounts.google.com",
     "accounts.google.com",
   ]);
   const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
+  const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
   const CLOCK_SKEW_SECONDS = 300;
 
   let jwksCache = null;
@@ -446,6 +449,153 @@
     return "login.html?next=" + encodeURIComponent(next);
   }
 
+  function loginRedirectUri() {
+    return new URL("login.html", global.location.href).href.split("#")[0].split("?")[0];
+  }
+
+  function rememberLoginNext(nextPath) {
+    try {
+      sessionStorage.setItem(NEXT_STORAGE_KEY, safeNextPath(nextPath || "/"));
+    } catch (_error) {
+      // Ignore.
+    }
+  }
+
+  function consumeLoginNext(fallback) {
+    try {
+      const next = sessionStorage.getItem(NEXT_STORAGE_KEY);
+      sessionStorage.removeItem(NEXT_STORAGE_KEY);
+      return safeNextPath(next || fallback || "/");
+    } catch (_error) {
+      return safeNextPath(fallback || "/");
+    }
+  }
+
+  function createOAuthState() {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    let binary = "";
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+
+  /**
+   * Full-page Google OIDC sign-in that returns an ID token in the URL fragment.
+   * Avoids GIS FedCM (often a no-op) and avoids authorization-code exchange
+   * (Google requires a client secret for web clients).
+   */
+  function beginGoogleIdTokenSignIn(nextPath) {
+    const clientId = getConfig().googleClientId;
+    if (!clientId) {
+      throw new Error("Google sign-in is not configured.");
+    }
+
+    const nonce = prepareSignInNonce();
+    const state = createOAuthState();
+    rememberLoginNext(nextPath);
+
+    try {
+      sessionStorage.setItem(OAUTH_STATE_KEY, state);
+    } catch (_error) {
+      throw new Error("Could not start Google sign-in (session storage blocked).");
+    }
+
+    const url = new URL(GOOGLE_AUTH_URL);
+    url.searchParams.set("client_id", clientId);
+    url.searchParams.set("redirect_uri", loginRedirectUri());
+    url.searchParams.set("response_type", "id_token");
+    url.searchParams.set("scope", "openid email profile");
+    url.searchParams.set("nonce", nonce);
+    url.searchParams.set("state", state);
+    url.searchParams.set("prompt", "select_account");
+    global.location.assign(url.toString());
+  }
+
+  function readOAuthResponseParams() {
+    const hash = String(global.location.hash || "").replace(/^#/, "");
+    const query = String(global.location.search || "").replace(/^\?/, "");
+    const fromHash = hash ? new URLSearchParams(hash) : null;
+    const fromQuery = query ? new URLSearchParams(query) : null;
+
+    const get = (key) => {
+      if (fromHash && fromHash.get(key)) {
+        return fromHash.get(key);
+      }
+      if (fromQuery && fromQuery.get(key)) {
+        return fromQuery.get(key);
+      }
+      return null;
+    };
+
+    return {
+      idToken: get("id_token"),
+      error: get("error"),
+      errorDescription: get("error_description"),
+      state: get("state"),
+      hasOAuthPayload: Boolean(
+        get("id_token") || get("error") || get("code")
+      ),
+    };
+  }
+
+  function clearOAuthResponseFromUrl(nextPath) {
+    try {
+      const clean = new URL(global.location.href);
+      ["code", "state", "scope", "authuser", "prompt", "error", "error_description"].forEach(
+        (key) => clean.searchParams.delete(key)
+      );
+      if (!clean.searchParams.get("next")) {
+        clean.searchParams.set("next", nextPath);
+      }
+      clean.hash = "";
+      global.history.replaceState({}, "", clean.pathname + clean.search);
+    } catch (_error) {
+      // Ignore history cleanup failures.
+    }
+  }
+
+  /**
+   * Complete sign-in when login.html is loaded as the OAuth redirect target.
+   * Returns { session, nextPath } or null for a normal page load.
+   */
+  async function completeGoogleIdTokenSignInIfPresent() {
+    const oauth = readOAuthResponseParams();
+    if (!oauth.hasOAuthPayload) {
+      return null;
+    }
+
+    const nextPath = consumeLoginNext("/");
+    clearOAuthResponseFromUrl(nextPath);
+
+    let expectedState = null;
+    try {
+      expectedState = sessionStorage.getItem(OAUTH_STATE_KEY);
+      sessionStorage.removeItem(OAUTH_STATE_KEY);
+    } catch (_error) {
+      expectedState = null;
+    }
+
+    if (oauth.error) {
+      throw new Error(oauth.errorDescription || oauth.error || "Google sign-in was cancelled.");
+    }
+
+    if (!oauth.idToken) {
+      throw new Error(
+        "Google sign-in could not be completed. In Google Cloud Console, add this page as an Authorized redirect URI: " +
+          loginRedirectUri()
+      );
+    }
+
+    if (!expectedState || !oauth.state || expectedState !== oauth.state) {
+      throw new Error("Google sign-in could not be verified (invalid state). Try again.");
+    }
+
+    const session = await loginWithCredential(oauth.idToken);
+    return { session: session, nextPath: nextPath };
+  }
+
   global.UndertwigAuth = {
     AUTH_STORAGE_KEY,
     getConfig,
@@ -457,6 +607,9 @@
     logout,
     logoutAndRevoke,
     loginUrl,
+    loginRedirectUri,
+    beginGoogleIdTokenSignIn,
+    completeGoogleIdTokenSignInIfPresent,
     loadGoogleIdentityServices,
   };
 })(window);

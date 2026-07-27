@@ -148,9 +148,11 @@
           allow third-party cookies for Google accounts if Connect still fails.
         </li>
         <li>
-          <strong>Private / incognito login:</strong> Google’s embedded sign-in button often
-          does nothing in private windows (FedCM / third-party cookie blocking). Use a normal
-          browser window to log in, then Connect Drive from the editor.
+          <strong>Private / incognito login:</strong> login uses a full-page Google redirect,
+          which works in private windows. In Google Cloud Console → your OAuth client →
+          <strong>Authorized redirect URIs</strong>, add exactly
+          <code>https://www.undertwig.com/login.html</code>
+          (and <code>https://undertwig.com/login.html</code> if you use the apex domain).
         </li>
       </ol>
 
@@ -163,6 +165,9 @@
           (and <code>https://www.googleapis.com/auth/gmail.send</code> for email invites).</li>
         <li>Under <strong>Clients</strong>, ensure Authorized JavaScript origins include your exact site origin
           (<code>https://www.undertwig.com</code> and/or <code>https://undertwig.com</code>).</li>
+        <li>Under the same OAuth client, add Authorized redirect URIs
+          <code>https://www.undertwig.com/login.html</code>
+          (and apex <code>https://undertwig.com/login.html</code> if needed).</li>
         <li>If the OAuth app is in <strong>Testing</strong>, add your Google account under <strong>Test users</strong>.</li>
       </ol>
 
