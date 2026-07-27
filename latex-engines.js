@@ -566,6 +566,7 @@
         preload_data_packages_js: [
           BUSYTEX_TEXLIVE + "/texlive-basic.js",
           BUSYTEX_TEXLIVE + "/texlive-recommended.js",
+          BUSYTEX_TEXLIVE + "/texlive-extra.js",
         ],
         data_packages_js: [],
         texmf_local: [],
