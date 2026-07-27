@@ -559,8 +559,6 @@
         busytex_wasm: BUSYTEX_CDN + "/busytex.wasm",
         preload_data_packages_js: [
           BUSYTEX_CDN + "/texlive-basic.js",
-          BUSYTEX_CDN + "/texlive-recommended.js",
-          BUSYTEX_CDN + "/texlive-extra.js",
         ],
         data_packages_js: [],
         texmf_local: [],
