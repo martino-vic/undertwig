@@ -929,6 +929,140 @@
     return files[0] || null;
   }
 
+  async function trashDriveFile(fileId) {
+    const id = String(fileId || "").trim();
+    if (!id) {
+      return;
+    }
+    const response = await driveFetch(
+      DRIVE_API + "/files/" + encodeURIComponent(id) + "?supportsAllDrives=true",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trashed: true }),
+      }
+    );
+    if (!response.ok) {
+      throw new Error(await readDriveError(response, "Could not delete a file from Google Drive."));
+    }
+  }
+
+  function pruneNestedDriveDeletions(items) {
+    const folderPaths = items
+      .filter(function (item) {
+        return item && item.type === "folder" && item.path;
+      })
+      .map(function (item) {
+        return item.path;
+      })
+      .sort();
+    return items.filter(function (item) {
+      if (!item || !item.path) {
+        return false;
+      }
+      for (let i = 0; i < folderPaths.length; i += 1) {
+        const folder = folderPaths[i];
+        if (item.path !== folder && item.path.indexOf(folder + "/") === 0) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  /**
+   * Remote Drive paths under the project folder that are no longer present locally.
+   */
+  async function findDriveDeletions(folderId, state, projectName) {
+    const localFiles = filesForProject(state, projectName);
+    const localFolderSet = {};
+    foldersForProject(state, projectName).forEach(function (path) {
+      localFolderSet[path] = true;
+    });
+    Object.keys(localFiles).forEach(function (path) {
+      const parts = path.split("/");
+      parts.pop();
+      let built = "";
+      for (let i = 0; i < parts.length; i += 1) {
+        built = built ? built + "/" + parts[i] : parts[i];
+        localFolderSet[built] = true;
+      }
+    });
+
+    const remote = await listFolderTree(folderId, "");
+    const deletions = [];
+    for (let i = 0; i < remote.length; i += 1) {
+      const entry = remote[i];
+      if (!entry || !entry.path || !entry.id) {
+        continue;
+      }
+      if (entry.type === "file") {
+        if (!Object.prototype.hasOwnProperty.call(localFiles, entry.path)) {
+          deletions.push({ path: entry.path, id: entry.id, type: "file", name: entry.name || entry.path });
+        }
+        continue;
+      }
+      if (entry.type === "folder" && !localFolderSet[entry.path]) {
+        deletions.push({ path: entry.path, id: entry.id, type: "folder", name: entry.name || entry.path });
+      }
+    }
+    return pruneNestedDriveDeletions(deletions);
+  }
+
+  async function resolveExistingProjectFolderId(projectName) {
+    const name = String(projectName || "").trim();
+    if (!name) {
+      return null;
+    }
+    let folderId = getMappedFolderId(name) || null;
+    if (!folderId && isCurrentProjectShared(name) && getProjectFolderId()) {
+      folderId = getProjectFolderId();
+    }
+    if (!folderId && isCollaborator() && getProjectFolderId()) {
+      folderId = getProjectFolderId();
+    }
+    if (folderId) {
+      const meta = await fetchDriveFileMeta(folderId, "id,trashed,mimeType");
+      if (isDriveFolderMeta(meta)) {
+        return folderId;
+      }
+    }
+    try {
+      const rootId = await ensureUndertwigFolder();
+      const children = await listChildren(rootId);
+      for (let i = 0; i < children.length; i += 1) {
+        const child = children[i];
+        if (
+          child &&
+          child.mimeType === "application/vnd.google-apps.folder" &&
+          child.name === name
+        ) {
+          setMappedProject(name, child.id, getMappedRole(name) || "owner");
+          return child.id;
+        }
+      }
+    } catch (_error) {
+      // Ignore lookup failures; caller treats this as "nothing to delete".
+    }
+    return null;
+  }
+
+  async function previewSaveDeletions(state, options) {
+    const opts = options || {};
+    await connect();
+    const projectName =
+      opts.projectName || inferProjectName(state && state.activeFile) || listRootProjects(state)[0];
+    if (!projectName) {
+      return { projectName: "", folderId: null, deletions: [] };
+    }
+    const folderId = await resolveExistingProjectFolderId(projectName);
+    if (!folderId) {
+      return { projectName: projectName, folderId: null, deletions: [] };
+    }
+    const deletions = await findDriveDeletions(folderId, state, projectName);
+    return { projectName: projectName, folderId: folderId, deletions: deletions };
+  }
+
   async function uploadFileToFolder(parentId, fileName, fileEntry, existingId) {
     const mime = mimeForPath(fileName);
     const bodyBlob = fileEntry.binary
@@ -1017,9 +1151,17 @@
     return Array.from(names).sort();
   }
 
-  async function syncFilesIntoExistingFolder(folderId, state, projectName) {
+  async function syncFilesIntoExistingFolder(folderId, state, projectName, options) {
+    const opts = options || {};
     const relativeFiles = filesForProject(state, projectName);
     const relativeFolders = foldersForProject(state, projectName);
+
+    if (opts.deleteMissing) {
+      const deletions = await findDriveDeletions(folderId, state, projectName);
+      for (let i = 0; i < deletions.length; i += 1) {
+        await trashDriveFile(deletions[i].id);
+      }
+    }
 
     for (let i = 0; i < relativeFolders.length; i += 1) {
       await ensurePathFolders(folderId, relativeFolders[i]);
@@ -1039,10 +1181,11 @@
     return folderId;
   }
 
-  async function syncOneProject(state, projectName) {
+  async function syncOneProject(state, projectName, options) {
+    const opts = options || {};
     try {
       const folderId = await ensureProjectFolder(projectName);
-      await syncFilesIntoExistingFolder(folderId, state, projectName);
+      await syncFilesIntoExistingFolder(folderId, state, projectName, opts);
       writeRole("owner");
       return folderId;
     } catch (error) {
@@ -1053,7 +1196,7 @@
       // Stale cached IDs (often a legacy JSON file) — rebuild Undertwig folders once.
       clearFolderCaches();
       const folderId = await ensureProjectFolder(projectName);
-      await syncFilesIntoExistingFolder(folderId, state, projectName);
+      await syncFilesIntoExistingFolder(folderId, state, projectName, opts);
       writeRole("owner");
       return folderId;
     }
@@ -1061,6 +1204,7 @@
 
   async function saveProject(state, options) {
     const opts = options || {};
+    const syncOpts = { deleteMissing: Boolean(opts.deleteMissing) };
     const run = async function () {
       await connect();
       const projectName =
@@ -1077,7 +1221,7 @@
           throw new Error("Shared project folder is no longer accessible.");
         }
         setMappedProject(projectName, sharedId, cachedRole || "writer");
-        await syncFilesIntoExistingFolder(sharedId, state, projectName);
+        await syncFilesIntoExistingFolder(sharedId, state, projectName, syncOpts);
         return { folderIds: [sharedId], role: cachedRole };
       }
 
@@ -1097,7 +1241,7 @@
       }
       const folderIds = [];
       for (let i = 0; i < projects.length; i += 1) {
-        folderIds.push(await syncOneProject(state, projects[i]));
+        folderIds.push(await syncOneProject(state, projects[i], syncOpts));
       }
       return { folderIds: folderIds, role: "owner" };
     };
@@ -1853,6 +1997,7 @@
     shareProjectWithEmail,
     refreshProjectMeta,
     probeConnection,
+    previewSaveDeletions,
     syncProject,
     saveProject,
     listRootProjects,

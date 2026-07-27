@@ -798,6 +798,97 @@
         display: none;
       }
 
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: rgba(8, 12, 16, 0.62);
+      }
+
+      .modal-overlay.hidden {
+        display: none;
+      }
+
+      .modal-card {
+        width: min(440px, 100%);
+        max-height: min(80vh, 560px);
+        overflow: auto;
+        padding: 18px 18px 14px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        color: var(--text);
+      }
+
+      .modal-card h2 {
+        margin: 0 0 10px;
+        font-size: 16px;
+        font-weight: 650;
+      }
+
+      .modal-card p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .modal-card ul {
+        margin: 0 0 14px;
+        padding: 10px 10px 10px 28px;
+        max-height: 160px;
+        overflow: auto;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel-soft);
+        color: var(--text);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .modal-card label.modal-check {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin: 0 0 16px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+        cursor: pointer;
+      }
+
+      .modal-card label.modal-check input {
+        margin-top: 2px;
+      }
+
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .modal-actions button {
+        min-width: 72px;
+        min-height: 34px;
+        padding: 0 14px;
+        font-size: 13px;
+      }
+
+      .modal-actions .modal-confirm {
+        background: var(--brand);
+        border-color: color-mix(in srgb, var(--brand) 70%, #000);
+        color: #fff;
+      }
+
+      .modal-actions .modal-confirm:hover {
+        background: var(--brand-strong);
+      }
+
       @media (max-width: 920px) {
         body {
           overflow: auto;
@@ -962,10 +1053,28 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260728h"></script>
-    <script src="auth.js?v=20260728h"></script>
-    <script src="cloud-storage.js?v=20260728h"></script>
-    <script src="invite.js?v=20260728h"></script>
+    <div class="modal-overlay hidden" id="driveDeleteDialog" role="alertdialog" aria-modal="true" aria-labelledby="driveDeleteTitle" aria-describedby="driveDeleteMessage">
+      <div class="modal-card">
+        <h2 id="driveDeleteTitle">Remove files from Google Drive?</h2>
+        <p id="driveDeleteMessage">
+          Saving will permanently remove these items from Google Drive because they were deleted locally. Do you want to continue?
+        </p>
+        <ul id="driveDeleteList"></ul>
+        <label class="modal-check">
+          <input type="checkbox" id="driveDeleteDontShow">
+          <span>Don't show this message again</span>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="driveDeleteCancel">No</button>
+          <button type="button" class="modal-confirm" id="driveDeleteConfirm">Yes</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="auth-config.js?v=20260728i"></script>
+    <script src="auth.js?v=20260728i"></script>
+    <script src="cloud-storage.js?v=20260728i"></script>
+    <script src="invite.js?v=20260728i"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1416,15 +1525,47 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
               setStatus("Select or set a current project before saving to Google Drive.", true);
               return;
             }
+
+            let deletions = [];
+            if (UndertwigCloud.previewSaveDeletions) {
+              setStatus("Checking Google Drive for removed files…");
+              const preview = await UndertwigCloud.previewSaveDeletions(state, {
+                projectName: projectName,
+              });
+              deletions = (preview && preview.deletions) || [];
+            }
+
+            if (deletions.length) {
+              const confirmed = await confirmDriveDeleteDialog(deletions, projectName);
+              if (!confirmed) {
+                setStatus("Save cancelled.");
+                return;
+              }
+            }
+
             setStatus("Saving “" + projectName + "” to Google Drive…");
             await UndertwigCloud.saveProject(state, {
               projectName: projectName,
+              deleteMissing: true,
             });
             renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+            const deleteNote = deletions.length
+              ? " Removed " +
+                deletions.length +
+                " deleted item" +
+                (deletions.length === 1 ? "" : "s") +
+                " from Drive."
+              : "";
             setStatus(
               localOk
-                ? "Saved in this browser and synced “" + projectName + "” to Google Drive."
-                : "Saved “" + projectName + "” to Google Drive (browser storage is full)."
+                ? "Saved in this browser and synced “" +
+                    projectName +
+                    "” to Google Drive." +
+                    deleteNote
+                : "Saved “" +
+                    projectName +
+                    "” to Google Drive (browser storage is full)." +
+                    deleteNote
             );
             return;
           }
@@ -1451,6 +1592,96 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           saveButton.disabled = false;
         }
       }
+
+      const DRIVE_DELETE_SKIP_KEY = "undertwig-skip-drive-delete-warning-v1";
+      const driveDeleteDialog = document.getElementById("driveDeleteDialog");
+      const driveDeleteList = document.getElementById("driveDeleteList");
+      const driveDeleteMessage = document.getElementById("driveDeleteMessage");
+      const driveDeleteDontShow = document.getElementById("driveDeleteDontShow");
+      const driveDeleteCancel = document.getElementById("driveDeleteCancel");
+      const driveDeleteConfirm = document.getElementById("driveDeleteConfirm");
+      let driveDeleteDialogResolver = null;
+
+      function readSkipDriveDeleteWarning() {
+        try {
+          return localStorage.getItem(DRIVE_DELETE_SKIP_KEY) === "1";
+        } catch (_error) {
+          return false;
+        }
+      }
+
+      function writeSkipDriveDeleteWarning(enabled) {
+        try {
+          if (enabled) {
+            localStorage.setItem(DRIVE_DELETE_SKIP_KEY, "1");
+          } else {
+            localStorage.removeItem(DRIVE_DELETE_SKIP_KEY);
+          }
+        } catch (_error) {
+          // Preference is optional.
+        }
+      }
+
+      function closeDriveDeleteDialog(result) {
+        driveDeleteDialog.classList.add("hidden");
+        const resolve = driveDeleteDialogResolver;
+        driveDeleteDialogResolver = null;
+        if (resolve) {
+          resolve(Boolean(result));
+        }
+      }
+
+      function confirmDriveDeleteDialog(deletions, projectName) {
+        if (!deletions || !deletions.length) {
+          return Promise.resolve(true);
+        }
+        if (readSkipDriveDeleteWarning()) {
+          return Promise.resolve(true);
+        }
+
+        const names = deletions.map(function (item) {
+          const label = item.path || item.name || "";
+          return (item.type === "folder" ? label + "/" : label) || "(unnamed)";
+        });
+        driveDeleteMessage.textContent =
+          "Saving “" +
+          (projectName || "this project") +
+          "” will permanently remove these items from Google Drive because they were deleted locally. Do you want to continue?";
+        driveDeleteList.replaceChildren();
+        names.forEach(function (name) {
+          const li = document.createElement("li");
+          li.textContent = name;
+          driveDeleteList.appendChild(li);
+        });
+        driveDeleteDontShow.checked = false;
+        driveDeleteDialog.classList.remove("hidden");
+        driveDeleteConfirm.focus();
+
+        return new Promise(function (resolve) {
+          driveDeleteDialogResolver = resolve;
+        });
+      }
+
+      driveDeleteCancel.addEventListener("click", () => {
+        closeDriveDeleteDialog(false);
+      });
+      driveDeleteConfirm.addEventListener("click", () => {
+        if (driveDeleteDontShow.checked) {
+          writeSkipDriveDeleteWarning(true);
+        }
+        closeDriveDeleteDialog(true);
+      });
+      driveDeleteDialog.addEventListener("click", (event) => {
+        if (event.target === driveDeleteDialog) {
+          closeDriveDeleteDialog(false);
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !driveDeleteDialog.classList.contains("hidden")) {
+          event.preventDefault();
+          closeDriveDeleteDialog(false);
+        }
+      });
 
       function closeHoverBoxes() {
         collaborateBox.classList.add("hidden");
@@ -2673,22 +2904,24 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           }
         });
 
-        const deleteButton = document.createElement("button");
-        deleteButton.type = "button";
-        deleteButton.className = "tree-delete";
-        deleteButton.title = `Delete ${node.name}`;
-        deleteButton.setAttribute("aria-label", `Delete ${node.path}`);
-        deleteButton.textContent = "x";
-        deleteButton.addEventListener("click", (event) => {
-          event.stopPropagation();
-          if (node.type === "folder") {
-            deleteFolder(node.path);
-          } else {
-            deleteFile(node.path);
-          }
-        });
         item.appendChild(row);
-        item.appendChild(deleteButton);
+        if (opts.section === "current") {
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "tree-delete";
+          deleteButton.title = `Delete ${node.name}`;
+          deleteButton.setAttribute("aria-label", `Delete ${node.path}`);
+          deleteButton.textContent = "x";
+          deleteButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            if (node.type === "folder") {
+              deleteFolder(node.path);
+            } else {
+              deleteFile(node.path);
+            }
+          });
+          item.appendChild(deleteButton);
+        }
 
         wrapper.appendChild(item);
         if (isFolder && !isCollapsed) {
@@ -2772,8 +3005,21 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         setStatus(`Moved ${sourcePath} → ${destination}.`);
       }
 
+      function pathBelongsToCurrentProject(path) {
+        const cleaned = normalizePath(path);
+        const project = getActiveProjectName();
+        if (!cleaned || !project) {
+          return false;
+        }
+        return cleaned === project || cleaned.startsWith(project + "/");
+      }
+
       function deleteFile(path) {
         if (!state.files[path]) return;
+        if (!pathBelongsToCurrentProject(path)) {
+          setStatus("Only files in the current project can be deleted.", true);
+          return;
+        }
         if (!confirm(`Delete ${path}?`)) return;
 
         delete state.files[path];
@@ -2789,6 +3035,10 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
       function deleteFolder(path) {
         if (!path) return;
+        if (!pathBelongsToCurrentProject(path)) {
+          setStatus("Only folders in the current project can be deleted.", true);
+          return;
+        }
 
         const prefix = path + "/";
         const nestedFiles = Object.keys(state.files).filter((filePath) => filePath.startsWith(prefix));
