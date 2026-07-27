@@ -783,7 +783,7 @@
         <div class="tree" id="tree"></div>
         <div class="cloud-status is-logged-out" id="cloudStatus" role="status" aria-live="polite">
           <span class="cloud-status-dot" id="cloudStatusDot" aria-hidden="true"></span>
-          <span class="cloud-status-text" id="cloudStatusText"><a href="login.html?next=/">Log in</a> to connect</span>
+          <span class="cloud-status-text" id="cloudStatusText"><a href="login.html?next=/">Log in</a> to connect to your Google Drive (free)</span>
         </div>
         <div class="legal-links">
           <a href="privacy.html">Privacy</a>
@@ -1154,7 +1154,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         login.href = UndertwigAuth.loginUrl("/");
         login.textContent = "Log in";
         cloudStatusText.appendChild(login);
-        cloudStatusText.appendChild(document.createTextNode(" to connect"));
+        cloudStatusText.appendChild(document.createTextNode(" to connect to your Google Drive (free)"));
       }
 
       function refreshCloudStatus() {
