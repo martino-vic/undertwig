@@ -890,22 +890,24 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
             persistProject();
             render();
           });
-
-          const deleteButton = document.createElement("button");
-          deleteButton.type = "button";
-          deleteButton.className = "tree-delete";
-          deleteButton.title = `Delete ${node.name}`;
-          deleteButton.setAttribute("aria-label", `Delete ${node.path}`);
-          deleteButton.textContent = "x";
-          deleteButton.addEventListener("click", (event) => {
-            event.stopPropagation();
-            deleteFile(node.path);
-          });
-          item.appendChild(row);
-          item.appendChild(deleteButton);
-        } else {
-          item.appendChild(row);
         }
+
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "tree-delete";
+        deleteButton.title = `Delete ${node.name}`;
+        deleteButton.setAttribute("aria-label", `Delete ${node.path}`);
+        deleteButton.textContent = "x";
+        deleteButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (node.type === "folder") {
+            deleteFolder(node.path);
+          } else {
+            deleteFile(node.path);
+          }
+        });
+        item.appendChild(row);
+        item.appendChild(deleteButton);
 
         wrapper.appendChild(item);
         if (node.type === "folder") {
@@ -928,6 +930,36 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
         persistProject();
         render();
         setStatus(`Deleted ${path}.`);
+      }
+
+      function deleteFolder(path) {
+        if (!path) return;
+
+        const prefix = path + "/";
+        const nestedFiles = Object.keys(state.files).filter((filePath) => filePath.startsWith(prefix));
+        const hasFolderEntry = (state.folders || []).some(
+          (folderPath) => folderPath === path || folderPath.startsWith(prefix)
+        );
+
+        if (!nestedFiles.length && !hasFolderEntry) return;
+        if (!confirm(`Delete folder ${path} and everything inside it?`)) return;
+
+        nestedFiles.forEach((filePath) => {
+          delete state.files[filePath];
+        });
+
+        state.folders = (state.folders || []).filter(
+          (folderPath) => folderPath !== path && !folderPath.startsWith(prefix)
+        );
+
+        if (!state.activeFile || state.activeFile.startsWith(prefix)) {
+          const remaining = Object.keys(state.files).sort();
+          state.activeFile = remaining.includes("main.tex") ? "main.tex" : (remaining[0] || "");
+        }
+
+        persistProject();
+        render();
+        setStatus(`Deleted folder ${path}.`);
       }
 
       function createFile() {
