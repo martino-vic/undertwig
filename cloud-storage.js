@@ -1221,12 +1221,11 @@
     }
 
     const activeProject = opts.projectName || inferProjectName(localState.activeFile) || projects[0];
-    await syncOneProject(localState, activeProject);
-    for (let i = 0; i < projects.length; i += 1) {
-      if (projects[i] !== activeProject) {
-        await syncOneProject(localState, projects[i]);
-      }
+    if (!activeProject) {
+      writeRole("owner");
+      return { project: localState, source: "uploaded", role: "owner" };
     }
+    await syncOneProject(localState, activeProject);
 
     return {
       project: localState,
@@ -1255,10 +1254,11 @@
 
   /**
    * Return a Drive UI URL for a folder the signed-in user can open.
-   * Avoids stale IDs (which show "You need access" in the Drive UI).
+   * Prefer the current project folder when projectName is provided.
    */
-  async function getOpenInDriveUrl(preferredId) {
+  async function getOpenInDriveUrl(preferredId, options) {
     await connect();
+    const projectName = String((options && options.projectName) || "").trim();
     const candidates = [];
     const seen = {};
     const push = (id) => {
@@ -1270,16 +1270,25 @@
       candidates.push(value);
     };
     push(preferredId);
+    if (projectName && projectFolderMap[projectName]) {
+      push(projectFolderMap[projectName]);
+    }
     push(getProjectFolderId());
+
+    if (projectName) {
+      try {
+        push(await ensureProjectFolder(projectName));
+      } catch (_error) {
+        // Fall through to other candidates.
+      }
+    }
+
     push(cachedUndertwigFolderId);
     try {
       push(localStorage.getItem(UNDERTWIG_FOLDER_KEY));
     } catch (_error) {
       // Ignore.
     }
-    Object.keys(projectFolderMap).forEach(function (name) {
-      push(projectFolderMap[name]);
-    });
 
     for (let i = 0; i < candidates.length; i += 1) {
       const meta = await fetchDriveFileMeta(
@@ -1303,6 +1312,18 @@
       return "https://drive.google.com/drive/folders/" + encodeURIComponent(rootMeta.id);
     }
     return "https://drive.google.com/drive/my-drive";
+  }
+
+  function setActiveProjectByName(projectName) {
+    const name = String(projectName || "").trim();
+    if (!name) {
+      return null;
+    }
+    const id = projectFolderMap[name] || null;
+    if (id) {
+      writeActiveFolderId(id);
+    }
+    return id;
   }
 
   function setActiveProjectFileId(folderId) {
@@ -1423,6 +1444,7 @@
     getProjectFolderId,
     getProjectRole,
     setActiveProjectFileId,
+    setActiveProjectByName,
     buildProjectInvitePath,
     joinSharedProject,
     shareProjectWithEmail,

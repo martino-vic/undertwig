@@ -172,6 +172,50 @@
         min-width: 0;
       }
 
+      .tree-section {
+        min-width: 0;
+      }
+
+      .tree-section-label {
+        padding: 10px 12px 4px;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        line-height: 1.2;
+        text-transform: uppercase;
+        user-select: none;
+      }
+
+      .tree-section-body {
+        min-width: 0;
+        padding-bottom: 4px;
+      }
+
+      .tree-section-body.is-empty {
+        padding: 4px 12px 8px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .tree-section-current {
+        border-radius: 6px;
+        transition: background 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .tree-section-current.is-project-drop {
+        background: color-mix(in srgb, var(--brand) 12%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 45%, transparent);
+      }
+
+      .tree-section-divider {
+        height: 0;
+        margin: 6px 12px 2px;
+        border: 0;
+        border-top: 1px solid var(--border);
+      }
+
       .tree-row[aria-expanded] .tree-icon {
         color: var(--brand-strong);
       }
@@ -911,10 +955,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727t"></script>
-    <script src="auth.js?v=20260727t"></script>
-    <script src="cloud-storage.js?v=20260727t"></script>
-    <script src="invite.js?v=20260727t"></script>
+    <script src="auth-config.js?v=20260727u"></script>
+    <script src="auth.js?v=20260727u"></script>
+    <script src="cloud-storage.js?v=20260727u"></script>
+    <script src="invite.js?v=20260727u"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1044,6 +1088,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         const root = "SampleProject";
         return {
           version: 2,
+          currentProject: root,
           activeFile: root + "/main.tex",
           folders: [root, root + "/sections", root + "/figures"],
           files: {
@@ -1153,6 +1198,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const cloudStatusDot = document.getElementById("cloudStatusDot");
       const cloudStatusText = document.getElementById("cloudStatusText");
       let dragSourcePath = null;
+      let dragSourceProject = null;
       let cloudSaveTimer = null;
       let cloudSaveInFlight = false;
       let cloudStatusMode = "logged-out";
@@ -1192,18 +1238,24 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           const role = UndertwigCloud.getProjectRole && UndertwigCloud.getProjectRole();
           const label =
             role === "writer" || role === "reader"
-              ? "Connected (shared project) "
-              : "Connected ";
+              ? "Connected (shared project). "
+              : "Connected. ";
           cloudStatusText.appendChild(document.createTextNode(label));
           const link = document.createElement("a");
-          const initialId = fileId || UndertwigCloud.getProjectFileId();
+          const currentName = getActiveProjectName();
+          const initialId =
+            fileId ||
+            (UndertwigCloud.setActiveProjectByName && currentName
+              ? UndertwigCloud.setActiveProjectByName(currentName)
+              : null) ||
+            UndertwigCloud.getProjectFileId();
           link.href = driveProjectUrl(initialId);
           link.target = "_blank";
           link.rel = "noopener";
           link.textContent = "Open in Google Drive";
           cloudStatusText.appendChild(link);
           if (UndertwigCloud.getOpenInDriveUrl) {
-            UndertwigCloud.getOpenInDriveUrl(initialId)
+            UndertwigCloud.getOpenInDriveUrl(initialId, { projectName: currentName || undefined })
               .then((url) => {
                 if (url && cloudStatusMode === "connected" && link.isConnected) {
                   link.href = url;
@@ -1319,19 +1371,19 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             }
 
             const projectName = getActiveProjectName();
-            setStatus(
-              projectName
-                ? "Saving “" + projectName + "” to Google Drive…"
-                : "Saving projects to Google Drive…"
-            );
+            if (!projectName) {
+              setStatus("Select or set a current project before saving to Google Drive.", true);
+              return;
+            }
+            setStatus("Saving “" + projectName + "” to Google Drive…");
             await UndertwigCloud.saveProject(state, {
-              projectName: projectName || undefined,
+              projectName: projectName,
             });
             renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
             setStatus(
               localOk
-                ? "Saved in this browser and synced to Google Drive."
-                : "Saved to Google Drive (browser storage is full)."
+                ? "Saved in this browser and synced “" + projectName + "” to Google Drive."
+                : "Saved “" + projectName + "” to Google Drive (browser storage is full)."
             );
             return;
           }
@@ -1432,7 +1484,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
       function showCollaborateLoggedIn() {
         collaborateMessage.textContent =
-          "Invite someone to edit the active project folder on your Google Drive (Undertwig / " +
+          "Invite someone to edit the current project folder on your Google Drive (Undertwig / " +
           (getActiveProjectName() || "…") +
           "). You remain the owner.";
         inviteForm.classList.remove("hidden");
@@ -1515,7 +1567,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         try {
           const projectName = getActiveProjectName();
           if (!projectName) {
-            throw new Error("Select a file inside a project folder before inviting collaborators.");
+            throw new Error("Set a current project in the file tree before inviting collaborators.");
           }
 
           // One popup for Drive + Gmail, opened from this click (no await before it).
@@ -1663,18 +1715,37 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         const active = legacy.activeFile ? root + "/" + legacy.activeFile : root + "/main.tex";
         return normalizeWorkspace({
           version: 2,
+          currentProject: root,
           activeFile: active,
           folders: Array.from(folders),
           files: files,
         });
       }
 
+      function listLocalRootProjects(workspace) {
+        const names = new Set();
+        ((workspace && workspace.folders) || []).forEach((path) => {
+          const root = String(path || "").split("/")[0];
+          if (root) {
+            names.add(root);
+          }
+        });
+        Object.keys((workspace && workspace.files) || {}).forEach((path) => {
+          const root = String(path || "").split("/")[0];
+          if (root) {
+            names.add(root);
+          }
+        });
+        return Array.from(names).sort((a, b) => a.localeCompare(b));
+      }
+
       function normalizeWorkspace(workspace) {
         const next = {
           version: 2,
-          activeFile: workspace.activeFile || "",
-          folders: Array.isArray(workspace.folders) ? workspace.folders.slice() : [],
-          files: workspace.files || {},
+          currentProject: String((workspace && workspace.currentProject) || "").trim(),
+          activeFile: (workspace && workspace.activeFile) || "",
+          folders: Array.isArray(workspace && workspace.folders) ? workspace.folders.slice() : [],
+          files: (workspace && workspace.files) || {},
         };
         // Ensure every root project exists as a folder entry.
         Object.keys(next.files).forEach((path) => {
@@ -1683,11 +1754,24 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             next.folders.push(root);
           }
         });
+        const roots = listLocalRootProjects(next);
+        if (next.currentProject && !roots.includes(next.currentProject)) {
+          next.currentProject = "";
+        }
+        if (!next.currentProject) {
+          const fromActive =
+            next.activeFile && next.activeFile.includes("/")
+              ? next.activeFile.split("/")[0]
+              : "";
+          next.currentProject =
+            (fromActive && roots.includes(fromActive) ? fromActive : "") || roots[0] || "";
+        }
         return next;
       }
 
       function replaceProjectState(nextState) {
         const normalized = normalizeWorkspace(nextState);
+        state.currentProject = normalized.currentProject || "";
         state.activeFile = normalized.activeFile || "";
         state.folders = normalized.folders;
         state.files = normalized.files;
@@ -1695,14 +1779,59 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       }
 
       function getActiveProjectName() {
+        const roots = listLocalRootProjects(state);
+        if (state.currentProject && roots.includes(state.currentProject)) {
+          return state.currentProject;
+        }
         const path = state.activeFile || "";
         if (path.includes("/")) {
-          return path.split("/")[0];
+          const fromActive = path.split("/")[0];
+          if (roots.includes(fromActive)) {
+            state.currentProject = fromActive;
+            return fromActive;
+          }
         }
-        const roots = UndertwigCloud.listRootProjects
-          ? UndertwigCloud.listRootProjects(state)
-          : [];
-        return roots[0] || "";
+        state.currentProject = roots[0] || "";
+        return state.currentProject;
+      }
+
+      function setCurrentProject(projectName, options) {
+        const name = String(projectName || "").trim();
+        const roots = listLocalRootProjects(state);
+        if (!name || !roots.includes(name)) {
+          return false;
+        }
+        const previous = state.currentProject;
+        state.currentProject = name;
+        collapsedFolders.delete(name);
+        persistCollapsedFolders();
+
+        const keepActive =
+          options && options.keepActiveFile && state.activeFile && state.activeFile.startsWith(name + "/");
+        if (!keepActive) {
+          const mainPath = name + "/main.tex";
+          if (state.files[mainPath]) {
+            state.activeFile = mainPath;
+          } else {
+            state.activeFile = pickFallbackActiveFile(name);
+          }
+        }
+
+        if (UndertwigCloud.setActiveProjectByName) {
+          UndertwigCloud.setActiveProjectByName(name);
+        }
+
+        persistProject({ immediateCloud: true });
+        render();
+        if (cloudStatusMode === "connected") {
+          renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+        }
+        if (previous && previous !== name) {
+          setStatus("Current project is now “" + name + "”. “" + previous + "” moved to Other.");
+        } else {
+          setStatus("Current project is “" + name + "”.");
+        }
+        return true;
       }
 
       let cloudInitPromise = null;
@@ -1839,13 +1968,11 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
                 projectName: getActiveProjectName() || undefined,
               });
               if (cloudStatusMode === "connected") {
-                const fileCount = Object.keys(state.files || {}).length;
+                const currentName = getActiveProjectName();
                 setStatus(
-                  "Synced " +
-                    fileCount +
-                    " file" +
-                    (fileCount === 1 ? "" : "s") +
-                    " to Google Drive / Undertwig."
+                  currentName
+                    ? "Synced current project “" + currentName + "” to Google Drive / Undertwig."
+                    : "Connected to Google Drive."
                 );
                 renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
               }
@@ -1966,7 +2093,85 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       function renderTree() {
         tree.textContent = "";
         const root = buildTree();
-        root.children.forEach((node) => tree.appendChild(renderNode(node, 0)));
+        const currentName = getActiveProjectName();
+        const currentNode = currentName
+          ? root.children.find((node) => node.type === "folder" && node.path === currentName)
+          : null;
+        const otherNodes = root.children.filter(
+          (node) => node.type === "folder" && node.path !== currentName
+        );
+
+        const currentSection = document.createElement("div");
+        currentSection.className = "tree-section tree-section-current";
+        const currentLabel = document.createElement("div");
+        currentLabel.className = "tree-section-label";
+        currentLabel.textContent = "Current";
+        currentSection.appendChild(currentLabel);
+
+        const currentBody = document.createElement("div");
+        currentBody.className = "tree-section-body";
+        if (currentNode) {
+          currentBody.appendChild(renderNode(currentNode, 0, { section: "current" }));
+        } else {
+          currentBody.classList.add("is-empty");
+          currentBody.textContent = "No current project";
+        }
+        currentSection.appendChild(currentBody);
+
+        currentSection.addEventListener("dragover", (event) => {
+          if (!dragSourceProject || dragSourceProject === currentName) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+          currentSection.classList.add("is-project-drop");
+        });
+        currentSection.addEventListener("dragleave", (event) => {
+          if (!currentSection.contains(event.relatedTarget)) {
+            currentSection.classList.remove("is-project-drop");
+          }
+        });
+        currentSection.addEventListener("drop", (event) => {
+          if (!dragSourceProject) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          currentSection.classList.remove("is-project-drop");
+          const next = dragSourceProject;
+          dragSourceProject = null;
+          if (next && next !== getActiveProjectName()) {
+            setCurrentProject(next);
+          }
+        });
+
+        tree.appendChild(currentSection);
+
+        const divider = document.createElement("hr");
+        divider.className = "tree-section-divider";
+        divider.setAttribute("aria-hidden", "true");
+        tree.appendChild(divider);
+
+        const otherSection = document.createElement("div");
+        otherSection.className = "tree-section tree-section-other";
+        const otherLabel = document.createElement("div");
+        otherLabel.className = "tree-section-label";
+        otherLabel.textContent = "Other";
+        otherSection.appendChild(otherLabel);
+
+        const otherBody = document.createElement("div");
+        otherBody.className = "tree-section-body";
+        if (otherNodes.length) {
+          otherNodes.forEach((node) => {
+            otherBody.appendChild(renderNode(node, 0, { section: "other", projectDraggable: true }));
+          });
+        } else {
+          otherBody.classList.add("is-empty");
+          otherBody.textContent = "No other projects yet";
+        }
+        otherSection.appendChild(otherBody);
+        tree.appendChild(otherSection);
       }
 
       tree.addEventListener("dragover", (event) => {
@@ -2031,13 +2236,16 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         });
       }
 
-      function renderNode(node, depth) {
+      function renderNode(node, depth, options) {
+        const opts = options || {};
         const wrapper = document.createElement("div");
         const item = document.createElement("div");
         item.className = "tree-item";
 
         const isFolder = node.type === "folder";
         const isCollapsed = isFolder && collapsedFolders.has(node.path);
+        const isRootProject = isFolder && !node.path.includes("/");
+        const projectDraggable = Boolean(opts.projectDraggable && isRootProject);
 
         const row = document.createElement("button");
         row.type = "button";
@@ -2048,6 +2256,10 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         if (isFolder) {
           row.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
           row.title = isCollapsed ? `Expand ${node.name}` : `Collapse ${node.name}`;
+        }
+        if (projectDraggable) {
+          row.title = "Drag to Current to make this the active project";
+          row.draggable = true;
         }
         row.innerHTML = `<span class="tree-icon">${isFolder ? (isCollapsed ? ">" : "v") : "-"}</span><span class="tree-name"></span>`;
         row.querySelector(".tree-name").textContent = node.name;
@@ -2062,6 +2274,23 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             persistCollapsedFolders();
             renderTree();
           });
+          if (projectDraggable) {
+            row.addEventListener("dragstart", (event) => {
+              dragSourceProject = node.path;
+              dragSourcePath = null;
+              event.dataTransfer.setData("text/plain", "project:" + node.path);
+              event.dataTransfer.effectAllowed = "move";
+              row.classList.add("dragging");
+            });
+            row.addEventListener("dragend", () => {
+              dragSourceProject = null;
+              row.classList.remove("dragging");
+              clearDropIndicators();
+              tree.querySelectorAll(".tree-section-current.is-project-drop").forEach((el) => {
+                el.classList.remove("is-project-drop");
+              });
+            });
+          }
         } else {
           row.draggable = true;
           row.addEventListener("click", () => {
@@ -2071,6 +2300,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           });
           row.addEventListener("dragstart", (event) => {
             dragSourcePath = node.path;
+            dragSourceProject = null;
             event.dataTransfer.setData("text/plain", node.path);
             event.dataTransfer.effectAllowed = "move";
             row.classList.add("dragging");
@@ -2083,6 +2313,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
 
         row.addEventListener("dragover", (event) => {
+          if (dragSourceProject) {
+            return;
+          }
           if (!dragSourcePath) return;
           if (node.type === "file" && dragSourcePath === node.path) return;
           event.preventDefault();
@@ -2099,6 +2332,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         });
 
         row.addEventListener("drop", (event) => {
+          if (dragSourceProject) {
+            return;
+          }
           if (!dragSourcePath) return;
           event.preventDefault();
           event.stopPropagation();
@@ -2135,7 +2371,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         if (isFolder && !isCollapsed) {
           const children = document.createElement("div");
           children.className = "tree-children";
-          node.children.forEach((child) => children.appendChild(renderNode(child, depth + 1)));
+          node.children.forEach((child) => children.appendChild(renderNode(child, depth + 1, { section: opts.section })));
           wrapper.appendChild(children);
         }
         return wrapper;
@@ -2258,6 +2494,14 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         if (!state.activeFile || state.activeFile === path || state.activeFile.startsWith(prefix)) {
           const parentProject = path.includes("/") ? path.split("/")[0] : "";
           state.activeFile = pickFallbackActiveFile(parentProject);
+        }
+
+        if (!path.includes("/") && state.currentProject === path) {
+          const roots = listLocalRootProjects(state);
+          state.currentProject = roots[0] || "";
+          if (state.currentProject && UndertwigCloud.setActiveProjectByName) {
+            UndertwigCloud.setActiveProjectByName(state.currentProject);
+          }
         }
 
         persistProject({ immediateCloud: true });
@@ -2452,10 +2696,8 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           return;
         }
         addFolder(name);
-        state.activeFile = "";
-        persistProject({ immediateCloud: true });
-        render();
-        setStatus(`Created project folder ${name}. Add files inside it to sync to Google Drive / Undertwig / ${name}.`);
+        setCurrentProject(name);
+        setStatus(`Created project folder ${name}. It is now the current project.`);
       }
 
       function createFile() {
