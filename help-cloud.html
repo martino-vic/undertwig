@@ -113,11 +113,38 @@
       <h2>Quick checks</h2>
       <ol>
         <li>Confirm you are signed in to Undertwig with Google.</li>
-        <li>Under the file tree, click <strong>Connect</strong> and allow the Google permission popup
-          (allow popups for <code>accounts.google.com</code> / <code>undertwig.com</code>).</li>
+        <li>Under the file tree, click <strong>Connect</strong> and finish the Google permission popup
+          (you may have up to about two minutes — do not ignore a background tab/window).</li>
         <li>After Connect succeeds once, reloads should show green automatically (token is kept for the tab session).</li>
-        <li>If it still looks stuck, hard-refresh (<code>Ctrl+Shift+R</code>). Status should never stay on “Checking…” for more than a few seconds.</li>
         <li>Use the same site origin you authorized (for example <code>https://www.undertwig.com</code>).</li>
+      </ol>
+
+      <h2>Brave browser</h2>
+      <p>
+        Brave often blocks Google’s permission window even when “popups” look allowed.
+        Check both of these:
+      </p>
+      <ol>
+        <li>
+          <strong>Site popups:</strong> click the Brave lion / site controls on the left of the address bar
+          → <strong>Site settings</strong> (or the padlock/tune icon) →
+          <strong>Popups and redirects</strong> → <strong>Allow</strong> for
+          <code>www.undertwig.com</code>.
+        </li>
+        <li>
+          <strong>Shields:</strong> click the lion icon → set Shields to
+          <strong>Down</strong> for undertwig.com, or leave Shields up but allow cookies /
+          disable aggressive blocking for this site. Google sign-in needs access to
+          <code>accounts.google.com</code>.
+        </li>
+        <li>
+          Optional: <strong>Settings → Shields → Content filtering</strong> / cookie settings —
+          allow third-party cookies for Google accounts if Connect still fails.
+        </li>
+        <li>
+          Look for a blocked-popup icon in the address bar right after clicking Connect.
+          If Brave blocked it, choose <strong>Always allow</strong> and click Connect again.
+        </li>
       </ol>
 
       <h2>Google Cloud Console (project owners)</h2>

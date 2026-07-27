@@ -7,6 +7,8 @@
   const FILE_ID_STORAGE_KEY = "undertwig-drive-file-v1";
   const TOKEN_REQUEST_TIMEOUT_MS = 8000;
   const SILENT_TOKEN_TIMEOUT_MS = 4000;
+  // Interactive Connect waits for the user to finish Google's popup — must not be short.
+  const INTERACTIVE_TOKEN_TIMEOUT_MS = 120000;
   const FETCH_TIMEOUT_MS = 12000;
 
   let memoryAccessToken = null;
@@ -180,6 +182,9 @@
     await ensureGisOauth();
 
     const waitMs = Number(timeoutMs) > 0 ? Number(timeoutMs) : TOKEN_REQUEST_TIMEOUT_MS;
+    // Empty prompt still shows Google UI when consent is missing, as long as this
+    // runs from a user click. Always forcing "consent" is slower and more brittle.
+    const prompt = forcePrompt ? "consent" : "";
 
     const token = await new Promise((resolve, reject) => {
       let settled = false;
@@ -197,7 +202,7 @@
           reject,
           new Error(
             forcePrompt
-              ? "Google Cloud authorization timed out. Allow popups for accounts.google.com, then click Connect."
+              ? "Google Cloud authorization timed out while waiting for the permission popup. In Brave, also check Shields for this site (allow cookies/popups for accounts.google.com), then click Connect again and finish the Google dialog."
               : "Google Cloud authorization needs a permission popup. Click Connect under the file tree."
           )
         );
@@ -207,7 +212,7 @@
         const client = global.google.accounts.oauth2.initTokenClient({
           client_id: clientId,
           scope: DRIVE_SCOPE,
-          prompt: forcePrompt ? "consent" : "",
+          prompt: prompt,
           hint: session.email,
           callback: (response) => {
             if (response && response.error) {
@@ -239,19 +244,29 @@
   async function getAccessToken(options) {
     const forcePrompt = Boolean(options && options.forcePrompt);
     const allowConsentRetry = Boolean(options && options.allowConsentRetry);
+    const interactive = Boolean(options && options.interactive);
     const timeoutMs = options && options.timeoutMs;
-    if (!forcePrompt && hydrateTokenFromStorage()) {
+    if (!forcePrompt && !interactive && hydrateTokenFromStorage()) {
       return memoryAccessToken;
     }
 
     try {
+      // Prefer a normal token request from a user gesture; only force consent on retry.
+      if (interactive && !forcePrompt) {
+        return await requestOauthToken(false, timeoutMs || INTERACTIVE_TOKEN_TIMEOUT_MS);
+      }
       return await requestOauthToken(
         forcePrompt,
-        timeoutMs || (forcePrompt ? TOKEN_REQUEST_TIMEOUT_MS : SILENT_TOKEN_TIMEOUT_MS)
+        timeoutMs ||
+          (forcePrompt || interactive ? INTERACTIVE_TOKEN_TIMEOUT_MS : SILENT_TOKEN_TIMEOUT_MS)
       );
     } catch (error) {
+      if (interactive && !forcePrompt) {
+        // First attempt may fail if Google requires an explicit consent screen.
+        return requestOauthToken(true, INTERACTIVE_TOKEN_TIMEOUT_MS);
+      }
       if (!forcePrompt && allowConsentRetry) {
-        return requestOauthToken(true, TOKEN_REQUEST_TIMEOUT_MS);
+        return requestOauthToken(true, INTERACTIVE_TOKEN_TIMEOUT_MS);
       }
       throw error;
     }
@@ -261,7 +276,11 @@
   async function connect(options) {
     const opts = options || {};
     if (opts.interactive || opts.forcePrompt) {
-      return getAccessToken({ forcePrompt: true, timeoutMs: TOKEN_REQUEST_TIMEOUT_MS });
+      return getAccessToken({
+        interactive: true,
+        forcePrompt: Boolean(opts.forcePrompt),
+        timeoutMs: INTERACTIVE_TOKEN_TIMEOUT_MS,
+      });
     }
     return getAccessToken({
       forcePrompt: false,
