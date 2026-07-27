@@ -565,6 +565,7 @@
         busytex_wasm: BUSYTEX_CORE + "/busytex.wasm",
         preload_data_packages_js: [
           BUSYTEX_TEXLIVE + "/texlive-basic.js",
+          BUSYTEX_TEXLIVE + "/texlive-recommended.js",
         ],
         data_packages_js: [],
         texmf_local: [],
