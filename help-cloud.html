@@ -115,8 +115,8 @@
         <li>Confirm you are signed in to Undertwig with Google.</li>
         <li>Under the file tree, click <strong>Connect</strong> and allow the Google permission popup
           (allow popups for <code>accounts.google.com</code> / <code>undertwig.com</code>).</li>
-        <li>If the status was stuck on “Checking…”, hard-refresh, then click <strong>Connect</strong> again.
-          Auto-connect cannot open a popup without that click.</li>
+        <li>After Connect succeeds once, reloads should show green automatically (token is kept for the tab session).</li>
+        <li>If it still looks stuck, hard-refresh (<code>Ctrl+Shift+R</code>). Status should never stay on “Checking…” for more than a few seconds.</li>
         <li>Use the same site origin you authorized (for example <code>https://www.undertwig.com</code>).</li>
       </ol>
 

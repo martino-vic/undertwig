@@ -815,10 +815,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js"></script>
-    <script src="auth.js"></script>
-    <script src="cloud-storage.js"></script>
-    <script src="invite.js"></script>
+    <script src="auth-config.js?v=20260727b"></script>
+    <script src="auth.js?v=20260727b"></script>
+    <script src="cloud-storage.js?v=20260727b"></script>
+    <script src="invite.js?v=20260727b"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1091,10 +1091,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           renderCloudStatus("logged-out");
           return;
         }
-        // Full connect/sync is owned by initCloudProject so we do not race a probe here.
-        if (cloudStatusMode === "logged-out") {
-          renderCloudStatus("checking");
-        }
+        // Do not flip into a sticky "checking" state here; initCloudProject owns that.
       }
 
       async function connectCloudStorage() {
@@ -1102,7 +1099,6 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           renderCloudStatus("logged-out");
           return;
         }
-        renderCloudStatus("checking");
         setStatus("Connecting to Google Cloud storage…");
         try {
           await initCloudProject({ force: true });
@@ -1342,6 +1338,13 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           return;
         }
 
+        // Without a stored Drive token, browsers will not complete OAuth without a click.
+        // Show Connect immediately instead of hanging on "Checking…".
+        if (!force && !UndertwigCloud.hasAccessToken()) {
+          renderCloudStatus("disconnected");
+          return;
+        }
+
         if (cloudInitPromise) {
           if (!force) {
             return cloudInitPromise;
@@ -1355,36 +1358,43 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
         cloudInitPromise = (async () => {
           renderCloudStatus("checking");
-          const failTimer = setTimeout(() => {
-            // Hard UI escape hatch if anything still hangs above the OAuth timeouts.
-            if (cloudStatusMode === "checking") {
-              renderCloudStatus("disconnected");
-              setStatus(
-                "Google Cloud needs permission. Click Connect under the file tree and allow the popup.",
-                true
-              );
+          let settled = false;
+          const markDisconnected = (message) => {
+            if (settled) {
+              return;
             }
-          }, 10000);
+            settled = true;
+            renderCloudStatus("disconnected");
+            if (message) {
+              setStatus(message, true);
+            }
+          };
+          const markConnected = (fileId) => {
+            settled = true;
+            renderCloudStatus("connected", fileId || UndertwigCloud.getProjectFileId());
+          };
+          const failTimer = setTimeout(() => {
+            markDisconnected(
+              "Google Cloud is taking too long. Click Connect under the file tree and allow the popup."
+            );
+          }, 8000);
 
           try {
-            // Page-load sync is silent only. Interactive grant requires the Connect click.
             if (force) {
               await UndertwigCloud.connect({ interactive: true });
             }
 
-            const result = await Promise.race([
-              UndertwigCloud.syncProject(state),
-              new Promise((_, reject) => {
-                setTimeout(() => {
-                  reject(
-                    new Error(
-                      "Google Cloud sync timed out. Click Connect under the file tree and allow the popup."
-                    )
-                  );
-                }, force ? 15000 : 7000);
-              }),
-            ]);
+            // Prove Drive access with a lightweight list call first, then update UI.
+            // Full project download/upload can be large and must not own the status spinner.
+            const probe = await UndertwigCloud.probeConnection();
+            if (!probe.connected) {
+              throw new Error(probe.reason || "Could not reach Google Drive.");
+            }
+            markConnected(probe.fileId);
+            clearTimeout(failTimer);
+            setStatus("Connected to Google Cloud storage. Syncing project files…");
 
+            const result = await UndertwigCloud.syncProject(state);
             if (result.source === "cloud" && result.project) {
               replaceProjectState(result.project);
               try {
@@ -1413,11 +1423,15 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             }
             renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
           } catch (error) {
-            renderCloudStatus("disconnected");
-            setStatus(
-              `Could not sync with Google Cloud storage: ${error && error.message ? error.message : error}`,
-              true
-            );
+            const message = `Could not sync with Google Cloud storage: ${
+              error && error.message ? error.message : error
+            }`;
+            if (!settled) {
+              markDisconnected(message);
+            } else {
+              // Drive is reachable; keep the green status and report sync trouble separately.
+              setStatus(message, true);
+            }
           } finally {
             clearTimeout(failTimer);
             cloudInitPromise = null;

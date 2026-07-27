@@ -5,6 +5,9 @@
   const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3";
   const TOKEN_STORAGE_KEY = "undertwig-drive-token-v1";
   const FILE_ID_STORAGE_KEY = "undertwig-drive-file-v1";
+  const TOKEN_REQUEST_TIMEOUT_MS = 8000;
+  const SILENT_TOKEN_TIMEOUT_MS = 4000;
+  const FETCH_TIMEOUT_MS = 12000;
 
   let memoryAccessToken = null;
   let memoryTokenExpiresAt = 0;
@@ -149,8 +152,19 @@
     return memoryAccessToken;
   }
 
-  const TOKEN_REQUEST_TIMEOUT_MS = 8000;
-  const SILENT_TOKEN_TIMEOUT_MS = 5000;
+  function withTimeout(promise, ms, message) {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(message || "Google Cloud request timed out."));
+      }, ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    });
+  }
 
   async function requestOauthToken(forcePrompt, timeoutMs) {
     const session = auth().readSession();
@@ -246,8 +260,6 @@
   /** Request Drive access and keep the token for this browser session. */
   async function connect(options) {
     const opts = options || {};
-    // Interactive connect must open consent immediately; silent-first can hang when
-    // a popup is blocked and Google never calls back.
     if (opts.interactive || opts.forcePrompt) {
       return getAccessToken({ forcePrompt: true, timeoutMs: TOKEN_REQUEST_TIMEOUT_MS });
     }
@@ -268,30 +280,82 @@
     return response.error_description || response.error || "Google Cloud storage authorization failed.";
   }
 
+  function mergeAbortSignals(signals) {
+    const controller = new AbortController();
+    const onAbort = () => {
+      try {
+        controller.abort();
+      } catch (_error) {
+        // Ignore.
+      }
+    };
+    signals.forEach((signal) => {
+      if (!signal) {
+        return;
+      }
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    return controller.signal;
+  }
+
   async function driveFetch(url, init, retried) {
     const token = await getAccessToken();
     const headers = Object.assign({}, (init && init.headers) || {}, {
       Authorization: "Bearer " + token,
     });
-    const response = await fetch(url, Object.assign({}, init, { headers, credentials: "omit" }));
+
+    const timeout =
+      typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+        ? AbortSignal.timeout(FETCH_TIMEOUT_MS)
+        : null;
+    const userSignal = init && init.signal;
+    const signal = timeout || userSignal ? mergeAbortSignals([timeout, userSignal].filter(Boolean)) : undefined;
+
+    let response;
+    try {
+      const request = fetch(
+        url,
+        Object.assign({}, init, {
+          headers,
+          credentials: "omit",
+          signal: signal,
+        })
+      );
+      response = timeout
+        ? await request
+        : await withTimeout(request, FETCH_TIMEOUT_MS, "Google Drive request timed out.");
+    } catch (error) {
+      if (error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+        throw new Error("Google Drive request timed out.");
+      }
+      throw error;
+    }
 
     if (response.status === 401 && !retried) {
       forgetAccessToken();
-      await getAccessToken({ forcePrompt: true });
+      // Silent refresh only — never open a consent popup from a background fetch.
+      await getAccessToken({ forcePrompt: false, timeoutMs: SILENT_TOKEN_TIMEOUT_MS });
       return driveFetch(url, init, true);
     }
 
     return response;
   }
 
-  async function findCloudFileId() {
-    if (cachedFileId) {
+  async function findCloudFileId(options) {
+    const allowCache = !(options && options.skipCache);
+    if (allowCache && cachedFileId) {
       return cachedFileId;
     }
-    const storedId = readStoredFileId();
-    if (storedId) {
-      cachedFileId = storedId;
-      return cachedFileId;
+    if (allowCache) {
+      const storedId = readStoredFileId();
+      if (storedId) {
+        cachedFileId = storedId;
+        return cachedFileId;
+      }
     }
 
     const query = encodeURIComponent("name = '" + CLOUD_FILE_NAME + "' and trashed = false");
@@ -333,7 +397,6 @@
       method: "GET",
     });
     if (!response.ok) {
-      // Stale cached id: forget it and treat as no cloud project.
       if (response.status === 404) {
         cachedFileId = null;
         writeStoredFileId(null);
@@ -362,13 +425,16 @@
       version: 1,
     });
 
-    // Serialize saves so rapid editor updates do not race.
-    saveChain = saveChain.then(() => writeProject(body), () => writeProject(body));
+    const write = () =>
+      withTimeout(writeProject(body), FETCH_TIMEOUT_MS + 5000, "Google Cloud save timed out.");
+
+    // Serialize saves so rapid editor updates do not race. Recover the chain if one save fails/hangs.
+    saveChain = saveChain.then(write, write);
     return saveChain;
   }
 
   async function writeProject(body) {
-    const fileId = await findCloudFileId();
+    let fileId = await findCloudFileId();
     const metadata = {
       name: CLOUD_FILE_NAME,
       mimeType: "application/json",
@@ -397,6 +463,7 @@
       if (fileId && response.status === 404) {
         cachedFileId = null;
         writeStoredFileId(null);
+        fileId = null;
         return writeProject(body);
       }
       throw new Error(await readDriveError(response, "Could not save project to Google Cloud storage."));
@@ -413,17 +480,18 @@
     return cachedFileId || readStoredFileId() || null;
   }
 
+  /**
+   * Lightweight connectivity check: token + Drive appData list.
+   * Does not download/upload the full project (that can hang the UI on large trees).
+   */
   async function probeConnection() {
     if (!isAvailable()) {
       return { connected: false, fileId: null, reason: "not-signed-in" };
     }
     try {
       await connect();
-      const fileId = await findCloudFileId();
-      if (!fileId) {
-        return { connected: true, fileId: null, reason: "ready-no-file" };
-      }
-      return { connected: true, fileId: fileId, reason: "ok" };
+      const fileId = await findCloudFileId({ skipCache: true });
+      return { connected: true, fileId: fileId, reason: fileId ? "ok" : "ready-no-file" };
     } catch (error) {
       return {
         connected: false,
@@ -452,7 +520,6 @@
     return Boolean(auth() && auth().isLoggedIn() && auth().getConfig().googleClientId);
   }
 
-  // Restore any token left from login redirect / prior page in this tab.
   hydrateTokenFromStorage();
   if (!cachedFileId) {
     cachedFileId = readStoredFileId();
