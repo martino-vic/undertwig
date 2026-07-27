@@ -369,11 +369,6 @@
           const redirected = await UndertwigAuth.completeGoogleIdTokenSignInIfPresent();
           if (redirected && redirected.session) {
             showSignedIn(redirected.session);
-            if (redirected.needsDriveToken) {
-              setStatus("Signed in. Connecting Google Drive…", "ok");
-              UndertwigAuth.beginGoogleDriveTokenSignIn(redirected.nextPath || nextPath);
-              return;
-            }
             setStatus("Signed in. Opening editor…", "ok");
             window.setTimeout(() => redirectAfterLogin(redirected.nextPath || nextPath), 250);
             return;

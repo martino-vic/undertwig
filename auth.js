@@ -488,8 +488,8 @@
   }
 
   /**
-   * Full-page Google OIDC sign-in. Requests an ID token plus Drive access when Google
-   * returns both; otherwise login.html follows up with beginGoogleDriveTokenSignIn().
+   * Full-page Google sign-in in one redirect: ID token for the session plus Drive
+   * access token. Uses consent so Drive permission is granted in the same Google UI.
    */
   function beginGoogleIdTokenSignIn(nextPath) {
     const clientId = getConfig().googleClientId;
@@ -515,7 +515,8 @@
     url.searchParams.set("scope", LOGIN_SCOPES);
     url.searchParams.set("nonce", nonce);
     url.searchParams.set("state", state);
-    url.searchParams.set("prompt", "select_account");
+    // One Google screen: pick account and grant Drive together (no second login hop).
+    url.searchParams.set("prompt", "select_account consent");
     url.searchParams.set("include_granted_scopes", "true");
     global.location.assign(url.toString());
   }
@@ -549,11 +550,6 @@
     url.searchParams.set("prompt", "consent");
     url.searchParams.set("include_granted_scopes", "true");
     global.location.assign(url.toString());
-  }
-
-  function scopeIncludesDrive(scopeValue) {
-    const scope = String(scopeValue || "");
-    return scope.indexOf("drive.file") !== -1 || scope.indexOf(DRIVE_FILE_SCOPE) !== -1;
   }
 
   function hasStoredDriveAccessToken() {
@@ -655,8 +651,7 @@
 
   /**
    * Complete sign-in / Drive token handoff when login.html is the OAuth redirect target.
-   * Returns null for a normal page load, or
-   * { session, nextPath, needsDriveToken?: boolean }.
+   * Returns null for a normal page load, or { session, nextPath }.
    */
   async function completeGoogleIdTokenSignInIfPresent() {
     const oauth = readOAuthResponseParams();
@@ -684,14 +679,14 @@
       throw new Error("Google sign-in could not be verified (invalid state). Try again.");
     }
 
-    // Drive-only follow-up redirect (response_type=token).
+    // Drive-only Connect redirect (response_type=token) — used from the editor fallback.
     if (!oauth.idToken && oauth.accessToken) {
       const session = readSession();
       if (!session) {
         throw new Error("Sign in again, then connect Google Drive.");
       }
       rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn);
-      return { session: session, nextPath: nextPath, needsDriveToken: false };
+      return { session: session, nextPath: nextPath };
     }
 
     if (!oauth.idToken) {
@@ -702,13 +697,10 @@
     }
 
     const session = await loginWithCredential(oauth.idToken);
-    if (oauth.accessToken && (!oauth.scope || scopeIncludesDrive(oauth.scope))) {
+    if (oauth.accessToken) {
       rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn);
-      return { session: session, nextPath: nextPath, needsDriveToken: false };
     }
-
-    // Hybrid login often returns only an ID token (or a token without Drive). Follow up.
-    return { session: session, nextPath: nextPath, needsDriveToken: true };
+    return { session: session, nextPath: nextPath };
   }
 
   global.UndertwigAuth = {
