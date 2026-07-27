@@ -75,6 +75,7 @@
       .sidebar {
         display: flex;
         min-width: 0;
+        min-height: 0;
         flex-direction: column;
         border-right: 1px solid var(--border);
         background: #121b24;
@@ -134,8 +135,41 @@
 
       .tree {
         flex: 1;
+        min-height: 0;
         overflow: auto;
+        overscroll-behavior: contain;
         padding: 10px 8px 16px;
+        scrollbar-gutter: stable;
+        scrollbar-width: thin;
+        scrollbar-color: #4b6073 transparent;
+      }
+
+      .tree::-webkit-scrollbar {
+        width: 10px;
+      }
+
+      .tree::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .tree::-webkit-scrollbar-thumb {
+        border: 2px solid transparent;
+        border-radius: 999px;
+        background: #4b6073;
+        background-clip: padding-box;
+      }
+
+      .tree::-webkit-scrollbar-thumb:hover {
+        background: #627990;
+        background-clip: padding-box;
+      }
+
+      .tree-children {
+        min-width: 0;
+      }
+
+      .tree-row[aria-expanded] .tree-icon {
+        color: var(--brand-strong);
       }
 
       .legal-links {
@@ -711,6 +745,8 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
       let dragSourcePath = null;
       let cloudSaveTimer = null;
       let cloudSaveInFlight = false;
+      const COLLAPSED_FOLDERS_KEY = "undertwig-tree-collapsed-v1";
+      let collapsedFolders = loadCollapsedFolders();
 
       function closeHoverBoxes() {
         collaborateBox.classList.add("hidden");
@@ -1045,16 +1081,33 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
         const item = document.createElement("div");
         item.className = "tree-item";
 
+        const isFolder = node.type === "folder";
+        const isCollapsed = isFolder && collapsedFolders.has(node.path);
+
         const row = document.createElement("button");
         row.type = "button";
         row.className = `tree-row${state.activeFile === node.path ? " active" : ""}`;
         row.style.paddingLeft = `${8 + depth * 16}px`;
         row.dataset.path = node.path;
         row.dataset.type = node.type;
-        row.innerHTML = `<span class="tree-icon">${node.type === "folder" ? ">" : "-"}</span><span class="tree-name"></span>`;
+        if (isFolder) {
+          row.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+          row.title = isCollapsed ? `Expand ${node.name}` : `Collapse ${node.name}`;
+        }
+        row.innerHTML = `<span class="tree-icon">${isFolder ? (isCollapsed ? ">" : "v") : "-"}</span><span class="tree-name"></span>`;
         row.querySelector(".tree-name").textContent = node.name;
 
-        if (node.type === "file") {
+        if (isFolder) {
+          row.addEventListener("click", () => {
+            if (collapsedFolders.has(node.path)) {
+              collapsedFolders.delete(node.path);
+            } else {
+              collapsedFolders.add(node.path);
+            }
+            persistCollapsedFolders();
+            renderTree();
+          });
+        } else {
           row.draggable = true;
           row.addEventListener("click", () => {
             state.activeFile = node.path;
@@ -1096,6 +1149,10 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
           event.stopPropagation();
           row.classList.remove("drop-target");
           if (node.type === "folder") {
+            if (collapsedFolders.has(node.path)) {
+              collapsedFolders.delete(node.path);
+              persistCollapsedFolders();
+            }
             moveFile(dragSourcePath, node.path);
           } else if (dragSourcePath !== node.path) {
             moveFile(dragSourcePath, parentFolder(node.path));
@@ -1120,10 +1177,33 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
         item.appendChild(deleteButton);
 
         wrapper.appendChild(item);
-        if (node.type === "folder") {
-          node.children.forEach((child) => wrapper.appendChild(renderNode(child, depth + 1)));
+        if (isFolder && !isCollapsed) {
+          const children = document.createElement("div");
+          children.className = "tree-children";
+          node.children.forEach((child) => children.appendChild(renderNode(child, depth + 1)));
+          wrapper.appendChild(children);
         }
         return wrapper;
+      }
+
+      function loadCollapsedFolders() {
+        try {
+          const stored = JSON.parse(localStorage.getItem(COLLAPSED_FOLDERS_KEY));
+          if (Array.isArray(stored)) {
+            return new Set(stored.filter((path) => typeof path === "string" && path));
+          }
+        } catch (_error) {
+          // Ignore invalid collapse state.
+        }
+        return new Set();
+      }
+
+      function persistCollapsedFolders() {
+        try {
+          localStorage.setItem(COLLAPSED_FOLDERS_KEY, JSON.stringify([...collapsedFolders]));
+        } catch (_error) {
+          // Collapse state is optional UI preference.
+        }
       }
 
       function clearDropIndicators() {
@@ -1213,6 +1293,13 @@ This document is compiled locally in your browser with SwiftLaTeX WebAssembly.
         state.folders = (state.folders || []).filter(
           (folderPath) => folderPath !== path && !folderPath.startsWith(prefix)
         );
+
+        [...collapsedFolders].forEach((folderPath) => {
+          if (folderPath === path || folderPath.startsWith(prefix)) {
+            collapsedFolders.delete(folderPath);
+          }
+        });
+        persistCollapsedFolders();
 
         if (!state.activeFile || state.activeFile.startsWith(prefix)) {
           const remaining = Object.keys(state.files).sort();
