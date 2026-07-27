@@ -116,10 +116,11 @@
 
       <h2>Quick checks</h2>
       <ol>
-        <li>Confirm you are signed in to Undertwig with Google.</li>
-        <li>Under the file tree, click <strong>Connect</strong> and finish the Google permission popup
+        <li>Confirm you are signed in to Undertwig with Google. Sign-in also grants Drive access,
+          so the file tree should show <strong>Connected</strong> afterward without an extra click.</li>
+        <li>If you still see <strong>Disconnected</strong>, click <strong>Connect</strong> once and finish the Google permission popup
           (you may have up to about two minutes — do not ignore a background tab/window).</li>
-        <li>After Connect succeeds once, reloads should show green automatically (token is kept for the tab session).</li>
+        <li>After a successful connection, reloads should stay green for the tab session (token is kept in session storage).</li>
         <li>Use the same site origin you authorized (for example <code>https://www.undertwig.com</code>).</li>
         <li>In Google Cloud Console, OAuth scopes must include
           <code>https://www.googleapis.com/auth/drive.file</code> (shareable Drive files).</li>

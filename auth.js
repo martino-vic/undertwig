@@ -3,6 +3,10 @@
   const NONCE_STORAGE_KEY = "undertwig-auth-nonce";
   const NEXT_STORAGE_KEY = "undertwig-auth-next";
   const OAUTH_STATE_KEY = "undertwig-auth-oauth-state";
+  // Must match cloud-storage.js so login can hand off a Drive token without Connect.
+  const DRIVE_TOKEN_STORAGE_KEY = "undertwig-drive-token-v1";
+  const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+  const LOGIN_SCOPES = "openid email profile " + DRIVE_FILE_SCOPE;
   const GOOGLE_ISSUERS = new Set([
     "https://accounts.google.com",
     "accounts.google.com",
@@ -330,6 +334,7 @@
     clearSession();
     try {
       sessionStorage.removeItem(NONCE_STORAGE_KEY);
+      sessionStorage.removeItem(DRIVE_TOKEN_STORAGE_KEY);
     } catch (_error) {
       // Ignore.
     }
@@ -482,9 +487,8 @@
   }
 
   /**
-   * Full-page Google OIDC sign-in that returns an ID token in the URL fragment.
-   * Avoids GIS FedCM (often a no-op) and avoids authorization-code exchange
-   * (Google requires a client secret for web clients).
+   * Full-page Google OIDC sign-in that returns an ID token and Drive access token
+   * in the URL fragment. Avoids GIS FedCM and a separate Connect click after login.
    */
   function beginGoogleIdTokenSignIn(nextPath) {
     const clientId = getConfig().googleClientId;
@@ -505,12 +509,42 @@
     const url = new URL(GOOGLE_AUTH_URL);
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", loginRedirectUri());
-    url.searchParams.set("response_type", "id_token");
-    url.searchParams.set("scope", "openid email profile");
+    // id_token for the Undertwig session; token for Google Drive without a second Connect step.
+    url.searchParams.set("response_type", "id_token token");
+    url.searchParams.set("scope", LOGIN_SCOPES);
     url.searchParams.set("nonce", nonce);
     url.searchParams.set("state", state);
     url.searchParams.set("prompt", "select_account");
+    url.searchParams.set("include_granted_scopes", "true");
     global.location.assign(url.toString());
+  }
+
+  function rememberDriveAccessToken(accessToken, expiresIn) {
+    if (!accessToken) {
+      return;
+    }
+    const expiresAt = Date.now() + (Number(expiresIn) || 3600) * 1000;
+    try {
+      sessionStorage.setItem(
+        DRIVE_TOKEN_STORAGE_KEY,
+        JSON.stringify({
+          accessToken: String(accessToken),
+          expiresAt: expiresAt,
+        })
+      );
+    } catch (_error) {
+      // Ignore storage failures; Connect remains available as a fallback.
+    }
+    if (global.UndertwigCloud && typeof global.UndertwigCloud.acceptTokenResponse === "function") {
+      try {
+        global.UndertwigCloud.acceptTokenResponse({
+          access_token: String(accessToken),
+          expires_in: Number(expiresIn) || 3600,
+        });
+      } catch (_error) {
+        // Ignore when cloud helpers are not on this page.
+      }
+    }
   }
 
   function readOAuthResponseParams() {
@@ -531,11 +565,13 @@
 
     return {
       idToken: get("id_token"),
+      accessToken: get("access_token"),
+      expiresIn: get("expires_in"),
       error: get("error"),
       errorDescription: get("error_description"),
       state: get("state"),
       hasOAuthPayload: Boolean(
-        get("id_token") || get("error") || get("code")
+        get("id_token") || get("access_token") || get("error") || get("code")
       ),
     };
   }
@@ -593,6 +629,9 @@
     }
 
     const session = await loginWithCredential(oauth.idToken);
+    if (oauth.accessToken) {
+      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn);
+    }
     return { session: session, nextPath: nextPath };
   }
 

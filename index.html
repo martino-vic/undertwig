@@ -867,10 +867,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727j"></script>
-    <script src="auth.js?v=20260727j"></script>
-    <script src="cloud-storage.js?v=20260727j"></script>
-    <script src="invite.js?v=20260727j"></script>
+    <script src="auth-config.js?v=20260727k"></script>
+    <script src="auth.js?v=20260727k"></script>
+    <script src="cloud-storage.js?v=20260727k"></script>
+    <script src="invite.js?v=20260727k"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1569,17 +1569,35 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           UndertwigCloud.setActiveProjectFileId(sharedProjectId);
         }
 
-        // Without a stored Drive token, browsers will not complete OAuth without a click.
-        // Show Connect immediately instead of hanging on "Checking…".
+        // Prefer a Drive token from login. If missing, try a silent refresh; only fall
+        // back to Connect when Google still needs an interactive permission grant.
         if (!force && !UndertwigCloud.hasAccessToken()) {
-          renderCloudStatus("disconnected");
-          if (sharedProjectId) {
-            setStatus(
-              "Click Connect under the file tree to open the shared project on the owner's Google Drive.",
-              true
-            );
+          try {
+            await UndertwigAuth.loadGoogleIdentityServices();
+            await UndertwigCloud.connect({
+              interactive: false,
+              timeoutMs: 4000,
+            });
+          } catch (_error) {
+            renderCloudStatus("disconnected");
+            if (sharedProjectId) {
+              setStatus(
+                "Click Connect under the file tree to open the shared project on the owner's Google Drive.",
+                true
+              );
+            }
+            return;
           }
-          return;
+          if (!UndertwigCloud.hasAccessToken()) {
+            renderCloudStatus("disconnected");
+            if (sharedProjectId) {
+              setStatus(
+                "Click Connect under the file tree to open the shared project on the owner's Google Drive.",
+                true
+              );
+            }
+            return;
+          }
         }
 
         if (cloudInitPromise) {

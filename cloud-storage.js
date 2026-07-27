@@ -3,7 +3,7 @@
   const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
   const DRIVE_API = "https://www.googleapis.com/drive/v3";
   const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3";
-  const TOKEN_STORAGE_KEY = "undertwig-drive-token-v1";
+  const TOKEN_STORAGE_KEY = "undertwig-drive-token-v1"; // kept in sync with auth.js login handoff
   const UNDERTWIG_FOLDER_KEY = "undertwig-drive-root-folder-v2";
   const PROJECT_MAP_KEY = "undertwig-drive-project-map-v2";
   const ACTIVE_FOLDER_KEY = "undertwig-drive-active-folder-v2";

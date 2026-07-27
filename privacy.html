@@ -175,8 +175,9 @@
         When you are signed in, Undertwig can store your LaTeX project (file names and
         contents, including uploaded assets) in an <strong>Undertwig</strong> folder in your
         Google Drive. You own that project. Access uses a Google OAuth token
-        with the Drive file scope. After sign-in, click <strong>Connect</strong> under the file tree
-        to grant Drive access (browsers only allow that popup from a click). The access token is kept
+        with the Drive file scope. Sign-in also requests Drive access, so the editor
+        connects automatically afterward (no separate Connect click in the usual case).
+        The access token is kept
         in session storage for the current browser tab session so later saves can sync without
         repeated prompts. Logging out
         clears the local session and attempts to revoke the token. You can also remove app
