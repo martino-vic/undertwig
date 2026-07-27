@@ -22,8 +22,9 @@ Use this checklist before any public release.
 
 - [x] Project `LICENSE` exists.
 - [x] `THIRD_PARTY_NOTICES.md` exists.
-- [x] In-app links expose License, Notices, Source, and Compliance pages.
-- [ ] Terms of Service and Privacy Policy are published before accounts, cloud sync, or server-side file storage.
+- [x] In-app links expose Privacy, Terms, and Source pages.
+- [x] Privacy Policy and Terms of Use are published for the public site.
+- [ ] Revisit Privacy and Terms before adding accounts, cloud sync, analytics, or server-side file storage.
 
 ## Release gate
 

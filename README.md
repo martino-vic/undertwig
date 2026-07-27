@@ -23,6 +23,8 @@ Convert writes the current project into the SwiftLaTeX in-browser PdfTeX engine 
 ## Project layout
 
 - `index.html` — app UI and conversion workflow
+- `privacy.html` — Privacy Policy
+- `terms.html` — Terms of Use
 - `vendor/swiftlatex/` — SwiftLaTeX PdfTeX WebAssembly engine
 - `LICENSE` — GNU AGPL v3.0
 - `THIRD_PARTY_NOTICES.md` — third-party dependency notes

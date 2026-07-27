@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Privacy Policy — Undertwig</title>
+    <meta name="description" content="Privacy Policy for Undertwig, a browser-based LaTeX workspace.">
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #10161d;
+        --panel: #18212b;
+        --border: #334455;
+        --text: #e8edf3;
+        --muted: #96a4b3;
+        --brand: #2f8f6b;
+        --brand-strong: #39a57d;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.6;
+      }
+
+      header {
+        border-bottom: 1px solid var(--border);
+        background: #121b24;
+      }
+
+      .header-inner,
+      .content {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 20px 24px;
+      }
+
+      .header-inner {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .brand {
+        color: var(--text);
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .brand span {
+        margin-left: 8px;
+        color: var(--muted);
+        font-weight: 400;
+        font-size: 14px;
+      }
+
+      nav a {
+        color: var(--muted);
+        font-size: 14px;
+        text-decoration: none;
+      }
+
+      nav a:hover { color: var(--text); }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+        letter-spacing: -0.02em;
+      }
+
+      .meta {
+        margin: 0 0 32px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      h2 {
+        margin: 28px 0 10px;
+        font-size: 18px;
+      }
+
+      p, li { color: #d5dde6; }
+
+      ul { padding-left: 1.2em; }
+
+      a { color: var(--brand-strong); }
+
+      footer {
+        margin-top: 48px;
+        padding-top: 20px;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      footer a {
+        color: var(--muted);
+        text-decoration: none;
+        margin-right: 14px;
+      }
+
+      footer a:hover { color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <a class="brand" href="/">Undertwig <span>Local LaTeX workspace</span></a>
+        <nav><a href="/">Back to editor</a></nav>
+      </div>
+    </header>
+
+    <main class="content">
+      <h1>Privacy Policy</h1>
+      <p class="meta">Last updated: 27 July 2026</p>
+
+      <p>
+        Undertwig (“we”, “us”) is a browser-based LaTeX workspace available at
+        <a href="https://undertwig.com">undertwig.com</a>.
+        This policy explains what information is involved when you use the service.
+      </p>
+
+      <h2>Summary</h2>
+      <p>
+        Undertwig is designed to run in your browser. Your project files are stored
+        on your device. We do not operate user accounts, and we do not intentionally
+        collect the contents of your documents.
+      </p>
+
+      <h2>Information stored on your device</h2>
+      <p>
+        The editor saves your current project in your browser’s local storage
+        (under a key such as <code>undertwig-latex-project-v1</code>) so your work
+        can persist between visits on the same browser and device. That data stays
+        on your device unless you export it, clear site data, or otherwise share it.
+      </p>
+      <p>
+        Generated PDFs are created locally in your browser and are not uploaded to
+        Undertwig servers.
+      </p>
+
+      <h2>Information processed to provide the service</h2>
+      <ul>
+        <li>
+          <strong>Hosting and delivery.</strong> The website is hosted on GitHub Pages.
+          Like most websites, the hosting provider may process standard technical
+          request data such as IP address, user agent, and request timestamps in
+          server logs for security, reliability, and abuse prevention.
+        </li>
+        <li>
+          <strong>Optional package fetching.</strong> When a document needs TeX packages
+          that are not already available in your project, the local compiler may
+          request package resources from a third-party TeX Live endpoint
+          (currently <code>texlive.texlyre.org</code>). Those requests are made by
+          your browser and may include technical request metadata.
+        </li>
+        <li>
+          <strong>Source repository.</strong> If you visit our public GitHub repository
+          or open issues there, GitHub’s own privacy terms apply to that activity.
+        </li>
+      </ul>
+
+      <h2>Cookies and similar technologies</h2>
+      <p>
+        Undertwig does not use advertising cookies or third-party analytics cookies.
+        The app relies on browser local storage (and normal browser/session
+        mechanisms) to keep your project available on your device.
+      </p>
+
+      <h2>How we use information</h2>
+      <p>
+        Technical hosting data, where processed by our hosting provider, is used only
+        to operate, secure, and maintain the website. We do not sell personal
+        information, and we do not use your document contents for advertising.
+      </p>
+
+      <h2>Data retention</h2>
+      <p>
+        Project data in local storage remains until you clear it or your browser
+        removes it. Hosting provider logs are retained according to that provider’s
+        practices. We do not maintain a separate Undertwig account database.
+      </p>
+
+      <h2>Children</h2>
+      <p>
+        Undertwig is a general-purpose tool and is not directed at children under 13
+        (or the equivalent minimum age in your jurisdiction).
+      </p>
+
+      <h2>International visitors</h2>
+      <p>
+        Because the site is delivered over the internet, technical request data may
+        be processed in the United States or other locations used by GitHub Pages
+        and any package endpoint your browser contacts.
+      </p>
+
+      <h2>Your choices</h2>
+      <ul>
+        <li>Clear site data in your browser to remove locally stored projects.</li>
+        <li>Export or copy your files before clearing data if you want to keep them.</li>
+        <li>Use network controls in your browser if you prefer to block third-party package requests.</li>
+      </ul>
+
+      <h2>Contact</h2>
+      <p>
+        Questions about this policy can be raised via the project’s GitHub repository:
+        <a href="https://github.com/martino-vic/undertwig">github.com/martino-vic/undertwig</a>.
+      </p>
+
+      <h2>Changes</h2>
+      <p>
+        We may update this policy as the service evolves. The “Last updated” date at
+        the top will change when we publish revisions.
+      </p>
+
+      <footer>
+        <a href="/">Editor</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+        <a href="https://github.com/martino-vic/undertwig">Source</a>
+      </footer>
+    </main>
+  </body>
+</html>
