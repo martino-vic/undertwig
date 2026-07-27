@@ -1254,22 +1254,26 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
         const submit = document.getElementById("inviteSubmit");
         submit.disabled = true;
-        setInviteStatus("Sharing project and sending invitation…");
         try {
-          if (cloudStatusMode !== "connected" && !UndertwigCloud.hasAccessToken()) {
-            throw new Error("Connect Google Drive under the file tree before inviting collaborators.");
-          }
           const projectName = getActiveProjectName();
           if (!projectName) {
             throw new Error("Select a file inside a project folder before inviting collaborators.");
           }
-          setInviteStatus("Uploading “" + projectName + "” to Google Drive / Undertwig…");
+
+          // Request Gmail (and Drive if needed) immediately on click. Waiting until after
+          // the upload makes browsers block the OAuth popup ("Failed to open popup").
+          setInviteStatus("Allow Google permission popups for Gmail (and Drive if asked)…");
+          await UndertwigInvite.connect({ interactive: true });
           if (!UndertwigCloud.hasAccessToken()) {
             await UndertwigCloud.connect({ interactive: true });
           }
+
+          setInviteStatus("Uploading “" + projectName + "” to Google Drive / Undertwig…");
           await UndertwigCloud.saveProject(state, { projectName: projectName });
+          setInviteStatus("Sharing “" + projectName + "” with " + email + "…");
           await UndertwigCloud.shareProjectWithEmail(email, "writer", projectName);
           const inviteUrl = buildInviteProjectUrl();
+          setInviteStatus("Sending invitation email…");
           await UndertwigInvite.sendCollaborationInvite(email, inviteUrl);
           setInviteStatus(
             "Invitation sent to " + email + ". They can edit your “" + projectName + "” folder in your Drive.",
