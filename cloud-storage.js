@@ -186,13 +186,8 @@
   }
 
   function roleFromMeta(meta) {
-    const session = auth().readSession();
-    const email = session && session.email ? String(session.email).toLowerCase() : "";
-    const owners = Array.isArray(meta && meta.owners) ? meta.owners : [];
-    const isOwner = owners.some(function (owner) {
-      return owner && owner.emailAddress && String(owner.emailAddress).toLowerCase() === email;
-    });
-    if (isOwner || (meta && meta.capabilities && meta.capabilities.canShare)) {
+    // Ownership is only by Drive owners list — not canShare (writers on shared folders often can share).
+    if (isOwnerEmail(meta)) {
       return "owner";
     }
     if (meta && meta.capabilities && meta.capabilities.canEdit === false) {
@@ -1213,13 +1208,11 @@
       throw accessError;
     }
     const project = await loadFolderAsProject(id, meta.name);
-    if (!project || !Object.keys(project.files || {}).length) {
-      throw new Error(
-        "Shared project folder was empty or inaccessible. Ask the owner to save the project once, then send a new invite."
-      );
+    if (!project) {
+      throw new Error("Shared project folder was inaccessible.");
     }
     // Invitees edit the owner's folder; never treat them as creating their own Undertwig copy.
-    const role = isOwnerEmail(meta) ? "owner" : cachedRole === "reader" ? "reader" : "writer";
+    const role = isOwnerEmail(meta) ? "owner" : "writer";
     writeRole(role);
     setMappedProject(project.projectName || meta.name, id, role);
     project.role = role;
@@ -1450,8 +1443,22 @@
         "id,name,mimeType,trashed,webViewLink,owners,capabilities"
       );
       if (isDriveFolderMeta(meta)) {
-        if (projectName) {
-          setMappedProject(projectName, meta.id, roleFromMeta(meta));
+        const role = roleFromMeta(meta);
+        // Never attach a shared folder ID to the wrong local project name (e.g. SampleProject).
+        const mappedIdForName = projectName ? getMappedFolderId(projectName) : null;
+        const mapName =
+          projectName && (mappedIdForName === meta.id || !mappedIdForName)
+            ? role === "owner"
+              ? projectName
+              : meta.name || projectName
+            : meta.name || projectName;
+        if (mapName) {
+          const existingRole = getMappedRole(mapName);
+          const nextRole = isSharedProjectRole(existingRole) ? existingRole : role;
+          setMappedProject(mapName, meta.id, nextRole);
+          writeRole(nextRole);
+        } else {
+          writeRole(role);
         }
         writeActiveFolderId(meta.id);
         if (meta.webViewLink) {

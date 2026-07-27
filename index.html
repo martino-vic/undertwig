@@ -955,10 +955,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727z"></script>
-    <script src="auth.js?v=20260727z"></script>
-    <script src="cloud-storage.js?v=20260727z"></script>
-    <script src="invite.js?v=20260727z"></script>
+    <script src="auth-config.js?v=20260728a"></script>
+    <script src="auth.js?v=20260728a"></script>
+    <script src="cloud-storage.js?v=20260728a"></script>
+    <script src="invite.js?v=20260728a"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1917,8 +1917,12 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           return;
         }
 
-        // Always show Connected as soon as we have a Drive token from login.
-        renderCloudStatus("connected", sharedProjectId || UndertwigCloud.getProjectFileId());
+        // For invite links, wait until join finishes before showing Connected / Open in Drive.
+        if (!sharedProjectId) {
+          renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+        } else {
+          setStatus("Opening shared project from the owner's Google Drive…");
+        }
 
         if (cloudInitPromise && !force) {
           return cloudInitPromise;
@@ -1927,7 +1931,6 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         cloudInitPromise = (async () => {
           try {
             if (sharedProjectId) {
-              setStatus("Opening shared project from the owner's Google Drive…");
               try {
                 const sharedProject = await Promise.race([
                   UndertwigCloud.joinSharedProject(sharedProjectId),
@@ -1937,12 +1940,15 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
                     }, 15000);
                   }),
                 ]);
+                const projectName =
+                  sharedProject.currentProject || sharedProject.projectName || "SharedProject";
                 replaceProjectState({
                   activeFile: sharedProject.activeFile,
                   folders: sharedProject.folders,
                   files: sharedProject.files,
-                  currentProject: sharedProject.currentProject || sharedProject.projectName,
+                  currentProject: projectName,
                 });
+                state.currentProject = projectName;
                 try {
                   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
                 } catch (_error) {
@@ -1954,7 +1960,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
                 const fileCount = Object.keys(state.files || {}).length;
                 setStatus(
                   "Joined shared project “" +
-                    (sharedProject.currentProject || sharedProject.projectName || "project") +
+                    projectName +
                     "” (" +
                     fileCount +
                     " file" +
@@ -1972,7 +1978,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
                     true
                   );
                   try {
-                    if (UndertwigCloud.forgetAccessToken || UndertwigCloud.clearToken) {
+                    if (UndertwigCloud.clearToken) {
                       UndertwigCloud.clearToken();
                     }
                     UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(sharedProjectId));
@@ -2198,8 +2204,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         currentLabel.className = "tree-section-label";
         const sharedCurrent =
           Boolean(currentName) &&
-          UndertwigCloud.isCurrentProjectShared &&
-          UndertwigCloud.isCurrentProjectShared(currentName);
+          ((UndertwigCloud.isCurrentProjectShared &&
+            UndertwigCloud.isCurrentProjectShared(currentName)) ||
+            (UndertwigCloud.isCollaborator && UndertwigCloud.isCollaborator()));
         const role = UndertwigCloud.getProjectRole && UndertwigCloud.getProjectRole();
         const currentSuffix =
           !currentName
