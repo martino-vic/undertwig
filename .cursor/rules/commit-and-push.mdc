@@ -1,0 +1,15 @@
+---
+description: Always commit and push after implementing changes
+alwaysApply: true
+---
+
+# Commit and push after implementing
+
+After finishing an implementation task (features, fixes, refactors that leave the tree dirty), **always**:
+
+1. Commit with a concise message focused on why
+2. Push to `origin` on the current branch (`git push -u origin HEAD` if needed)
+
+Do this without waiting to be asked. Prefer shipping to remote so hard-refresh / undertwig.com pick up the change.
+
+Still follow git safety: no force-push to main/master, no amending pushed commits unless explicitly requested, no secrets in commits, no interactive git flags.
