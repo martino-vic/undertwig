@@ -955,10 +955,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727y"></script>
-    <script src="auth.js?v=20260727y"></script>
-    <script src="cloud-storage.js?v=20260727y"></script>
-    <script src="invite.js?v=20260727y"></script>
+    <script src="auth-config.js?v=20260727z"></script>
+    <script src="auth.js?v=20260727z"></script>
+    <script src="cloud-storage.js?v=20260727z"></script>
+    <script src="invite.js?v=20260727z"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1327,7 +1327,8 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         if (!UndertwigCloud.hasAccessToken()) {
           setStatus("Redirecting to Google to connect Drive…");
           try {
-            UndertwigAuth.beginGoogleDriveTokenSignIn("/");
+            const pending = resolveSharedProjectId();
+            UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(pending));
           } catch (error) {
             renderCloudStatus("disconnected");
             setStatus(
@@ -1446,10 +1447,29 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         try {
           const params = new URLSearchParams(window.location.search);
           const projectId = String(params.get("project") || "").trim();
+          if (projectId && UndertwigCloud.rememberPendingInvite) {
+            UndertwigCloud.rememberPendingInvite(projectId);
+          }
           return projectId || null;
         } catch (_error) {
           return null;
         }
+      }
+
+      function resolveSharedProjectId() {
+        return (
+          readProjectIdFromUrl() ||
+          (UndertwigCloud.readPendingInvite && UndertwigCloud.readPendingInvite()) ||
+          null
+        );
+      }
+
+      function inviteResumePath(folderId) {
+        if (UndertwigCloud.inviteEditorPath) {
+          return UndertwigCloud.inviteEditorPath(folderId);
+        }
+        const id = String(folderId || "").trim();
+        return id ? "/?project=" + encodeURIComponent(id) : "/";
       }
 
       function clearProjectIdFromUrl() {
@@ -1868,7 +1888,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
       async function initCloudProject(options) {
         const force = Boolean(options && options.force);
-        const sharedProjectId = readProjectIdFromUrl();
+        const sharedProjectId = resolveSharedProjectId();
         if (!UndertwigCloud.isAvailable()) {
           if (sharedProjectId) {
             setStatus("Log in with Google to open the shared project invitation.", true, {
@@ -1881,6 +1901,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
         if (sharedProjectId) {
           UndertwigCloud.setActiveProjectFileId(sharedProjectId);
+          if (UndertwigCloud.rememberPendingInvite) {
+            UndertwigCloud.rememberPendingInvite(sharedProjectId);
+          }
         }
 
         if (!UndertwigCloud.hasAccessToken()) {
@@ -1895,7 +1918,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
 
         // Always show Connected as soon as we have a Drive token from login.
-        renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+        renderCloudStatus("connected", sharedProjectId || UndertwigCloud.getProjectFileId());
 
         if (cloudInitPromise && !force) {
           return cloudInitPromise;
@@ -1905,45 +1928,70 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           try {
             if (sharedProjectId) {
               setStatus("Opening shared project from the owner's Google Drive…");
-              const sharedProject = await Promise.race([
-                UndertwigCloud.joinSharedProject(sharedProjectId),
-                new Promise(function (_, reject) {
-                  setTimeout(function () {
-                    reject(new Error("Opening the shared project timed out."));
-                  }, 15000);
-                }),
-              ]);
-              replaceProjectState({
-                activeFile: sharedProject.activeFile,
-                folders: sharedProject.folders,
-                files: sharedProject.files,
-                currentProject: sharedProject.currentProject || sharedProject.projectName,
-              });
               try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-              } catch (_error) {
-                // Local cache is optional.
+                const sharedProject = await Promise.race([
+                  UndertwigCloud.joinSharedProject(sharedProjectId),
+                  new Promise(function (_, reject) {
+                    setTimeout(function () {
+                      reject(new Error("Opening the shared project timed out."));
+                    }, 15000);
+                  }),
+                ]);
+                replaceProjectState({
+                  activeFile: sharedProject.activeFile,
+                  folders: sharedProject.folders,
+                  files: sharedProject.files,
+                  currentProject: sharedProject.currentProject || sharedProject.projectName,
+                });
+                try {
+                  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+                } catch (_error) {
+                  // Local cache is optional.
+                }
+                render();
+                clearProjectIdFromUrl();
+                renderCloudStatus("connected", sharedProjectId);
+                const fileCount = Object.keys(state.files || {}).length;
+                setStatus(
+                  "Joined shared project “" +
+                    (sharedProject.currentProject || sharedProject.projectName || "project") +
+                    "” (" +
+                    fileCount +
+                    " file" +
+                    (fileCount === 1 ? "" : "s") +
+                    "). You are an invitee — edits save to the owner's Google Drive."
+                );
+                return;
+              } catch (joinError) {
+                const message = (joinError && joinError.message) || "Could not open shared project.";
+                const code = joinError && joinError.code;
+                if (code === "missing-scope" || /insufficient authentication scopes/i.test(message)) {
+                  renderCloudStatus("disconnected");
+                  setStatus(
+                    "Google Drive permission needs an update to open shared projects. Redirecting…",
+                    true
+                  );
+                  try {
+                    if (UndertwigCloud.forgetAccessToken || UndertwigCloud.clearToken) {
+                      UndertwigCloud.clearToken();
+                    }
+                    UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(sharedProjectId));
+                    return;
+                  } catch (_redirectError) {
+                    setStatus(message + " Click Retry under the file tree.", true);
+                    return;
+                  }
+                }
+                renderCloudStatus("disconnected");
+                setStatus(message, true);
+                return;
               }
-              render();
-              clearProjectIdFromUrl();
-              renderCloudStatus("connected", sharedProjectId);
-              const fileCount = Object.keys(state.files || {}).length;
-              setStatus(
-                "Joined shared project (" +
-                  fileCount +
-                  " file" +
-                  (fileCount === 1 ? "" : "s") +
-                  "). Edits save to the owner's Google Drive."
-              );
-              return;
             }
 
             const verify = await UndertwigCloud.verifyDriveAccess();
             if (!verify || !verify.ok) {
               const reason = verify && verify.reason;
               if (reason === "missing-scope") {
-                // One automatic upgrade hop after login when the ID token came back
-                // without usable drive.file (legacy appdata / openid-only access token).
                 let alreadyTried = false;
                 try {
                   alreadyTried = sessionStorage.getItem("undertwig-drive-scope-upgrade") === "1";
@@ -1956,9 +2004,10 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
                   } catch (_error) {
                     // Ignore.
                   }
-                  setStatus("Google needs Drive file permission. Redirecting…");
+                  setStatus("Google needs Drive permission. Redirecting…");
                   try {
-                    UndertwigAuth.beginGoogleDriveTokenSignIn("/");
+                    const pending = resolveSharedProjectId();
+                    UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(pending));
                     return;
                   } catch (_redirectError) {
                     // Fall through to disconnected UI.
@@ -1966,7 +2015,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
                 }
                 renderCloudStatus("disconnected");
                 setStatus(
-                  "Google Drive needs file access. Click Retry and allow Drive, or add drive.file under Google Cloud → Data Access.",
+                  "Google Drive needs access. Click Retry and allow Drive, or add the Drive scope under Google Cloud → Data Access.",
                   true
                 );
                 return;

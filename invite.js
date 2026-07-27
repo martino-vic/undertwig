@@ -1,6 +1,6 @@
 (function (global) {
   const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
-  const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+  const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
   const COLLAB_SCOPES = DRIVE_SCOPE + " " + GMAIL_SEND_SCOPE;
   const GMAIL_SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
   const INTERACTIVE_TOKEN_TIMEOUT_MS = 120000;

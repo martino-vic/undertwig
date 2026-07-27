@@ -6,12 +6,12 @@
   const DRIVE_OAUTH_PENDING_KEY = "undertwig-drive-oauth-pending";
   // Must match cloud-storage.js so login can hand off a Drive token without Connect.
   const DRIVE_TOKEN_STORAGE_KEY = "undertwig-drive-token-v1";
-  const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-  const LOGIN_SCOPES = "openid email profile " + DRIVE_FILE_SCOPE;
+  // Full Drive access so invitees can open folders the owner shared with them.
+  const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+  const LOGIN_SCOPES = "openid email profile " + DRIVE_SCOPE;
 
-  function scopeIncludesDriveFile(scope) {
-    // Google may return full URLs or (rarely) short names; accept either form of drive.file.
-    return /(?:^|[\s+])(?:https:\/\/www\.googleapis\.com\/auth\/)?drive\.file(?:[\s+]|$)/i.test(
+  function scopeIncludesDriveAccess(scope) {
+    return /(?:^|[\s+])(?:https:\/\/www\.googleapis\.com\/auth\/)?drive(?:\.file)?(?:[\s+]|$)/i.test(
       String(scope || "").replace(/\+/g, " ")
     );
   }
@@ -552,7 +552,7 @@
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", loginRedirectUri());
     url.searchParams.set("response_type", "token");
-    url.searchParams.set("scope", DRIVE_FILE_SCOPE);
+    url.searchParams.set("scope", DRIVE_SCOPE);
     url.searchParams.set("state", state);
     url.searchParams.set("prompt", "consent");
     url.searchParams.set("include_granted_scopes", "true");
@@ -695,15 +695,15 @@
       if (!session) {
         throw new Error("Sign in again, then connect Google Drive.");
       }
-      if (oauth.scope && !scopeIncludesDriveFile(oauth.scope)) {
+      if (oauth.scope && !scopeIncludesDriveAccess(oauth.scope)) {
         try {
           sessionStorage.removeItem(DRIVE_TOKEN_STORAGE_KEY);
         } catch (_error) {
           // Ignore.
         }
         throw new Error(
-          "Google did not grant Drive file access. In Google Cloud Console → Data Access, add scope " +
-            DRIVE_FILE_SCOPE +
+          "Google did not grant Drive access. In Google Cloud Console → Data Access, add scope " +
+            DRIVE_SCOPE +
             ", then click Retry and allow Drive access."
         );
       }

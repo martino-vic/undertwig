@@ -123,7 +123,7 @@
         <li>After a successful connection, reloads should stay green for the tab session (token is kept in session storage).</li>
         <li>Use the same site origin you authorized (for example <code>https://www.undertwig.com</code>).</li>
         <li>In Google Cloud Console, OAuth scopes must include
-          <code>https://www.googleapis.com/auth/drive.file</code> (shareable Drive files).</li>
+          <code>https://www.googleapis.com/auth/drive</code> (needed so invitees can open shared project folders).</li>
       </ol>
 
       <h2>Brave browser</h2>
@@ -162,7 +162,7 @@
         <li>Open the <strong>undertwig</strong> Google Cloud project.</li>
         <li>Enable the <strong>Google Drive API</strong>.</li>
         <li>Under OAuth <strong>Data Access</strong> / scopes, include
-          <code>https://www.googleapis.com/auth/drive.file</code>
+          <code>https://www.googleapis.com/auth/drive</code>
           (and <code>https://www.googleapis.com/auth/gmail.send</code> for email invites).</li>
         <li>Under <strong>Clients</strong>, ensure Authorized JavaScript origins include your exact site origin
           (<code>https://www.undertwig.com</code> and/or <code>https://undertwig.com</code>).</li>

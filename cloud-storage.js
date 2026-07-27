@@ -1,6 +1,8 @@
 (function (global) {
   const CLOUD_FOLDER_NAME = "Undertwig";
-  const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+  // Full Drive scope is required so invitees can open/edit folders the owner shared with them.
+  // drive.file alone cannot access another user's shared folder via the API.
+  const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
   const DRIVE_API = "https://www.googleapis.com/drive/v3";
   const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3";
   const TOKEN_STORAGE_KEY = "undertwig-drive-token-v1"; // kept in sync with auth.js login handoff
@@ -8,6 +10,7 @@
   const PROJECT_MAP_KEY = "undertwig-drive-project-map-v2";
   const ACTIVE_FOLDER_KEY = "undertwig-drive-active-folder-v2";
   const ROLE_KEY = "undertwig-drive-role-v2";
+  const PENDING_INVITE_KEY = "undertwig-pending-invite-project-v1";
   // Legacy keys from the single-JSON sync era — clear on load so stale IDs cannot 404.
   const LEGACY_FILE_KEYS = ["undertwig-drive-file-v1", "undertwig-drive-folder-v1"];
 
@@ -244,11 +247,47 @@
     return cachedRole === "writer" || cachedRole === "reader";
   }
 
-  function scopeIncludesDriveFile(scope) {
-    // Google may return full URLs or short names; accept either form of drive.file.
-    return /(?:^|[\s+])(?:https:\/\/www\.googleapis\.com\/auth\/)?drive\.file(?:[\s+]|$)/i.test(
+  function scopeIncludesDriveAccess(scope) {
+    // Accept full drive or legacy drive.file grants.
+    return /(?:^|[\s+])(?:https:\/\/www\.googleapis\.com\/auth\/)?drive(?:\.file)?(?:[\s+]|$)/i.test(
       String(scope || "").replace(/\+/g, " ")
     );
+  }
+
+  function rememberPendingInvite(folderId) {
+    const id = String(folderId || "").trim();
+    if (!id) {
+      return;
+    }
+    try {
+      localStorage.setItem(PENDING_INVITE_KEY, id);
+    } catch (_error) {
+      // Ignore.
+    }
+  }
+
+  function readPendingInvite() {
+    try {
+      return String(localStorage.getItem(PENDING_INVITE_KEY) || "").trim() || null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function clearPendingInvite() {
+    try {
+      localStorage.removeItem(PENDING_INVITE_KEY);
+    } catch (_error) {
+      // Ignore.
+    }
+  }
+
+  function inviteEditorPath(folderId) {
+    const id = String(folderId || "").trim();
+    if (!id) {
+      return "/";
+    }
+    return "/?project=" + encodeURIComponent(id);
   }
 
   function isInsufficientScopeMessage(message) {
@@ -580,7 +619,7 @@
   async function driveSearch(query, pageSize) {
     const url =
       DRIVE_API +
-      "/files?fields=files(id,name,mimeType,modifiedTime,owners,capabilities)&q=" +
+      "/files?supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,mimeType,modifiedTime,owners,capabilities)&q=" +
       encodeURIComponent(query) +
       "&pageSize=" +
       (pageSize || 100) +
@@ -601,7 +640,7 @@
     if (parentId) {
       metadata.parents = [parentId];
     }
-    const response = await driveFetch(DRIVE_API + "/files?fields=id,name", {
+    const response = await driveFetch(DRIVE_API + "/files?supportsAllDrives=true&fields=id,name", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(metadata),
@@ -642,7 +681,7 @@
       DRIVE_API +
         "/files/" +
         encodeURIComponent(fileId) +
-        "?fields=" +
+        "?supportsAllDrives=true&fields=" +
         encodeURIComponent(fields || "id,name,mimeType,trashed"),
       { method: "GET" }
     );
@@ -842,8 +881,11 @@
     form.append("file", bodyBlob);
 
     const url = existingId
-      ? DRIVE_UPLOAD + "/files/" + encodeURIComponent(existingId) + "?uploadType=multipart&fields=id,name"
-      : DRIVE_UPLOAD + "/files?uploadType=multipart&fields=id,name";
+      ? DRIVE_UPLOAD +
+        "/files/" +
+        encodeURIComponent(existingId) +
+        "?uploadType=multipart&supportsAllDrives=true&fields=id,name"
+      : DRIVE_UPLOAD + "/files?uploadType=multipart&supportsAllDrives=true&fields=id,name";
 
     const response = await driveFetch(url, {
       method: existingId ? "PATCH" : "POST",
@@ -1015,9 +1057,10 @@
   }
 
   async function downloadDriveFile(fileId, asBinary) {
-    const response = await driveFetch(DRIVE_API + "/files/" + encodeURIComponent(fileId) + "?alt=media", {
-      method: "GET",
-    });
+    const response = await driveFetch(
+      DRIVE_API + "/files/" + encodeURIComponent(fileId) + "?alt=media&supportsAllDrives=true",
+      { method: "GET" }
+    );
     if (!response.ok) {
       throw new Error(await readDriveError(response, "Could not download Drive file."));
     }
@@ -1108,7 +1151,7 @@
       DRIVE_API +
         "/files/" +
         encodeURIComponent(id) +
-        "?fields=id,name,mimeType,owners,capabilities,shared,webViewLink,trashed",
+        "?supportsAllDrives=true&fields=id,name,mimeType,owners,capabilities,shared,webViewLink,trashed",
       { method: "GET" }
     );
     if (!response.ok) {
@@ -1145,17 +1188,35 @@
     if (!id) {
       throw new Error("Missing shared project id.");
     }
+    rememberPendingInvite(id);
     await connect();
     writeActiveFolderId(id);
-    const meta = await refreshProjectMeta(id);
+    let meta = null;
+    try {
+      meta = await refreshProjectMeta(id);
+    } catch (error) {
+      const message = (error && error.message) || "";
+      if (isInsufficientScopeMessage(message)) {
+        const scopeError = new Error(
+          "Undertwig needs Google Drive access to open shared projects. Click Retry to grant access, then reopen the invite link."
+        );
+        scopeError.code = "missing-scope";
+        throw scopeError;
+      }
+      throw error;
+    }
     if (!meta) {
-      throw new Error(
-        "That invite does not point to a shared project folder. Ask the owner to send a new invite after connecting Google Drive."
+      const accessError = new Error(
+        "Could not open the shared project folder. Make sure the owner shared it with your Google account, then reopen the invite link. If this keeps failing, log out and sign in again to refresh Google Drive permissions."
       );
+      accessError.code = "shared-folder-unavailable";
+      throw accessError;
     }
     const project = await loadFolderAsProject(id, meta.name);
     if (!project || !Object.keys(project.files || {}).length) {
-      throw new Error("Shared project folder was empty or inaccessible.");
+      throw new Error(
+        "Shared project folder was empty or inaccessible. Ask the owner to save the project once, then send a new invite."
+      );
     }
     // Invitees edit the owner's folder; never treat them as creating their own Undertwig copy.
     const role = isOwnerEmail(meta) ? "owner" : cachedRole === "reader" ? "reader" : "writer";
@@ -1163,6 +1224,7 @@
     setMappedProject(project.projectName || meta.name, id, role);
     project.role = role;
     project.currentProject = project.projectName || meta.name;
+    clearPendingInvite();
     return project;
   }
 
@@ -1207,7 +1269,7 @@
       DRIVE_API +
         "/files/" +
         encodeURIComponent(folderId) +
-        "/permissions?sendNotificationEmail=false&fields=id,role,emailAddress",
+        "/permissions?sendNotificationEmail=true&supportsAllDrives=true&fields=id,role,emailAddress",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1545,7 +1607,7 @@
         return { ok: false, reason: "http-" + response.status, fileId: null };
       }
 
-      if (!memoryTokenScope || !scopeIncludesDriveFile(memoryTokenScope)) {
+      if (!memoryTokenScope || !scopeIncludesDriveAccess(memoryTokenScope)) {
         memoryTokenScope = DRIVE_SCOPE;
         writeStoredToken(memoryAccessToken, memoryTokenExpiresAt, memoryTokenScope);
       }
@@ -1597,6 +1659,10 @@
     setActiveProjectByName,
     resolveProjectAccess,
     buildProjectInvitePath,
+    rememberPendingInvite,
+    readPendingInvite,
+    clearPendingInvite,
+    inviteEditorPath,
     joinSharedProject,
     shareProjectWithEmail,
     refreshProjectMeta,
