@@ -525,12 +525,49 @@
         font-weight: 600;
         font-variant-ligatures: none;
         white-space: nowrap;
-        cursor: default;
+        cursor: pointer;
       }
 
       .engine-button:hover {
-        background: var(--panel-soft);
-        border-color: var(--border);
+        background: var(--panel-strong);
+        border-color: #4b6073;
+      }
+
+      .engine-wrap {
+        position: relative;
+      }
+
+      .engine-menu {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        z-index: 40;
+        min-width: 100%;
+        padding: 6px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #1a2530;
+        box-shadow: var(--shadow);
+      }
+
+      .engine-menu button {
+        display: block;
+        width: 100%;
+        min-height: 32px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 600;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .engine-menu button:hover,
+      .engine-menu button[aria-selected="true"] {
+        background: var(--panel-strong);
       }
 
       .convert-busy {
@@ -1034,7 +1071,13 @@
               </svg>
               Save
             </button>
-            <button class="engine-button" id="latexEngine" type="button" title="Local SwiftLaTeX engine (pdfTeX + LaTeX format)" aria-label="LaTeX engine: pdfLaTeX">pdfLaTeX</button>
+            <div class="engine-wrap">
+              <button class="engine-button" id="latexEngine" type="button" aria-haspopup="listbox" aria-expanded="false" title="Choose the local LaTeX engine">pdfLaTeX</button>
+              <div class="engine-menu hidden" id="engineMenu" role="listbox" aria-label="LaTeX engine">
+                <button type="button" role="option" data-engine="pdflatex" aria-selected="true">pdfLaTeX</button>
+                <button type="button" role="option" data-engine="lualatex" aria-selected="false">LuaLaTeX</button>
+              </div>
+            </div>
             <button class="convert-button" id="convert" type="button">Convert</button>
             <span class="convert-busy hidden" id="convertBusy" aria-hidden="true" title="Converting…">|</span>
           </div>
@@ -1094,12 +1137,13 @@
       </div>
     </div>
 
-    <script src="auth-config.js?v=20260728n"></script>
-    <script src="auth.js?v=20260728n"></script>
-    <script src="cloud-storage.js?v=20260728n"></script>
-    <script src="invite.js?v=20260728n"></script>
+    <script src="auth-config.js?v=20260728p"></script>
+    <script src="auth.js?v=20260728p"></script>
+    <script src="cloud-storage.js?v=20260728p"></script>
+    <script src="invite.js?v=20260728p"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
+    <script src="latex-engines.js?v=20260728p"></script>
     <script>
       const DEMO_FIGURE_PNG_BASE64 =
         "iVBORw0KGgoAAAANSUhEUgAAAPAAAACMCAIAAADN17N/AAAD20lEQVR42u3dMU4UURjAcdjsAaigIlzBwsKSTisSL8ARKI2cAGPpEbyACZV2lhQUXIHSW1hMMpkMy26YN/PeN+/9/pUxsM6yv/38Zncdj09Oz4+kWtr4EQhoCWgJaAloAS0BLQEtAS0BLaAloCWgJaAloNVS24Vu9+L2yg9X+3u+u5/9No/n/YA/xyorezbQKCsC63lAv9T878dfj5D2d3ZzObvpVNAjyhwrXXYK6w3NKt5ITsr6ul3igKRphF4uIfkmdP80olmzj+rJQ3qTqFlaqGnGNnM9paQI6+sm5alDs6ItHj7LoaoCWm2Dtm8o8tZhQsvKIQEtAS0BLaClOtoWP4L0D1gFzGuaLYKukvLwrmHd0MpRseam7iPQbT3STNe/crT2GJ/dXEbbPZ4eH/Z/wbv3H4CmObTpg4hf++J14d4eqep2Ov78+/v+7/r16cvLW1iF7KygW14o8w/pEeWDiF/74h53d4PBWZvQlU/lNznej7uTHZw10NVqTqe8U3bPOqZpoFGeyDrmqPZZDpqT9pA3vXgCtCJqjmzaylGJ5pyUd64fQXYPE5rmeVgHmdNA01yVaaBprso00Os+C3RsQNdTnPEc53iAtmxUtXgATXNVpoFWVQFtPFc1pIGWCS3jOeqQBlomtAS02tk3Cm4dQMuEloCWgNZaF+hSazTQqqoK/03hn+tvQY/sOum7h5fnmn2IWjkkoCWgpaZ36I8/v8Y8sMlXH13vqxwmtAS0BLSAloBWct11EBd6Y2XRumPOeR1HoGVCS0BLQGvFa3T+BRpomdAS0Gpt6yiybwAtE1qGdNTxDLRMaBnSUccz0ExXpRnodRfNdITjAXrFQ9qxAW3xqHbZAJrp2jQDzXRVmo+qvIxBg6afHh86VZkvddA/keLs9CZ0VeeIOUd1QM25QU++0koFLX3fM5uOqdnKUeGcXnr9CEu5zMrR5pDOea+Ho3reaT28wbAvhG+LPLpnN5c0ZxjVw4E6eWCPnhWR39MptnK0Y7rg30hD1iOXB3HvHO3BKRfeoVswHWG/6hUO/6OTN60iq3Ac4qSwe7yrZB3wVGHo8uD/4rMuxFFAt3yaGAd3ZXljRUBLQEtAS0ALaKlR0M93990vmnr7WpnrdfXeTGiZ0FKDoG0dirlvzDChmdZCmrOuHBOeOlIGY5v0P8+QVoRlo2s743H43JyK765JO/ToaWRUaxbNKQvt8cnpefoBXdxejX7HtNaEqZx+bjYP6J2mpQxngUuBxlplKS8CmmwVcbw4aKlIPsshoCWgJaAloAW0BLQEtAS0BLSAloCWgJaAlg71HwSpsZ+X/NyHAAAAAElFTkSuQmCC";
@@ -1273,6 +1317,8 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const status = document.getElementById("status");
       const convertButton = document.getElementById("convert");
       const convertBusy = document.getElementById("convertBusy");
+      const latexEngineButton = document.getElementById("latexEngine");
+      const engineMenu = document.getElementById("engineMenu");
       const CONVERT_SPINNER_FRAMES = ["|", "/", "-", "\\"];
       let convertSpinnerTimer = null;
       let convertSpinnerFrame = 0;
@@ -1712,6 +1758,31 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         accountBox.classList.add("hidden");
         collaborateButton.setAttribute("aria-expanded", "false");
         accountButton.setAttribute("aria-expanded", "false");
+        closeEngineMenu();
+      }
+
+      function closeEngineMenu() {
+        if (!engineMenu || !latexEngineButton) {
+          return;
+        }
+        engineMenu.classList.add("hidden");
+        latexEngineButton.setAttribute("aria-expanded", "false");
+      }
+
+      function syncEngineMenuUi() {
+        if (!UndertwigEngines || !latexEngineButton || !engineMenu) {
+          return;
+        }
+        const selected = UndertwigEngines.getSelectedEngine();
+        latexEngineButton.textContent = UndertwigEngines.getSelectedEngineLabel();
+        latexEngineButton.setAttribute(
+          "aria-label",
+          "LaTeX engine: " + UndertwigEngines.getSelectedEngineLabel()
+        );
+        engineMenu.querySelectorAll("[data-engine]").forEach((button) => {
+          const id = button.getAttribute("data-engine");
+          button.setAttribute("aria-selected", id === selected ? "true" : "false");
+        });
       }
 
       function setInviteStatus(message, kind) {
@@ -2116,6 +2187,32 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       fileInput.addEventListener("change", () => handleUpload(fileInput.files));
       folderInput.addEventListener("change", () => handleUpload(folderInput.files, true));
       convertButton.addEventListener("click", compileProject);
+
+      latexEngineButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const open = !engineMenu.classList.contains("hidden");
+        closeHoverBoxes();
+        if (open) {
+          return;
+        }
+        engineMenu.classList.remove("hidden");
+        latexEngineButton.setAttribute("aria-expanded", "true");
+      });
+
+      engineMenu.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const option = event.target.closest("[data-engine]");
+        if (!option) {
+          return;
+        }
+        const id = option.getAttribute("data-engine");
+        UndertwigEngines.setSelectedEngine(id);
+        syncEngineMenuUi();
+        closeEngineMenu();
+        setStatus("LaTeX engine set to " + UndertwigEngines.getSelectedEngineLabel() + ".");
+      });
+
+      syncEngineMenuUi();
 
       editor.addEventListener("input", () => {
         const file = state.files[state.activeFile];
@@ -3721,65 +3818,40 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           return;
         }
 
+        const engineLabel = UndertwigEngines.getSelectedEngineLabel();
         convertButton.disabled = true;
         convertButton.setAttribute("aria-busy", "true");
         startConvertSpinner();
-        setStatus("Loading local WebAssembly LaTeX engine...");
+        setStatus("Loading " + engineLabel + "…");
         compileLog.textContent = "";
         logPanel.classList.add("hidden");
 
         try {
-          if (engine) engine.closeWorker();
-          engine = new PdfTeXEngine();
-          await engine.loadEngine();
+          if (engine && engine.closeWorker) {
+            try {
+              engine.closeWorker();
+            } catch (_error) {
+              // Ignore.
+            }
+            engine = null;
+          }
 
-          const folders = new Set();
-          Object.keys(projectFiles).forEach((path) => {
-            const parts = path.split("/");
-            parts.pop();
-            let current = "";
-            parts.forEach((part) => {
-              current = current ? `${current}/${part}` : part;
-              folders.add(current);
-            });
-          });
-          [...folders]
-            .sort((a, b) => a.split("/").length - b.split("/").length)
-            .forEach((folder) => engine.makeMemFSFolder(folder));
-
-          Object.entries(projectFiles).forEach(([path, file]) => {
-            const content = file.binary ? base64ToBytes(file.content) : file.content;
-            engine.writeMemFSFile(path, content);
+          const result = await UndertwigEngines.compileProjectFiles(projectFiles, {
+            previousEngine: engine,
+            onProgress: function (message) {
+              setStatus(message || "Converting with " + engineLabel + "…");
+            },
           });
 
-          setStatus("Converting with PdfTeX in the browser...");
-          engine.setEngineMainFile("main.tex");
-
-          // Two passes so .toc / .aux from the first resolve TOC and references.
-          let result = null;
-          let auxFiles = {};
-          for (let pass = 1; pass <= 2; pass += 1) {
-            setStatus(`Converting with PdfTeX in the browser (pass ${pass}/2)...`);
-            Object.entries(auxFiles).forEach(([path, content]) => {
-              engine.writeMemFSFile(path, content);
-            });
-            result = await engine.compileLaTeX();
-            if (result && result.aux && typeof result.aux === "object") {
-              auxFiles = result.aux;
-            }
-            if (!result || result.status !== 0 || !result.pdf) {
-              break;
-            }
+          if (result && result.engine) {
+            engine = result.engine;
           }
 
           compileLog.textContent = (result && result.log) || "No compiler log returned.";
           logPanel.classList.remove("hidden");
-          const failed = !result || result.status !== 0 || !result.pdf;
+          const failed = !result || !result.ok || !result.pdf;
           if (failed) {
             setLogCollapsed(false);
-          }
-
-          if (failed) {
             setStatus("Conversion failed. Check the compiler log below the preview.", true);
             return;
           }
@@ -3789,7 +3861,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           pdfFrame.src = pdfUrl;
           emptyPreview.classList.add("hidden");
           previewMeta.textContent = `Generated ${new Date().toLocaleTimeString()}`;
-          setStatus("PDF generated locally.");
+          setStatus("PDF generated locally with " + (result.label || engineLabel) + ".");
         } catch (error) {
           setStatus(`Conversion failed: ${error && error.message ? error.message : error}`, true);
         } finally {
