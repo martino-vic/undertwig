@@ -443,6 +443,10 @@
         flex: 0 0 auto;
       }
 
+      .save-button {
+        min-width: 36px;
+      }
+
       .convert-button {
         min-height: 36px;
         padding: 0 16px;
@@ -825,6 +829,12 @@
                 <a id="accountLogout" href="#">Log out</a>
               </div>
             </div>
+            <button class="toolbar-button save-button" id="saveProject" type="button" title="Save in this browser">
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+                <path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zM15 9H5V5h10v4z"/>
+              </svg>
+              Save
+            </button>
             <button class="convert-button" id="convert" type="button">Convert</button>
             <span class="convert-busy hidden" id="convertBusy" aria-hidden="true" title="Converting…">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -867,10 +877,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727n"></script>
-    <script src="auth.js?v=20260727n"></script>
-    <script src="cloud-storage.js?v=20260727n"></script>
-    <script src="invite.js?v=20260727n"></script>
+    <script src="auth-config.js?v=20260727o"></script>
+    <script src="auth.js?v=20260727o"></script>
+    <script src="cloud-storage.js?v=20260727o"></script>
+    <script src="invite.js?v=20260727o"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1238,6 +1248,62 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
       }
 
+      async function saveProjectNow() {
+        const saveButton = document.getElementById("saveProject");
+        const active = state.files[state.activeFile];
+        if (active && !active.binary) {
+          active.content = editor.value;
+        }
+
+        saveButton.disabled = true;
+        try {
+          let localOk = true;
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          } catch (_error) {
+            localOk = false;
+          }
+
+          if (UndertwigAuth.isLoggedIn() && UndertwigCloud.isAvailable()) {
+            if (!UndertwigCloud.hasAccessToken()) {
+              setStatus("Redirecting to Google so this save can sync to Drive…");
+              UndertwigAuth.beginGoogleDriveTokenSignIn("/");
+              return;
+            }
+
+            const projectName = getActiveProjectName();
+            setStatus(
+              projectName
+                ? "Saving “" + projectName + "” to Google Drive…"
+                : "Saving projects to Google Drive…"
+            );
+            await UndertwigCloud.saveProject(state, {
+              projectName: projectName || undefined,
+            });
+            renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+            setStatus(
+              localOk
+                ? "Saved in this browser and synced to Google Drive."
+                : "Saved to Google Drive (browser storage is full)."
+            );
+            return;
+          }
+
+          if (localOk) {
+            setStatus("Saved in this browser.");
+          } else {
+            setStatusStorageFull();
+          }
+        } catch (error) {
+          setStatus(
+            (error && error.message) || "Could not save the project.",
+            true
+          );
+        } finally {
+          saveButton.disabled = false;
+        }
+      }
+
       function closeHoverBoxes() {
         collaborateBox.classList.add("hidden");
         accountBox.classList.add("hidden");
@@ -1322,6 +1388,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
       function refreshAuthUi() {
         const session = UndertwigAuth.readSession();
+        const saveButton = document.getElementById("saveProject");
         if (session) {
           loginButton.classList.add("hidden");
           accountWrap.classList.remove("hidden");
@@ -1332,12 +1399,18 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             ". Your projects live in Google Drive; invites share your project with collaborators.";
           collaborateLoginLink.classList.add("hidden");
           UndertwigInvite.preload();
+          if (saveButton) {
+            saveButton.title = "Save locally and sync to Google Drive";
+          }
         } else {
           loginButton.classList.remove("hidden");
           accountWrap.classList.add("hidden");
           collaborateLoginLink.classList.remove("hidden");
           collaborateLoginLink.href = UndertwigAuth.loginUrl("/");
           inviteForm.classList.add("hidden");
+          if (saveButton) {
+            saveButton.title = "Save in this browser";
+          }
         }
         closeHoverBoxes();
         refreshCloudStatus();
@@ -1468,6 +1541,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       document.getElementById("uploadFiles").addEventListener("click", () => fileInput.click());
       document.getElementById("downloadZip").addEventListener("click", downloadProjectZip);
       document.getElementById("uploadToDrive").addEventListener("click", uploadToGoogleDrive);
+      document.getElementById("saveProject").addEventListener("click", saveProjectNow);
       document.getElementById("uploadFolder").addEventListener("click", () => {
         if (!supportsFolderUpload()) {
           setStatus(
