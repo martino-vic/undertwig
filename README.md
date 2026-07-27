@@ -8,6 +8,7 @@ Local editing and conversion run in the browser with the SwiftLaTeX PdfTeX WebAs
 
 - Collapsible file explorer
 - Create and upload files or folders
+- Download the project as a ZIP
 - Drag files into folders or back to the project root
 - LaTeX source editor
 - Convert button with local PDF preview
