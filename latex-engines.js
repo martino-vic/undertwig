@@ -863,7 +863,9 @@
         if (file && file.binary) {
           return false;
         }
-        return /\.(bcf|bib|tex|aux|blg|bbl)$/i.test(path);
+        // Omit .bbl: typeward skips unchanged inputs from its output map, which
+        // made successful Biber runs look like failures and blocked upgrades.
+        return /\.(bcf|bib|tex|aux|blg)$/i.test(path);
       })
       .map(function (path) {
         const file = projectFiles[path];
@@ -872,6 +874,26 @@
           content: file && file.content != null ? String(file.content) : "",
         };
       });
+  }
+
+  function findProjectBbl(projectFiles, jobname) {
+    const exact = jobname + ".bbl";
+    const keys = Object.keys(projectFiles || {});
+    const hit =
+      keys.find(function (path) {
+        return path === exact || path.endsWith("/" + exact);
+      }) ||
+      keys.find(function (path) {
+        return /\.bbl$/i.test(path);
+      });
+    if (!hit) {
+      return null;
+    }
+    const file = projectFiles[hit];
+    if (!file || file.binary || file.content == null) {
+      return null;
+    }
+    return { path: hit === exact ? exact : hit, content: String(file.content) };
   }
 
   function mergePreparedOutputs(projectFiles, outputs) {
@@ -890,10 +912,69 @@
     return next;
   }
 
+  /**
+   * typeward ships Biber 2.19 (BBL format 3.2). BusyTeX/TeXlyre uses
+   * TeX Live 2026 biblatex, which expects BBL format 3.3. Header-only
+   * rewrites fail: 3.3 adds a trailing /global on \datalist refcontexts
+   * and an extra {} on \entry. Upgrade mechanically so Convert can load
+   * the bibliography.
+   */
+  function upgradeBbl32to33(bbl) {
+    let s = String(bbl || "");
+    if (!s || !/biblatex\s+bbl format version\s+3\.2/i.test(s)) {
+      return s;
+    }
+
+    // Loose match: Biber's header formatting must not block the bump.
+    s = s.replace(/bbl format version\s+3\.2/gi, "bbl format version 3.3");
+
+    s = s.replace(/(\\datalist(?:\[[^\]]*\])?\{)([^}\n]+)(\})/g, function (full, head, ctx, brace) {
+      if (/\/global\/global\/global\s*$/.test(ctx)) {
+        return full;
+      }
+      if (/\/global\/global\s*$/.test(ctx)) {
+        return head + ctx.replace(/\s*$/, "") + "/global" + brace;
+      }
+      return full;
+    });
+
+    // \entry{key}{type}{} → \entry{key}{type}{}{}
+    s = s.replace(/(\\entry\{[^}]+\}\{[^}]*\}\{\})(?!\{)/g, "$1{}");
+
+    return s;
+  }
+
+  function upgradeBiberOutputs(outputs) {
+    const next = Object.assign({}, outputs || {});
+    Object.keys(next).forEach(function (path) {
+      if (next[path] == null) {
+        return;
+      }
+      const text = String(next[path]);
+      if (!/\.bbl$/i.test(path) && !/biblatex\s+bbl format version/i.test(text)) {
+        return;
+      }
+      next[path] = upgradeBbl32to33(text);
+    });
+    // Always expose a stable main.bbl key when any job bbl exists.
+    if (!next["main.bbl"]) {
+      const alt = Object.keys(next).find(function (path) {
+        return /(^|\/)main\.bbl$/i.test(path);
+      });
+      if (alt) {
+        next["main.bbl"] = next[alt];
+      }
+    }
+    if (next["main.bbl"] != null) {
+      next["main.bbl"] = upgradeBbl32to33(String(next["main.bbl"]));
+    }
+    return next;
+  }
+
   function runTypewardBiber(projectFiles, notify) {
     notify("Loading Biber WASM (typeward)…");
     const moduleUrl = new URL(
-      "vendor/texlive-wasm/run-biber.js?v=20260728af",
+      "vendor/texlive-wasm/run-biber.js?v=20260728aj",
       global.location.href
     ).href;
     return import(moduleUrl).then(function (mod) {
@@ -905,6 +986,41 @@
         jobname: "main",
         files: projectFilesToTypeward(projectFiles),
         timeoutMs: 300000,
+      }).then(function (result) {
+        const outputs = Object.assign({}, (result && result.outputs) || {});
+        const hasBbl = Object.keys(outputs).some(function (path) {
+          return /(^|\/)main\.bbl$/i.test(path) || /\.bbl$/i.test(path);
+        });
+
+        // Fallback if WASM omitted an unchanged .bbl despite exit 0.
+        if ((result && (result.ok || result.exit_code === 0)) && !hasBbl) {
+          const existing = findProjectBbl(projectFiles, "main");
+          if (existing) {
+            outputs["main.bbl"] = existing.content;
+          }
+        }
+
+        const upgraded = upgradeBiberOutputs(outputs);
+        const ok = Boolean(
+          result &&
+            (result.ok || result.exit_code === 0) &&
+            upgraded["main.bbl"]
+        );
+
+        let log = (result && result.log) || "";
+        if (upgraded["main.bbl"] && /bbl format version 3\.3/i.test(upgraded["main.bbl"])) {
+          log +=
+            "\n\nNOTE: Upgraded main.bbl from biblatex format 3.2 → 3.3 for TeX Live 2026.";
+        } else if (upgraded["main.bbl"] && /bbl format version 3\.2/i.test(upgraded["main.bbl"])) {
+          log +=
+            "\n\nWARNING: main.bbl still reports format 3.2 after upgrade attempt.";
+        }
+
+        return Object.assign({}, result || {}, {
+          ok: ok,
+          outputs: upgraded,
+          log: log,
+        });
       });
     });
   }
@@ -962,9 +1078,11 @@
           }
 
           return runTypewardBiber(preparedFiles, notify).then(function (result) {
-            const outputs = Object.assign({}, (prep && prep.outputs) || {}, result.outputs || {});
+            const outputs = upgradeBiberOutputs(
+              Object.assign({}, (prep && prep.outputs) || {}, result.outputs || {})
+            );
             return {
-              ok: Boolean(result.ok),
+              ok: Boolean(result && result.ok),
               tool: BIBER,
               label: toolLabel,
               log:
@@ -972,7 +1090,7 @@
                 "\n\n" +
                 ((result && result.log) || "No Biber log returned."),
               outputs: outputs,
-              exit_code: result.exit_code,
+              exit_code: result && result.exit_code,
             };
           });
         });
@@ -996,6 +1114,7 @@
     listBibTools: listBibTools,
     compileProjectFiles: compileProjectFiles,
     runBibliography: runBibliography,
+    upgradeBbl32to33: upgradeBbl32to33,
     closeLuaWorker: closeLuaWorker,
   };
 })(window);
