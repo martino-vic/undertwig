@@ -819,6 +819,7 @@
     <script src="auth.js"></script>
     <script src="cloud-storage.js"></script>
     <script src="invite.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
       const DEMO_FIGURE_PNG_BASE64 =
@@ -1357,7 +1358,18 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           renderCloudStatus("checking");
           setStatus("Syncing project with Google Cloud storage…");
           try {
-            const result = await UndertwigCloud.syncProject(state);
+            const result = await Promise.race([
+              UndertwigCloud.syncProject(state),
+              new Promise((_, reject) => {
+                setTimeout(() => {
+                  reject(
+                    new Error(
+                      "Google Cloud sync timed out. Allow popups, then click Connect under the file tree."
+                    )
+                  );
+                }, 25000);
+              }),
+            ]);
             if (result.source === "cloud" && result.project) {
               replaceProjectState(result.project);
               try {

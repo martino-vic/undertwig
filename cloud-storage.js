@@ -149,6 +149,8 @@
     return memoryAccessToken;
   }
 
+  const TOKEN_REQUEST_TIMEOUT_MS = 20000;
+
   async function requestOauthToken(forcePrompt) {
     const session = auth().readSession();
     if (!session) {
@@ -163,6 +165,25 @@
     await ensureGisOauth();
 
     const token = await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (handler, value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        handler(value);
+      };
+
+      const timer = setTimeout(() => {
+        finish(
+          reject,
+          new Error(
+            "Google Cloud authorization timed out. Allow popups for accounts.google.com, then click Connect."
+          )
+        );
+      }, TOKEN_REQUEST_TIMEOUT_MS);
+
       try {
         const client = global.google.accounts.oauth2.initTokenClient({
           client_id: clientId,
@@ -171,22 +192,25 @@
           hint: session.email,
           callback: (response) => {
             if (response && response.error) {
-              reject(new Error(describeOauthError(response)));
+              finish(reject, new Error(describeOauthError(response)));
               return;
             }
             if (!response || !response.access_token) {
-              reject(new Error("Google did not return a cloud storage access token."));
+              finish(reject, new Error("Google did not return a cloud storage access token."));
               return;
             }
-            resolve(response);
+            finish(resolve, response);
           },
           error_callback: (error) => {
-            reject(new Error((error && error.message) || "Google cloud storage authorization failed."));
+            finish(
+              reject,
+              new Error((error && error.message) || "Google cloud storage authorization failed.")
+            );
           },
         });
         client.requestAccessToken();
       } catch (error) {
-        reject(error);
+        finish(reject, error);
       }
     });
 
@@ -214,9 +238,14 @@
   /** Request Drive access and keep the token for this browser session. */
   async function connect(options) {
     const opts = options || {};
+    // Interactive connect must open consent immediately; silent-first can hang forever
+    // when a popup is blocked and Google never calls back.
+    if (opts.interactive || opts.forcePrompt) {
+      return getAccessToken({ forcePrompt: true });
+    }
     return getAccessToken({
-      forcePrompt: Boolean(opts.forcePrompt),
-      allowConsentRetry: Boolean(opts.interactive || opts.allowConsentRetry),
+      forcePrompt: false,
+      allowConsentRetry: Boolean(opts.allowConsentRetry),
     });
   }
 

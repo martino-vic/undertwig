@@ -377,7 +377,10 @@
           if (ready()) {
             clearInterval(wait);
             resolve();
+            return;
           }
+          clearInterval(wait);
+          reject(new Error("Google authorization library failed to load."));
         }, 10000);
         return;
       }
