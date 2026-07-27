@@ -1344,6 +1344,58 @@
     return joinSharedProject(folderId, onProgress);
   }
 
+  /**
+   * Pull the named project's Google Drive folder into an Undertwig project snapshot.
+   * Used by the file-tree Sync button (Drive → local tree).
+   */
+  async function pullProjectFromDrive(projectName, onProgress) {
+    const name = String(projectName || "").trim();
+    if (!name) {
+      throw new Error("Set a current project in the file tree before syncing.");
+    }
+    await connect();
+
+    let folderId = getMappedFolderId(name) || null;
+    if (!folderId && isCurrentProjectShared(name) && getProjectFolderId()) {
+      folderId = getProjectFolderId();
+    }
+    if (!folderId && isCollaborator() && getProjectFolderId()) {
+      const meta = await refreshProjectMeta(getProjectFolderId());
+      if (meta && (meta.name === name || !getMappedFolderId(name))) {
+        folderId = getProjectFolderId();
+      }
+    }
+    if (!folderId) {
+      try {
+        const rootId = await ensureUndertwigFolder();
+        const children = await listChildren(rootId);
+        for (let i = 0; i < children.length; i += 1) {
+          const child = children[i];
+          if (
+            child &&
+            child.mimeType === "application/vnd.google-apps.folder" &&
+            child.name === name
+          ) {
+            folderId = child.id;
+            setMappedProject(name, folderId, "owner");
+            break;
+          }
+        }
+      } catch (_error) {
+        // Fall through to the final error below.
+      }
+    }
+    if (!folderId) {
+      throw new Error(
+        "No Google Drive folder found for “" +
+          name +
+          "”. Save the project first, or open it from an invite link."
+      );
+    }
+
+    return loadFolderAsProject(folderId, name, onProgress);
+  }
+
   function isOwnerEmail(meta) {
     const session = auth().readSession();
     const email = session && session.email ? String(session.email).toLowerCase() : "";
@@ -1797,6 +1849,7 @@
     inviteEditorPath,
     joinSharedProject,
     syncFromDrive,
+    pullProjectFromDrive,
     shareProjectWithEmail,
     refreshProjectMeta,
     probeConnection,

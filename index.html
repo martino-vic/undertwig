@@ -137,6 +137,12 @@
         grid-column: 1 / -1;
       }
 
+      .sidebar-actions button.is-syncing {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        letter-spacing: 0.02em;
+        cursor: wait;
+      }
+
       .tree {
         flex: 1;
         min-height: 0;
@@ -859,6 +865,7 @@
           <button id="uploadFolder" type="button">Upload folder</button>
           <button class="wide" id="downloadZip" type="button">Download ZIP</button>
           <button class="wide" id="newProject" type="button">New project</button>
+          <button class="wide" id="syncProject" type="button" title="Pull the current project from Google Drive into the file tree">Sync</button>
         </div>
         <div class="tree" id="tree"></div>
         <div class="cloud-status is-logged-out" id="cloudStatus" role="status" aria-live="polite">
@@ -955,10 +962,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260728f"></script>
-    <script src="auth.js?v=20260728f"></script>
-    <script src="cloud-storage.js?v=20260728f"></script>
-    <script src="invite.js?v=20260728f"></script>
+    <script src="auth-config.js?v=20260728g"></script>
+    <script src="auth.js?v=20260728g"></script>
+    <script src="cloud-storage.js?v=20260728g"></script>
+    <script src="invite.js?v=20260728g"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1137,6 +1144,11 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const CONVERT_SPINNER_FRAMES = ["|", "/", "-", "\\"];
       let convertSpinnerTimer = null;
       let convertSpinnerFrame = 0;
+      const syncProjectButton = document.getElementById("syncProject");
+      const SYNC_BUTTON_LABEL = "Sync";
+      let syncSpinnerTimer = null;
+      let syncSpinnerFrame = 0;
+      let syncInFlight = false;
 
       function startConvertSpinner() {
         convertBusy.classList.remove("hidden");
@@ -1158,6 +1170,33 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
         convertBusy.classList.add("hidden");
         convertBusy.textContent = "|";
+      }
+
+      function startSyncSpinner() {
+        syncInFlight = true;
+        syncProjectButton.disabled = true;
+        syncProjectButton.classList.add("is-syncing");
+        syncSpinnerFrame = 0;
+        syncProjectButton.textContent = SYNC_BUTTON_LABEL + " " + CONVERT_SPINNER_FRAMES[0];
+        if (syncSpinnerTimer) {
+          clearInterval(syncSpinnerTimer);
+        }
+        syncSpinnerTimer = setInterval(() => {
+          syncSpinnerFrame = (syncSpinnerFrame + 1) % CONVERT_SPINNER_FRAMES.length;
+          syncProjectButton.textContent =
+            SYNC_BUTTON_LABEL + " " + CONVERT_SPINNER_FRAMES[syncSpinnerFrame];
+        }, 100);
+      }
+
+      function stopSyncSpinner() {
+        if (syncSpinnerTimer) {
+          clearInterval(syncSpinnerTimer);
+          syncSpinnerTimer = null;
+        }
+        syncInFlight = false;
+        syncProjectButton.disabled = false;
+        syncProjectButton.classList.remove("is-syncing");
+        syncProjectButton.textContent = SYNC_BUTTON_LABEL;
       }
       const activeFileName = document.getElementById("activeFileName");
       const activeFileMeta = document.getElementById("activeFileMeta");
@@ -1701,6 +1740,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       });
 
       document.getElementById("newProject").addEventListener("click", createProject);
+      syncProjectButton.addEventListener("click", () => {
+        syncCurrentProjectFromDrive();
+      });
       document.getElementById("newFile").addEventListener("click", createFile);
       document.getElementById("newFolder").addEventListener("click", createFolder);
       document.getElementById("uploadFiles").addEventListener("click", () => fileInput.click());
@@ -1945,6 +1987,50 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
               Object.keys(state.files)
                 .filter((path) => path.startsWith(projectName + "/"))
                 .sort()[0] || "";
+          }
+        }
+        state.version = 2;
+      }
+
+      /**
+       * Replace one root project's local files with a Drive pull (keeps Other projects).
+       */
+      function applyPulledProject(pulledProject) {
+        const projectName =
+          (pulledProject && (pulledProject.currentProject || pulledProject.projectName)) ||
+          getActiveProjectName() ||
+          "Project";
+        const previousActive = state.activeFile || "";
+        removeRootProjectPaths(projectName);
+
+        const pulledFolders = Array.isArray(pulledProject.folders) ? pulledProject.folders : [];
+        pulledFolders.forEach((folder) => {
+          if (folder && !state.folders.includes(folder)) {
+            state.folders.push(folder);
+          }
+        });
+        if (!state.folders.includes(projectName)) {
+          state.folders.push(projectName);
+        }
+        Object.keys(pulledProject.files || {}).forEach((path) => {
+          state.files[path] = pulledProject.files[path];
+        });
+
+        state.currentProject = projectName;
+        if (previousActive && state.files[previousActive]) {
+          state.activeFile = previousActive;
+        } else {
+          state.activeFile = pulledProject.activeFile || "";
+          if (!state.activeFile) {
+            const preferred = projectName + "/main.tex";
+            if (state.files[preferred]) {
+              state.activeFile = preferred;
+            } else {
+              state.activeFile =
+                Object.keys(state.files)
+                  .filter((path) => path.startsWith(projectName + "/"))
+                  .sort()[0] || "";
+            }
           }
         }
         state.version = 2;
@@ -2959,6 +3045,79 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         addFolder(name);
         setCurrentProject(name);
         setStatus(`Created project folder ${name}. It is now the current project.`);
+      }
+
+      async function syncCurrentProjectFromDrive() {
+        if (syncInFlight) {
+          return;
+        }
+        if (!UndertwigAuth.isLoggedIn() || !UndertwigCloud.isAvailable()) {
+          setStatus("Log in with Google to sync from Drive.", true, { offerCloudLogin: true });
+          return;
+        }
+        if (!UndertwigCloud.hasAccessToken()) {
+          setStatus("Connect Google Drive first, then click Sync.", true);
+          try {
+            UndertwigAuth.beginGoogleDriveTokenSignIn("/");
+          } catch (error) {
+            setStatus((error && error.message) || "Could not start Google Drive connection.", true);
+          }
+          return;
+        }
+        if (!UndertwigCloud.pullProjectFromDrive) {
+          setStatus("Sync is not available. Hard-refresh the page and try again.", true);
+          return;
+        }
+
+        const projectName = getActiveProjectName();
+        if (!projectName) {
+          setStatus("Set a current project in the file tree before syncing.", true);
+          return;
+        }
+
+        const active = state.files[state.activeFile];
+        if (active && !active.binary) {
+          active.content = editor.value;
+        }
+
+        startSyncSpinner();
+        setStatus("Syncing “" + projectName + "” from Google Drive…");
+        try {
+          const pulled = await UndertwigCloud.pullProjectFromDrive(projectName, function (message) {
+            setStatus(message || "Syncing from Google Drive…");
+          });
+          applyPulledProject(pulled);
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          } catch (_error) {
+            // Local cache is optional.
+          }
+          collapsedFolders.delete(projectName);
+          persistCollapsedFolders();
+          render();
+          if (cloudStatusMode === "connected") {
+            renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+          }
+          const fileCount =
+            typeof pulled.fileCount === "number"
+              ? pulled.fileCount
+              : Object.keys(state.files || {}).filter(function (path) {
+                  return path === projectName || path.startsWith(projectName + "/");
+                }).length;
+          setStatus(
+            "Synced “" +
+              projectName +
+              "” from Google Drive (" +
+              fileCount +
+              " file" +
+              (fileCount === 1 ? "" : "s") +
+              ")."
+          );
+        } catch (error) {
+          setStatus((error && error.message) || "Could not sync from Google Drive.", true);
+        } finally {
+          stopSyncSpinner();
+        }
       }
 
       function pathUnderCurrentProject(path) {
