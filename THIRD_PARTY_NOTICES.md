@@ -9,6 +9,8 @@
 - Local modifications:
   - `PdfTeXEngine.js`: worker path set to `vendor/swiftlatex/swiftlatexpdftex.js`
   - `swiftlatexpdftex.js`: TeXLive package endpoint set to `https://texlive.texlyre.org/`
+  - `swiftlatexpdftex.js`: `compileLaTeXRoutine` runs PdfTeX multiple times in one
+    job so `\tableofcontents` and cross-references resolve from `.toc`/`.aux`
 
 Undertwig loads these assets in the browser to compile LaTeX to PDF locally.
 
