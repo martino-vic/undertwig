@@ -955,10 +955,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727w"></script>
-    <script src="auth.js?v=20260727w"></script>
-    <script src="cloud-storage.js?v=20260727w"></script>
-    <script src="invite.js?v=20260727w"></script>
+    <script src="auth-config.js?v=20260727x"></script>
+    <script src="auth.js?v=20260727x"></script>
+    <script src="cloud-storage.js?v=20260727x"></script>
+    <script src="invite.js?v=20260727x"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1243,6 +1243,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           cloudStatusText.appendChild(document.createTextNode(label));
           const link = document.createElement("a");
           const currentName = getActiveProjectName();
+          const shared =
+            UndertwigCloud.isCurrentProjectShared &&
+            UndertwigCloud.isCurrentProjectShared(currentName);
           const initialId =
             fileId ||
             (UndertwigCloud.setActiveProjectByName && currentName
@@ -1252,7 +1255,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           link.href = driveProjectUrl(initialId);
           link.target = "_blank";
           link.rel = "noopener";
-          link.textContent = "Open in Google Drive";
+          link.textContent = shared ? "Open shared project in Google Drive" : "Open in Google Drive";
           cloudStatusText.appendChild(link);
           if (UndertwigCloud.getOpenInDriveUrl) {
             UndertwigCloud.getOpenInDriveUrl(initialId, { projectName: currentName || undefined })
@@ -1483,9 +1486,25 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       }
 
       function showCollaborateLoggedIn() {
+        const projectName = getActiveProjectName();
+        const shared =
+          UndertwigCloud.isCurrentProjectShared &&
+          UndertwigCloud.isCurrentProjectShared(projectName);
+        const role = UndertwigCloud.getProjectRole && UndertwigCloud.getProjectRole();
+        if (shared || role === "writer" || role === "reader") {
+          collaborateMessage.textContent =
+            "You're editing a shared project (Undertwig / " +
+            (projectName || "…") +
+            "). Only the project owner can send invitations.";
+          inviteForm.classList.add("hidden");
+          collaborateNote.classList.add("hidden");
+          collaborateLoginLink.classList.add("hidden");
+          resetInviteForm();
+          return;
+        }
         collaborateMessage.textContent =
           "Invite someone to edit the current project folder on your Google Drive (Undertwig / " +
-          (getActiveProjectName() || "…") +
+          (projectName || "…") +
           "). You remain the owner.";
         inviteForm.classList.remove("hidden");
         collaborateNote.classList.add("hidden");
@@ -1568,6 +1587,12 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           const projectName = getActiveProjectName();
           if (!projectName) {
             throw new Error("Set a current project in the file tree before inviting collaborators.");
+          }
+          if (
+            UndertwigCloud.isCurrentProjectShared &&
+            UndertwigCloud.isCurrentProjectShared(projectName)
+          ) {
+            throw new Error("Only the project owner can invite collaborators.");
           }
 
           // One popup for Drive + Gmail, opened from this click (no await before it).
@@ -1873,10 +1898,6 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
         cloudInitPromise = (async () => {
           try {
-            if (!sharedProjectId && UndertwigCloud.isCollaborator && UndertwigCloud.isCollaborator()) {
-              UndertwigCloud.clearCollaboratorState();
-            }
-
             if (sharedProjectId) {
               setStatus("Opening shared project from the owner's Google Drive…");
               const sharedProject = await Promise.race([
@@ -1887,7 +1908,12 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
                   }, 15000);
                 }),
               ]);
-              replaceProjectState(sharedProject);
+              replaceProjectState({
+                activeFile: sharedProject.activeFile,
+                folders: sharedProject.folders,
+                files: sharedProject.files,
+                currentProject: sharedProject.currentProject || sharedProject.projectName,
+              });
               try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
               } catch (_error) {
@@ -1960,15 +1986,26 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
             } catch (_error) {
               // Ignore.
             }
-            renderCloudStatus("connected", verify.fileId || UndertwigCloud.getProjectFileId());
+
+            const currentName = getActiveProjectName();
+            if (UndertwigCloud.resolveProjectAccess) {
+              try {
+                await UndertwigCloud.resolveProjectAccess(currentName || undefined);
+              } catch (_error) {
+                // Keep going; sync/save will surface access problems.
+              }
+            }
+            renderCloudStatus(
+              "connected",
+              UndertwigCloud.getProjectFileId() || verify.fileId
+            );
             setStatus("Connected to Google Drive. Syncing projects…");
 
             try {
               await UndertwigCloud.syncProject(state, {
-                projectName: getActiveProjectName() || undefined,
+                projectName: currentName || undefined,
               });
               if (cloudStatusMode === "connected") {
-                const currentName = getActiveProjectName();
                 setStatus(
                   currentName
                     ? "Synced current project “" + currentName + "” to Google Drive / Undertwig."

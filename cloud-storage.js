@@ -105,6 +105,99 @@
     writeJsonStorage(PROJECT_MAP_KEY, projectFolderMap);
   }
 
+  function normalizeMapEntry(value) {
+    if (!value) {
+      return null;
+    }
+    if (typeof value === "string") {
+      return { id: value, role: null };
+    }
+    if (value && value.id) {
+      return { id: String(value.id), role: value.role ? String(value.role) : null };
+    }
+    return null;
+  }
+
+  function getMappedFolderId(name) {
+    const entry = normalizeMapEntry(projectFolderMap[name]);
+    return entry ? entry.id : null;
+  }
+
+  function getMappedRole(name) {
+    const entry = normalizeMapEntry(projectFolderMap[name]);
+    return entry ? entry.role : null;
+  }
+
+  function setMappedProject(name, id, role) {
+    const key = String(name || "").trim();
+    const folderId = String(id || "").trim();
+    if (!key || !folderId) {
+      return;
+    }
+    projectFolderMap[key] = {
+      id: folderId,
+      role: role ? String(role) : null,
+    };
+    persistProjectMap();
+  }
+
+  function removeMappedProject(name) {
+    const key = String(name || "").trim();
+    if (!key || !Object.prototype.hasOwnProperty.call(projectFolderMap, key)) {
+      return;
+    }
+    delete projectFolderMap[key];
+    persistProjectMap();
+  }
+
+  function removeMappedFolderId(folderId) {
+    const id = String(folderId || "").trim();
+    if (!id) {
+      return;
+    }
+    Object.keys(projectFolderMap).forEach(function (key) {
+      if (getMappedFolderId(key) === id) {
+        delete projectFolderMap[key];
+      }
+    });
+    persistProjectMap();
+  }
+
+  function isSharedProjectRole(role) {
+    return role === "writer" || role === "reader";
+  }
+
+  function isCurrentProjectShared(projectName) {
+    const name = String(projectName || "").trim();
+    if (name && isSharedProjectRole(getMappedRole(name))) {
+      return true;
+    }
+    if (!isCollaborator()) {
+      return false;
+    }
+    if (!name) {
+      return true;
+    }
+    const mappedId = getMappedFolderId(name);
+    return Boolean(mappedId && mappedId === getProjectFolderId());
+  }
+
+  function roleFromMeta(meta) {
+    const session = auth().readSession();
+    const email = session && session.email ? String(session.email).toLowerCase() : "";
+    const owners = Array.isArray(meta && meta.owners) ? meta.owners : [];
+    const isOwner = owners.some(function (owner) {
+      return owner && owner.emailAddress && String(owner.emailAddress).toLowerCase() === email;
+    });
+    if (isOwner || (meta && meta.capabilities && meta.capabilities.canShare)) {
+      return "owner";
+    }
+    if (meta && meta.capabilities && meta.capabilities.canEdit === false) {
+      return "reader";
+    }
+    return "writer";
+  }
+
   function readActiveFolderId() {
     try {
       return localStorage.getItem(ACTIVE_FOLDER_KEY) || null;
@@ -633,25 +726,40 @@
     if (!name) {
       throw new Error("Missing project name.");
     }
-    if (projectFolderMap[name]) {
-      const id = projectFolderMap[name];
-      const meta = await fetchDriveFileMeta(id, "id,trashed,mimeType");
-      if (isDriveFolderMeta(meta)) {
-        writeActiveFolderId(id);
-        return id;
+
+    const existingId = getMappedFolderId(name);
+    const existingRole = getMappedRole(name);
+    if (existingId) {
+      // Shared projects must keep pointing at the owner's folder — never recreate locally.
+      if (isSharedProjectRole(existingRole)) {
+        writeActiveFolderId(existingId);
+        writeRole(existingRole);
+        return existingId;
       }
-      delete projectFolderMap[name];
-      persistProjectMap();
-      if (cachedActiveFolderId === id) {
+      const meta = await fetchDriveFileMeta(existingId, "id,trashed,mimeType");
+      if (isDriveFolderMeta(meta)) {
+        writeActiveFolderId(existingId);
+        return existingId;
+      }
+      removeMappedProject(name);
+      if (cachedActiveFolderId === existingId) {
         writeActiveFolderId(null);
       }
     }
 
+    if (isCollaborator() && isCurrentProjectShared(name)) {
+      const sharedId = getProjectFolderId();
+      if (!sharedId) {
+        throw new Error("Missing shared project folder. Open the invite link again.");
+      }
+      return sharedId;
+    }
+
     const rootId = await ensureUndertwigFolder();
     const folderId = await ensureChildFolder(rootId, name);
-    projectFolderMap[name] = folderId;
-    persistProjectMap();
+    setMappedProject(name, folderId, "owner");
     writeActiveFolderId(folderId);
+    writeRole("owner");
     return folderId;
   }
 
@@ -849,21 +957,27 @@
       const projectName =
         opts.projectName || inferProjectName(state.activeFile) || listRootProjects(state)[0];
 
-      // Collaborators must write into the owner's shared folder — never create Undertwig/ on their account.
-      if (isCollaborator()) {
-        const sharedId = getProjectFolderId();
+      // Shared / invited projects always write into the owner's folder.
+      if (projectName && isCurrentProjectShared(projectName)) {
+        const sharedId = getMappedFolderId(projectName) || getProjectFolderId();
         if (!sharedId) {
           throw new Error("Missing shared project folder. Open the invite link again.");
-        }
-        if (!projectName) {
-          throw new Error("Select a file inside the shared project before saving.");
         }
         const meta = await refreshProjectMeta(sharedId);
         if (!meta) {
           throw new Error("Shared project folder is no longer accessible.");
         }
+        setMappedProject(projectName, sharedId, cachedRole || "writer");
         await syncFilesIntoExistingFolder(sharedId, state, projectName);
         return { folderIds: [sharedId], role: cachedRole };
+      }
+
+      if (isCollaborator() && !projectName) {
+        const sharedId = getProjectFolderId();
+        if (!sharedId) {
+          throw new Error("Missing shared project folder. Open the invite link again.");
+        }
+        throw new Error("Select a file inside the shared project before saving.");
       }
 
       const projects = opts.projectName ? [opts.projectName] : listRootProjects(state);
@@ -971,7 +1085,7 @@
     }
 
     writeActiveFolderId(folderId);
-    projectFolderMap[name] = folderId;
+    setMappedProject(name, folderId, cachedRole || null);
     persistProjectMap();
 
     return {
@@ -979,6 +1093,7 @@
       folders: folders,
       files: files,
       projectName: name,
+      currentProject: name,
       role: cachedRole,
     };
   }
@@ -1001,12 +1116,7 @@
         if (cachedActiveFolderId === id) {
           writeActiveFolderId(null);
         }
-        Object.keys(projectFolderMap).forEach(function (key) {
-          if (projectFolderMap[key] === id) {
-            delete projectFolderMap[key];
-          }
-        });
-        persistProjectMap();
+        removeMappedFolderId(id);
         return null;
       }
       throw new Error(await readDriveError(response, "Could not read project folder metadata."));
@@ -1021,28 +1131,12 @@
       if (cachedActiveFolderId === id) {
         writeActiveFolderId(null);
       }
-      Object.keys(projectFolderMap).forEach(function (key) {
-        if (projectFolderMap[key] === id) {
-          delete projectFolderMap[key];
-        }
-      });
-      persistProjectMap();
+      removeMappedFolderId(id);
       return null;
     }
 
-    const session = auth().readSession();
-    const email = session && session.email ? String(session.email).toLowerCase() : "";
-    const owners = Array.isArray(meta.owners) ? meta.owners : [];
-    const isOwner = owners.some(function (owner) {
-      return owner && owner.emailAddress && String(owner.emailAddress).toLowerCase() === email;
-    });
-    if (isOwner || (meta.capabilities && meta.capabilities.canShare)) {
-      writeRole("owner");
-    } else if (meta.capabilities && meta.capabilities.canEdit === false) {
-      writeRole("reader");
-    } else {
-      writeRole("writer");
-    }
+    const role = roleFromMeta(meta);
+    writeRole(role);
     return meta;
   }
 
@@ -1064,9 +1158,11 @@
       throw new Error("Shared project folder was empty or inaccessible.");
     }
     // Invitees edit the owner's folder; never treat them as creating their own Undertwig copy.
-    if (!isOwnerEmail(meta)) {
-      writeRole(cachedRole === "reader" ? "reader" : "writer");
-    }
+    const role = isOwnerEmail(meta) ? "owner" : cachedRole === "reader" ? "reader" : "writer";
+    writeRole(role);
+    setMappedProject(project.projectName || meta.name, id, role);
+    project.role = role;
+    project.currentProject = project.projectName || meta.name;
     return project;
   }
 
@@ -1096,15 +1192,14 @@
     let meta = await refreshProjectMeta(folderId);
     if (!meta || meta.mimeType !== "application/vnd.google-apps.folder") {
       writeActiveFolderId(null);
-      delete projectFolderMap[name];
-      persistProjectMap();
+      removeMappedProject(name);
       folderId = await ensureProjectFolder(name);
       meta = await refreshProjectMeta(folderId);
     }
     if (!meta || meta.mimeType !== "application/vnd.google-apps.folder") {
       throw new Error("Could not resolve a Drive folder to share for this project.");
     }
-    if (cachedRole && cachedRole !== "owner") {
+    if (isCurrentProjectShared(name) || (cachedRole && cachedRole !== "owner")) {
       throw new Error("Only the project owner can invite collaborators.");
     }
 
@@ -1186,9 +1281,20 @@
     const opts = options || {};
     await connect();
 
+    const projectName =
+      opts.projectName || inferProjectName(localState.activeFile) || listRootProjects(localState)[0];
+
+    if (projectName && isCurrentProjectShared(projectName)) {
+      await saveProject(localState, { projectName: projectName });
+      return {
+        project: localState,
+        source: "uploaded",
+        role: cachedRole,
+        folderId: getMappedFolderId(projectName) || getProjectFolderId(),
+      };
+    }
+
     if (isCollaborator() && getProjectFolderId()) {
-      const projectName =
-        opts.projectName || inferProjectName(localState.activeFile) || listRootProjects(localState)[0];
       const sharedMeta = await refreshProjectMeta(getProjectFolderId());
       if (!sharedMeta) {
         clearCollaboratorState();
@@ -1203,7 +1309,7 @@
       }
     }
 
-    // Owner path: ensure Undertwig exists and upload root projects.
+    // Owner path: ensure Undertwig exists and upload the current project only.
     try {
       await ensureUndertwigFolder();
     } catch (error) {
@@ -1220,7 +1326,7 @@
       return { project: localState, source: "uploaded", role: "owner" };
     }
 
-    const activeProject = opts.projectName || inferProjectName(localState.activeFile) || projects[0];
+    const activeProject = projectName || projects[0];
     if (!activeProject) {
       writeRole("owner");
       return { project: localState, source: "uploaded", role: "owner" };
@@ -1253,12 +1359,13 @@
   }
 
   /**
-   * Return a Drive UI URL for a folder the signed-in user can open.
-   * Prefer the current project folder when projectName is provided.
+   * Return a Drive UI URL for the current project folder.
+   * For invited/shared projects this is always the owner's folder — never the invitee's Undertwig root.
    */
   async function getOpenInDriveUrl(preferredId, options) {
     await connect();
     const projectName = String((options && options.projectName) || "").trim();
+    const shared = projectName ? isCurrentProjectShared(projectName) : isCollaborator();
     const candidates = [];
     const seen = {};
     const push = (id) => {
@@ -1270,36 +1377,53 @@
       candidates.push(value);
     };
     push(preferredId);
-    if (projectName && projectFolderMap[projectName]) {
-      push(projectFolderMap[projectName]);
+    if (projectName) {
+      push(getMappedFolderId(projectName));
     }
     push(getProjectFolderId());
-
-    if (projectName) {
-      try {
-        push(await ensureProjectFolder(projectName));
-      } catch (_error) {
-        // Fall through to other candidates.
-      }
-    }
-
-    push(cachedUndertwigFolderId);
-    try {
-      push(localStorage.getItem(UNDERTWIG_FOLDER_KEY));
-    } catch (_error) {
-      // Ignore.
-    }
 
     for (let i = 0; i < candidates.length; i += 1) {
       const meta = await fetchDriveFileMeta(
         candidates[i],
-        "id,name,mimeType,trashed,webViewLink"
+        "id,name,mimeType,trashed,webViewLink,owners,capabilities"
       );
       if (isDriveFolderMeta(meta)) {
+        if (projectName) {
+          setMappedProject(projectName, meta.id, roleFromMeta(meta));
+        }
+        writeActiveFolderId(meta.id);
         if (meta.webViewLink) {
           return meta.webViewLink;
         }
         return "https://drive.google.com/drive/folders/" + encodeURIComponent(meta.id);
+      }
+    }
+
+    // Invitees must never create Undertwig/<project> on their own Drive.
+    if (shared) {
+      const fallbackId = getMappedFolderId(projectName) || getProjectFolderId() || preferredId;
+      if (fallbackId) {
+        return "https://drive.google.com/drive/folders/" + encodeURIComponent(fallbackId);
+      }
+      return "https://drive.google.com/drive/shared-with-me";
+    }
+
+    if (projectName) {
+      try {
+        const ensuredId = await ensureProjectFolder(projectName);
+        push(ensuredId);
+        const meta = await fetchDriveFileMeta(
+          ensuredId,
+          "id,name,mimeType,trashed,webViewLink"
+        );
+        if (isDriveFolderMeta(meta)) {
+          if (meta.webViewLink) {
+            return meta.webViewLink;
+          }
+          return "https://drive.google.com/drive/folders/" + encodeURIComponent(meta.id);
+        }
+      } catch (_error) {
+        // Fall through to Undertwig root.
       }
     }
 
@@ -1319,11 +1443,36 @@
     if (!name) {
       return null;
     }
-    const id = projectFolderMap[name] || null;
+    const id = getMappedFolderId(name);
     if (id) {
       writeActiveFolderId(id);
+      const role = getMappedRole(name);
+      if (role) {
+        writeRole(role);
+      }
     }
     return id;
+  }
+
+  async function resolveProjectAccess(projectName) {
+    const name = String(projectName || "").trim();
+    const id = (name && getMappedFolderId(name)) || getProjectFolderId();
+    if (!id) {
+      writeRole(cachedRole || "owner");
+      return { role: cachedRole || "owner", folderId: null };
+    }
+    const meta = await refreshProjectMeta(id);
+    if (!meta) {
+      return { role: null, folderId: null };
+    }
+    const role = cachedRole || roleFromMeta(meta);
+    if (name) {
+      setMappedProject(name, id, role);
+    } else if (meta.name) {
+      setMappedProject(meta.name, id, role);
+    }
+    writeActiveFolderId(id);
+    return { role: role, folderId: id, webViewLink: meta.webViewLink || null };
   }
 
   function setActiveProjectFileId(folderId) {
@@ -1436,6 +1585,7 @@
     hasAccessToken,
     verifyDriveAccess,
     isCollaborator,
+    isCurrentProjectShared,
     connect,
     getAccessToken,
     acceptTokenResponse,
@@ -1445,6 +1595,7 @@
     getProjectRole,
     setActiveProjectFileId,
     setActiveProjectByName,
+    resolveProjectAccess,
     buildProjectInvitePath,
     joinSharedProject,
     shareProjectWithEmail,
