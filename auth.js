@@ -6,7 +6,7 @@
     "accounts.google.com",
   ]);
   const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
-  const CLOCK_SKEW_SECONDS = 60;
+  const CLOCK_SKEW_SECONDS = 300;
 
   let jwksCache = null;
   let jwksFetchedAt = 0;
