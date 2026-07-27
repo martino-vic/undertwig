@@ -2934,11 +2934,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       }
 
       async function compileProject() {
-        const path = state.activeFile || "";
-        const project =
-          path.includes("/") ? path.split("/")[0] : getActiveProjectName();
+        const project = getActiveProjectName();
         if (!project) {
-          setStatus("Select a file inside a project folder before converting.", true);
+          setStatus("Set a current project before converting.", true);
           return;
         }
 
