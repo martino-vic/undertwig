@@ -23,12 +23,13 @@ https://github.com/martino-vic/undertwig
 
 ## TeXlyre BusyTeX (LuaLaTeX)
 
-- Location: `vendor/busytex/` (worker + pipeline stubs only)
+- Location: `vendor/busytex/` (worker, pipeline, and heap-patched `busytex.js` / `busytex.wasm`)
 - Upstream: https://github.com/TeXlyre/texlyre-busytex
 - License: GNU Affero General Public License v3.0
-- Runtime WASM / TeX Live data: fetched from
+- Local modification: WASM / JS heap maximum raised to 1 GiB for larger documents
+- TeX Live data packages: fetched from
   `https://texlyre.github.io/texlyre-busytex/core/busytex/` when LuaLaTeX is selected
-- Optional package endpoint: `https://texlive.texlyre.org/`
+- Optional package endpoint: `https://texlive2026.texlyre.org/`
 - Notes:
   - pdfLaTeX continues to use the vendored SwiftLaTeX PdfTeX engine.
   - LuaLaTeX uses BusyTeX’s `luahbtex` driver via a same-origin Web Worker.

@@ -6,7 +6,13 @@
     pdflatex: "pdfLaTeX",
     lualatex: "LuaLaTeX",
   };
-  const BUSYTEX_CDN = "https://texlyre.github.io/texlyre-busytex/core/busytex";
+  // Same-origin patched BusyTeX core (1 GiB WASM heap). TeX Live data stays on TeXlyre CDN.
+  const BUSYTEX_CORE = new URL("vendor/busytex/", global.location.href).href.replace(
+    /\/$/,
+    ""
+  );
+  const BUSYTEX_TEXLIVE =
+    "https://texlyre.github.io/texlyre-busytex/core/busytex";
   const BUSYTEX_WORKER = "vendor/busytex/busytex_worker.js";
   // BusyTeX kpse_remote expects GET /<format_id>/<filename> (not the pdftex/ prefix).
   const TEXLIVE_REMOTE = "https://texlive2026.texlyre.org/";
@@ -555,10 +561,10 @@
       };
 
       luaWorker.postMessage({
-        busytex_js: BUSYTEX_CDN + "/busytex.js",
-        busytex_wasm: BUSYTEX_CDN + "/busytex.wasm",
+        busytex_js: BUSYTEX_CORE + "/busytex.js",
+        busytex_wasm: BUSYTEX_CORE + "/busytex.wasm",
         preload_data_packages_js: [
-          BUSYTEX_CDN + "/texlive-basic.js",
+          BUSYTEX_TEXLIVE + "/texlive-basic.js",
         ],
         data_packages_js: [],
         texmf_local: [],
