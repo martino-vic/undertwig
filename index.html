@@ -792,9 +792,15 @@ This document is converted locally in your browser with Undertwig's first-party 
 
         pushParagraph(body.slice(cursor));
 
+        const handledCommands = new Set([
+          "\\begin", "\\end", "\\maketitle", "\\section", "\\subsection", "\\subsubsection",
+          "\\item", "\\title", "\\author", "\\date", "\\today", "\\LaTeX", "\\TeX",
+          "\\usepackage", "\\documentclass", "\\textbf", "\\textit", "\\emph", "\\underline",
+          "\\frac", "\\sqrt", "\\left", "\\right", "\\pi", "\\alpha", "\\beta", "\\gamma"
+        ]);
         const remainingCommands = body.match(/\\[A-Za-z]+/g) || [];
         remainingCommands
-          .filter((command) => !["\\today", "\\LaTeX", "\\TeX"].includes(command))
+          .filter((command) => !handledCommands.has(command))
           .forEach((command) => unsupported.push(command));
 
         return { blocks: blocks.length ? blocks : [{ type: "paragraph", text: "No renderable LaTeX content found." }], unsupported };
@@ -835,7 +841,10 @@ This document is converted locally in your browser with Undertwig's first-party 
           .replace(/\\gamma/g, "gamma")
           .replace(/\\alpha/g, "alpha")
           .replace(/\\beta/g, "beta")
+          .replace(/\^\{([^}]*)\}/g, "^($1)")
+          .replace(/_\{([^}]*)\}/g, "_($1)")
           .replace(/[{}]/g, "")
+          .replace(/\s+/g, " ")
           .trim();
       }
 
@@ -881,32 +890,42 @@ This document is converted locally in your browser with Undertwig's first-party 
 
       function paginateBlocks(blocks) {
         const pages = [[]];
+        let y = 790;
+        const bottom = 54;
+
         const addLine = (line) => {
-          const current = pages[pages.length - 1];
-          if (current.length >= 42) pages.push([]);
+          const height = line.text ? line.size + (line.gap || 4) : (line.gap || 8);
+          if (y - height < bottom && pages[pages.length - 1].length) {
+            pages.push([]);
+            y = 790;
+          }
           pages[pages.length - 1].push(line);
+          y -= height;
         };
 
         blocks.forEach((block) => {
           if (block.type === "title") {
-            addLine({ text: block.text, size: 24, font: "F2", gap: 14 });
+            addLine({ text: block.text, size: 24, font: "F2", gap: 10 });
           } else if (block.type === "subtitle") {
-            addLine({ text: block.text, size: 12, font: "F1", gap: 10 });
+            addLine({ text: block.text, size: 12, font: "F1", gap: 6 });
           } else if (block.type === "heading") {
-            addLine({ text: block.text, size: 18, font: "F2", gap: 12 });
+            addLine({ text: "", size: 10, font: "F1", gap: 14 });
+            addLine({ text: block.text, size: 16, font: "F2", gap: 10 });
           } else if (block.type === "subheading") {
-            addLine({ text: block.text, size: 14, font: "F2", gap: 8 });
+            addLine({ text: "", size: 10, font: "F1", gap: 10 });
+            addLine({ text: block.text, size: 13, font: "F2", gap: 8 });
           } else if (block.type === "math") {
+            addLine({ text: "", size: 10, font: "F1", gap: 8 });
             wrapText(block.text, 78).forEach((line) => addLine({ text: line, size: 12, font: "F1", indent: 28, gap: 4 }));
-            addLine({ text: "", size: 10, font: "F1", gap: 6 });
+            addLine({ text: "", size: 10, font: "F1", gap: 8 });
           } else if (block.type === "list") {
             block.items.forEach((item) => {
-              wrapText(item, 82).forEach((line, index) => addLine({ text: `${index === 0 ? "- " : "  "}${line}`, size: 11, font: "F1", indent: 12, gap: 2 }));
+              wrapText(item, 82).forEach((line, index) => addLine({ text: `${index === 0 ? "- " : "  "}${line}`, size: 11, font: "F1", indent: 12, gap: 3 }));
             });
-            addLine({ text: "", size: 10, font: "F1", gap: 6 });
-          } else {
-            wrapText(block.text, 88).forEach((line) => addLine({ text: line, size: 11, font: "F1", gap: 2 }));
             addLine({ text: "", size: 10, font: "F1", gap: 8 });
+          } else {
+            wrapText(block.text, 88).forEach((line) => addLine({ text: line, size: 11, font: "F1", gap: 4 }));
+            addLine({ text: "", size: 10, font: "F1", gap: 10 });
           }
         });
 
@@ -922,8 +941,9 @@ This document is converted locally in your browser with Undertwig's first-party 
             return;
           }
           const x = 54 + (line.indent || 0);
+          // Tm sets an absolute text matrix. Td is relative and was stacking offsets off-page.
           commands.push(`/${line.font} ${line.size} Tf`);
-          commands.push(`${x} ${y} Td (${escapePdfText(line.text)}) Tj`);
+          commands.push(`1 0 0 1 ${x} ${y} Tm (${escapePdfText(line.text)}) Tj`);
           y -= line.size + (line.gap || 4);
         });
         commands.push("ET");
