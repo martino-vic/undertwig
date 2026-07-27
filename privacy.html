@@ -176,8 +176,9 @@
         contents, including uploaded assets) in Google Drive application data associated
         with your Google account. That data is stored by Google in a hidden app-data space
         for Undertwig, not in Undertwig-operated servers. Access uses a Google OAuth token
-        with the Drive app data scope, requested in your browser right after sign-in and kept
-        in session storage for the current browser tab session so projects can sync without
+        with the Drive app data scope. After sign-in, click <strong>Connect</strong> under the file tree
+        to grant Drive access (browsers only allow that popup from a click). The access token is kept
+        in session storage for the current browser tab session so later saves can sync without
         repeated prompts. Logging out
         clears the local session and attempts to revoke the token. You can also remove app
         access from your Google Account permissions page.

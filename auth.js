@@ -347,6 +347,17 @@
 
   function loadGoogleIdentityServices() {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (handler, value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearInterval(poll);
+        clearTimeout(watchdog);
+        handler(value);
+      };
+
       const ready = () =>
         global.google &&
         global.google.accounts &&
@@ -357,57 +368,40 @@
         resolve();
         return;
       }
-      const existing = document.querySelector('script[data-undertwig-gsi="1"]');
+
+      const poll = setInterval(() => {
+        if (ready()) {
+          finish(resolve);
+        }
+      }, 50);
+
+      const watchdog = setTimeout(() => {
+        finish(reject, new Error("Google authorization library failed to load."));
+      }, 10000);
+
+      const existing =
+        document.querySelector('script[data-undertwig-gsi="1"]') ||
+        document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+
       if (existing) {
-        const wait = setInterval(() => {
-          if (ready()) {
-            clearInterval(wait);
-            resolve();
-          }
-        }, 50);
         existing.addEventListener(
           "error",
-          () => {
-            clearInterval(wait);
-            reject(new Error("Google sign-in failed to load."));
-          },
+          () => finish(reject, new Error("Google sign-in failed to load.")),
           { once: true }
         );
-        setTimeout(() => {
-          if (ready()) {
-            clearInterval(wait);
-            resolve();
-            return;
-          }
-          clearInterval(wait);
-          reject(new Error("Google authorization library failed to load."));
-        }, 10000);
         return;
       }
+
       const script = document.createElement("script");
       script.src = "https://accounts.google.com/gsi/client";
       script.async = true;
       script.defer = true;
       script.dataset.undertwigGsi = "1";
       script.addEventListener(
-        "load",
-        () => {
-          const started = Date.now();
-          const wait = setInterval(() => {
-            if (ready()) {
-              clearInterval(wait);
-              resolve();
-            } else if (Date.now() - started > 10000) {
-              clearInterval(wait);
-              reject(new Error("Google authorization library failed to load."));
-            }
-          }, 50);
-        },
+        "error",
+        () => finish(reject, new Error("Google sign-in failed to load.")),
         { once: true }
       );
-      script.addEventListener("error", () => reject(new Error("Google sign-in failed to load.")), {
-        once: true,
-      });
       document.head.appendChild(script);
     });
   }

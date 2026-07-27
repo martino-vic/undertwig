@@ -149,9 +149,10 @@
     return memoryAccessToken;
   }
 
-  const TOKEN_REQUEST_TIMEOUT_MS = 20000;
+  const TOKEN_REQUEST_TIMEOUT_MS = 8000;
+  const SILENT_TOKEN_TIMEOUT_MS = 5000;
 
-  async function requestOauthToken(forcePrompt) {
+  async function requestOauthToken(forcePrompt, timeoutMs) {
     const session = auth().readSession();
     if (!session) {
       throw new Error("Sign in to use Google Cloud storage.");
@@ -163,6 +164,8 @@
     }
 
     await ensureGisOauth();
+
+    const waitMs = Number(timeoutMs) > 0 ? Number(timeoutMs) : TOKEN_REQUEST_TIMEOUT_MS;
 
     const token = await new Promise((resolve, reject) => {
       let settled = false;
@@ -179,10 +182,12 @@
         finish(
           reject,
           new Error(
-            "Google Cloud authorization timed out. Allow popups for accounts.google.com, then click Connect."
+            forcePrompt
+              ? "Google Cloud authorization timed out. Allow popups for accounts.google.com, then click Connect."
+              : "Google Cloud authorization needs a permission popup. Click Connect under the file tree."
           )
         );
-      }, TOKEN_REQUEST_TIMEOUT_MS);
+      }, waitMs);
 
       try {
         const client = global.google.accounts.oauth2.initTokenClient({
@@ -220,16 +225,19 @@
   async function getAccessToken(options) {
     const forcePrompt = Boolean(options && options.forcePrompt);
     const allowConsentRetry = Boolean(options && options.allowConsentRetry);
+    const timeoutMs = options && options.timeoutMs;
     if (!forcePrompt && hydrateTokenFromStorage()) {
       return memoryAccessToken;
     }
 
     try {
-      return await requestOauthToken(forcePrompt);
+      return await requestOauthToken(
+        forcePrompt,
+        timeoutMs || (forcePrompt ? TOKEN_REQUEST_TIMEOUT_MS : SILENT_TOKEN_TIMEOUT_MS)
+      );
     } catch (error) {
-      // Used right after Google sign-in (user gesture) so Drive consent can complete.
       if (!forcePrompt && allowConsentRetry) {
-        return requestOauthToken(true);
+        return requestOauthToken(true, TOKEN_REQUEST_TIMEOUT_MS);
       }
       throw error;
     }
@@ -238,14 +246,15 @@
   /** Request Drive access and keep the token for this browser session. */
   async function connect(options) {
     const opts = options || {};
-    // Interactive connect must open consent immediately; silent-first can hang forever
-    // when a popup is blocked and Google never calls back.
+    // Interactive connect must open consent immediately; silent-first can hang when
+    // a popup is blocked and Google never calls back.
     if (opts.interactive || opts.forcePrompt) {
-      return getAccessToken({ forcePrompt: true });
+      return getAccessToken({ forcePrompt: true, timeoutMs: TOKEN_REQUEST_TIMEOUT_MS });
     }
     return getAccessToken({
       forcePrompt: false,
       allowConsentRetry: Boolean(opts.allowConsentRetry),
+      timeoutMs: opts.timeoutMs || SILENT_TOKEN_TIMEOUT_MS,
     });
   }
 
@@ -435,6 +444,10 @@
     return { project: localProject || null, source: "uploaded" };
   }
 
+  function hasAccessToken() {
+    return hydrateTokenFromStorage();
+  }
+
   function isAvailable() {
     return Boolean(auth() && auth().isLoggedIn() && auth().getConfig().googleClientId);
   }
@@ -449,6 +462,7 @@
     DRIVE_SCOPE,
     CLOUD_FILE_NAME,
     isAvailable,
+    hasAccessToken,
     connect,
     getAccessToken,
     getProjectFileId,
