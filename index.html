@@ -1526,7 +1526,12 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           collaborateLoginLink.classList.add("hidden");
           UndertwigInvite.preload();
           if (saveButton) {
-            saveButton.title = "Save locally and sync to Google Drive";
+            const shared =
+              UndertwigCloud.isCurrentProjectShared &&
+              UndertwigCloud.isCurrentProjectShared(getActiveProjectName());
+            saveButton.title = shared
+              ? "Save locally and sync to the owner's shared Google Drive folder"
+              : "Save locally and sync to Google Drive";
           }
         } else {
           loginButton.classList.remove("hidden");
