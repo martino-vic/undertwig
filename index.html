@@ -867,10 +867,10 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <script src="auth-config.js?v=20260727m"></script>
-    <script src="auth.js?v=20260727m"></script>
-    <script src="cloud-storage.js?v=20260727m"></script>
-    <script src="invite.js?v=20260727m"></script>
+    <script src="auth-config.js?v=20260727n"></script>
+    <script src="auth.js?v=20260727n"></script>
+    <script src="cloud-storage.js?v=20260727n"></script>
+    <script src="invite.js?v=20260727n"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script>
@@ -1081,7 +1081,8 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
       function driveProjectUrl(fileId) {
         if (fileId) {
-          return "https://drive.google.com/open?id=" + encodeURIComponent(fileId);
+          // Folder deep-link (open?id= often shows "You need access" for stale/non-folder IDs).
+          return "https://drive.google.com/drive/folders/" + encodeURIComponent(fileId);
         }
         return "https://drive.google.com/drive/my-drive";
       }
@@ -1103,11 +1104,23 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
               : "Connected ";
           cloudStatusText.appendChild(document.createTextNode(label));
           const link = document.createElement("a");
-          link.href = driveProjectUrl(fileId || UndertwigCloud.getProjectFileId());
+          const initialId = fileId || UndertwigCloud.getProjectFileId();
+          link.href = driveProjectUrl(initialId);
           link.target = "_blank";
           link.rel = "noopener";
           link.textContent = "Open in Google Drive";
           cloudStatusText.appendChild(link);
+          if (UndertwigCloud.getOpenInDriveUrl) {
+            UndertwigCloud.getOpenInDriveUrl(initialId)
+              .then((url) => {
+                if (url && cloudStatusMode === "connected" && link.isConnected) {
+                  link.href = url;
+                }
+              })
+              .catch(() => {
+                // Keep the best-effort folders/ URL already set.
+              });
+          }
           return;
         }
 

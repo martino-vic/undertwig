@@ -1220,7 +1220,59 @@
 
   function getProjectFileId() {
     // Back-compat alias used by UI ("Open in Google Drive").
-    return getProjectFolderId();
+    return getProjectFolderId() || cachedUndertwigFolderId || null;
+  }
+
+  /**
+   * Return a Drive UI URL for a folder the signed-in user can open.
+   * Avoids stale IDs (which show "You need access" in the Drive UI).
+   */
+  async function getOpenInDriveUrl(preferredId) {
+    await connect();
+    const candidates = [];
+    const seen = {};
+    const push = (id) => {
+      const value = String(id || "").trim();
+      if (!value || seen[value]) {
+        return;
+      }
+      seen[value] = true;
+      candidates.push(value);
+    };
+    push(preferredId);
+    push(getProjectFolderId());
+    push(cachedUndertwigFolderId);
+    try {
+      push(localStorage.getItem(UNDERTWIG_FOLDER_KEY));
+    } catch (_error) {
+      // Ignore.
+    }
+    Object.keys(projectFolderMap).forEach(function (name) {
+      push(projectFolderMap[name]);
+    });
+
+    for (let i = 0; i < candidates.length; i += 1) {
+      const meta = await fetchDriveFileMeta(
+        candidates[i],
+        "id,name,mimeType,trashed,webViewLink"
+      );
+      if (isDriveFolderMeta(meta)) {
+        if (meta.webViewLink) {
+          return meta.webViewLink;
+        }
+        return "https://drive.google.com/drive/folders/" + encodeURIComponent(meta.id);
+      }
+    }
+
+    const rootId = await ensureUndertwigFolder();
+    const rootMeta = await fetchDriveFileMeta(rootId, "id,mimeType,trashed,webViewLink");
+    if (isDriveFolderMeta(rootMeta)) {
+      if (rootMeta.webViewLink) {
+        return rootMeta.webViewLink;
+      }
+      return "https://drive.google.com/drive/folders/" + encodeURIComponent(rootMeta.id);
+    }
+    return "https://drive.google.com/drive/my-drive";
   }
 
   function setActiveProjectFileId(folderId) {
@@ -1270,6 +1322,7 @@
     getAccessToken,
     acceptTokenResponse,
     getProjectFileId,
+    getOpenInDriveUrl,
     getProjectFolderId,
     getProjectRole,
     setActiveProjectFileId,
