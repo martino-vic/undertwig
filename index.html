@@ -1813,7 +1813,7 @@
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
-    <script src="latex-engines.js?v=20260728am"></script>
+    <script src="latex-engines.js?v=20260728an"></script>
     <script>
 
       const DEMO_FIGURE_PNG_BASE64 =
@@ -5650,7 +5650,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       async function compileProject() {
         if (conversionAbortController) {
           conversionAbortController.abort();
-          setStatus("Cancelling conversion…");
+          setStatus("Cancelling…");
           return;
         }
 
@@ -5742,6 +5742,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       async function runProjectBibliography() {
+        if (conversionAbortController) {
+          conversionAbortController.abort();
+          setStatus("Cancelling…");
+          return;
+        }
+
         const { project, prefix, projectFiles } = collectActiveProjectFiles();
         if (!project) {
           setStatus("Set a current project before running bibliography.", true);
@@ -5753,9 +5759,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
 
         const toolLabel = UndertwigEngines.getSelectedBibToolLabel();
-        convertButton.disabled = true;
+        const abortController = new AbortController();
+        conversionAbortController = abortController;
         bibliographyButton.disabled = true;
         bibliographyButton.setAttribute("aria-busy", "true");
+        convertButton.setAttribute("aria-busy", "true");
+        convertButton.textContent = ABORT_BUTTON_LABEL;
+        convertButton.title = "Cancel bibliography update";
         startConvertSpinner();
         setStatus("Running " + toolLabel + "…");
         compileLog.textContent = "Running " + toolLabel + "…\n";
@@ -5764,7 +5774,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         try {
           const result = await UndertwigEngines.runBibliography(projectFiles, {
+            signal: abortController.signal,
             onProgress: function (message) {
+              if (abortController.signal.aborted) {
+                return;
+              }
               const line = message || "Running " + toolLabel + "…";
               setStatus(line);
               // Keep the compiler log visible and informative while BusyTeX prints.
@@ -5774,6 +5788,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               compileLog.scrollTop = compileLog.scrollHeight;
             },
           });
+
+          if (abortController.signal.aborted) {
+            return;
+          }
 
           compileLog.textContent = (result && result.log) || "No bibliography log returned.";
           logPanel.classList.remove("hidden");
@@ -5809,6 +5827,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               (upgraded ? " main.bbl upgraded to format 3.3." : "")
           );
         } catch (error) {
+          if (error && error.name === "AbortError") {
+            setStatus("Bibliography update cancelled.");
+            return;
+          }
           const message =
             error && error.message ? error.message : String(error);
           compileLog.textContent = message;
@@ -5816,9 +5838,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           setLogCollapsed(false);
           setStatus(`Update bibliography failed: ${message}`, true);
         } finally {
-          convertButton.disabled = false;
+          if (conversionAbortController === abortController) {
+            conversionAbortController = null;
+          }
           bibliographyButton.disabled = false;
           bibliographyButton.removeAttribute("aria-busy");
+          convertButton.removeAttribute("aria-busy");
+          convertButton.textContent = CONVERT_BUTTON_LABEL;
+          convertButton.removeAttribute("title");
           stopConvertSpinner();
         }
       }

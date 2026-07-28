@@ -912,8 +912,8 @@
     return compileWithPdfLaTeX(projectFiles, options || {});
   }
 
-  function postBibToolToWorker(files, tool, notify) {
-    return new Promise(function (resolve, reject) {
+  function postBibToolToWorker(files, tool, notify, signal) {
+    const run = new Promise(function (resolve, reject) {
       if (!luaWorker) {
         reject(new Error("LuaLaTeX worker is not ready."));
         return;
@@ -983,6 +983,12 @@
         main_tex_path: "main.tex",
         main_job_path: "main.tex",
       });
+    });
+
+    return abortable(run, signal, function () {
+      closeLuaWorker();
+      luaReady = false;
+      luaInitPromise = null;
     });
   }
 
@@ -1055,7 +1061,7 @@
    * already has those hooks; otherwise rebuild with pdfLaTeX (stale aux without
    * bibliography markers is a common cause of false "BibTeX failed" reports).
    */
-  function ensureBibtexAux(projectFiles, notify) {
+  function ensureBibtexAux(projectFiles, notify, signal) {
     if (projectUsesHandwrittenBibliography(projectFiles)) {
       return Promise.reject(
         new Error(
@@ -1064,6 +1070,8 @@
         )
       );
     }
+
+    throwIfAborted(signal);
 
     if (auxHasBibtexHooks(projectFiles)) {
       return Promise.resolve({ files: projectFiles, wroteAux: false });
@@ -1074,9 +1082,11 @@
         ? "Refreshing main.aux with pdfLaTeX before BibTeX…"
         : "Creating main.aux with pdfLaTeX before BibTeX…"
     );
-    return compileWithPdfLaTeX(projectFiles, { onProgress: notify }).then(function (
-      result
-    ) {
+    return compileWithPdfLaTeX(projectFiles, {
+      onProgress: notify,
+      signal: signal,
+    }).then(function (result) {
+      throwIfAborted(signal);
       const aux = (result && result.aux) || {};
       const merged = mergeAuxIntoProjectFiles(projectFiles, aux);
       closeEngineQuietly(result && result.engine);
@@ -1210,13 +1220,15 @@
     return next;
   }
 
-  function runTypewardBiber(projectFiles, notify) {
+  function runTypewardBiber(projectFiles, notify, signal) {
+    throwIfAborted(signal);
     notify("Loading Biber WASM (typeward)…");
     const moduleUrl = new URL(
       "vendor/texlive-wasm/run-biber.js?v=20260728aj",
       global.location.href
     ).href;
-    return import(moduleUrl).then(function (mod) {
+    const run = import(moduleUrl).then(function (mod) {
+      throwIfAborted(signal);
       if (!mod || typeof mod.runBiber !== "function") {
         throw new Error("Biber WASM module failed to load.");
       }
@@ -1226,6 +1238,7 @@
         files: projectFilesToTypeward(projectFiles),
         timeoutMs: 300000,
       }).then(function (result) {
+        throwIfAborted(signal);
         const outputs = Object.assign({}, (result && result.outputs) || {});
         const hasBbl = Object.keys(outputs).some(function (path) {
           return /(^|\/)main\.bbl$/i.test(path) || /\.bbl$/i.test(path);
@@ -1262,31 +1275,55 @@
         });
       });
     });
+
+    return abortable(run, signal);
   }
 
   function runBibliography(projectFiles, options) {
     const notify = options && options.onProgress ? options.onProgress : function () {};
+    const signal = options && options.signal;
     const tool = selectedBibTool;
     const toolLabel = getSelectedBibToolLabel();
 
     const loadWorker = function () {
-      return ensureLuaWorker(function (message) {
-        const text = String(message || "");
-        if (/Preparing|Downloading|complete/i.test(text)) {
-          notify("Downloading LuaLaTeX assets… " + text);
-        } else {
-          notify(text);
+      throwIfAborted(signal);
+      return abortable(
+        ensureLuaWorker(function (message) {
+          if (signal && signal.aborted) {
+            return;
+          }
+          const text = String(message || "");
+          if (/Preparing|Downloading|complete/i.test(text)) {
+            notify("Downloading LuaLaTeX assets… " + text);
+          } else {
+            notify(text);
+          }
+        }),
+        signal,
+        function () {
+          closeLuaWorker();
+          luaReady = false;
+          luaInitPromise = null;
         }
-      });
+      );
+    };
+
+    const stopBibWorkers = function () {
+      closeLuaWorker();
+      luaReady = false;
+      luaInitPromise = null;
     };
 
     if (tool !== BIBER) {
       // BibTeX: create aux with pdfLaTeX if needed, then bibtex8 only (no Lua pass).
-      return ensureBibtexAux(projectFiles, notify).then(function (auxResult) {
+      const run = ensureBibtexAux(projectFiles, notify, signal).then(function (auxResult) {
+        throwIfAborted(signal);
         return loadWorker().then(function () {
+          throwIfAborted(signal);
           notify("Running " + toolLabel + "…");
           const files = projectFilesToBusyTex(auxResult.files);
-          return postBibToolToWorker(files, tool, notify).then(function (data) {
+          return postBibToolToWorker(files, tool, notify, signal).then(function (data) {
+            throwIfAborted(signal);
             const outputs = Object.assign({}, data.outputs || {});
             // Surface freshly created aux so the app can persist it.
             if (auxResult.wroteAux && auxResult.aux) {
@@ -1312,19 +1349,24 @@
           });
         });
       });
+      return abortable(run, signal, stopBibWorkers);
     }
 
-    return loadWorker()
+    const run = loadWorker()
       .then(function () {
+        throwIfAborted(signal);
         return ensureLuaTexJa(notify);
       })
       .then(function () {
+        throwIfAborted(signal);
         return ensureLuaLibertinus(notify);
       })
       .then(function () {
+        throwIfAborted(signal);
         const files = mergeLuaEngineFiles(projectFiles);
         notify("Preparing Biber control file (.bcf)…");
-        return postBibToolToWorker(files, BIBER, notify).then(function (prep) {
+        return postBibToolToWorker(files, BIBER, notify, signal).then(function (prep) {
+          throwIfAborted(signal);
           const preparedFiles = mergePreparedOutputs(projectFiles, prep && prep.outputs);
           const hasBcf = Object.keys(preparedFiles).some(function (path) {
             return /(^|\/)main\.bcf$/i.test(path) || /\.bcf$/i.test(path);
@@ -1340,7 +1382,8 @@
             };
           }
 
-          return runTypewardBiber(preparedFiles, notify).then(function (result) {
+          return runTypewardBiber(preparedFiles, notify, signal).then(function (result) {
+            throwIfAborted(signal);
             const outputs = upgradeBiberOutputs(
               Object.assign({}, (prep && prep.outputs) || {}, result.outputs || {})
             );
@@ -1358,6 +1401,7 @@
           });
         });
       });
+    return abortable(run, signal, stopBibWorkers);
   }
 
   global.UndertwigEngines = {
