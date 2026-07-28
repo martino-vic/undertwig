@@ -2268,6 +2268,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let lastPdfBytes = null;
       let pdfJsScaleFactor = 1;
       let pdfJsDoc = null;
+      let previewedPdfPath = null;
+
+      function isPdfPath(path) {
+        return /\.pdf$/i.test(String(path || ""));
+      }
 
       function browserBlocksInlinePdf() {
         const ua = navigator.userAgent || "";
@@ -2278,7 +2283,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return iOS || android;
       }
 
-      function bindPdfActionLinks(url) {
+      function bindPdfActionLinks(url, downloadName) {
+        const name = downloadName || PDF_PREVIEW_NAME;
         [openPdfLink, openPdfFallback].forEach((link) => {
           if (!link) return;
           link.href = url || "#";
@@ -2287,7 +2293,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         [downloadPdfLink, downloadPdfFallback].forEach((link) => {
           if (!link) return;
           link.href = url || "#";
-          link.setAttribute("download", PDF_PREVIEW_NAME);
+          link.setAttribute("download", name);
           link.toggleAttribute("aria-disabled", !url);
         });
       }
@@ -2449,22 +2455,27 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
       }
 
-      function showGeneratedPdf(pdfData) {
+      function showGeneratedPdf(pdfData, options) {
+        options = options || {};
         if (pdfUrl) {
           URL.revokeObjectURL(pdfUrl);
           pdfUrl = null;
         }
 
         const bytes = toPdfUint8Array(pdfData);
-        const file = new File([bytes], PDF_PREVIEW_NAME, { type: "application/pdf" });
+        lastPdfBytes = bytes.slice();
+        const downloadName = options.fileName || PDF_PREVIEW_NAME;
+        const file = new File([bytes], downloadName, { type: "application/pdf" });
         pdfUrl = URL.createObjectURL(file);
-        bindPdfActionLinks(pdfUrl);
+        bindPdfActionLinks(pdfUrl, downloadName);
+        previewedPdfPath = options.sourcePath || null;
 
         emptyPreview.classList.add("hidden");
         if (previewActions) {
           previewActions.classList.remove("hidden");
         }
-        previewMeta.textContent = "Generated " + new Date().toLocaleTimeString();
+        previewMeta.textContent =
+          options.meta || "Generated " + new Date().toLocaleTimeString();
 
         if (browserBlocksInlinePdf()) {
           pdfJsScaleFactor = 1;
@@ -2483,6 +2494,48 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         if (window.matchMedia("(max-width: 920px)").matches && previewSection) {
           previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+
+      function writeProjectPdf(prefix, pdfData) {
+        const path = normalizePath(prefix + "main.pdf");
+        const bytes = toPdfUint8Array(pdfData);
+        ensureFoldersForPath(path);
+        state.files[path] = {
+          name: "main.pdf",
+          content: bytesToBase64(bytes),
+          binary: true,
+        };
+        let saved = true;
+        try {
+          persistProject();
+        } catch (error) {
+          saved = false;
+          console.warn("Could not persist main.pdf to browser storage:", error);
+        }
+        return { path: path, saved: saved };
+      }
+
+      function previewProjectPdf(file, path) {
+        if (!file || !file.binary || !isPdfPath(path) || !file.content) {
+          return false;
+        }
+        if (previewedPdfPath === path && pdfUrl) {
+          return true;
+        }
+        try {
+          const bytes = base64ToBytes(file.content);
+          const name = path.split("/").pop() || "preview.pdf";
+          showGeneratedPdf(bytes, {
+            fileName: name,
+            meta: "Showing " + path,
+            sourcePath: path,
+          });
+          return true;
+        } catch (error) {
+          console.warn("Could not preview project PDF:", error);
+          setStatus("Could not open PDF preview.", true);
+          return false;
         }
       }
 
@@ -4424,6 +4477,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         UndertwigEditor.setVisible(false);
         assetPreview.classList.add("is-visible");
 
+        if (isPdfPath(path)) {
+          assetPreviewImage.removeAttribute("src");
+          assetPreviewImage.alt = "";
+          assetPreviewImage.hidden = true;
+          assetPreviewNote.textContent =
+            "PDF selected. Shown in the preview panel on the right.";
+          previewProjectPdf(file, path);
+          return;
+        }
+
         const mime = imageMimeFromPath(path);
         if (mime && file.content) {
           assetPreviewImage.src = "data:" + mime + ";base64," + file.content;
@@ -5842,8 +5905,20 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
 
-          showGeneratedPdf(result.pdf);
-          setStatus("PDF generated locally with " + (result.label || engineLabel) + ".");
+          const written = writeProjectPdf(prefix, result.pdf);
+          renderTree();
+          showGeneratedPdf(result.pdf, {
+            fileName: "main.pdf",
+            meta: "Generated " + new Date().toLocaleTimeString(),
+            sourcePath: written.path,
+          });
+          setStatus(
+            "PDF generated locally with " +
+              (result.label || engineLabel) +
+              (written.saved
+                ? " and saved as main.pdf."
+                : ". Preview is ready, but browser storage could not save main.pdf.")
+          );
         } catch (error) {
           if (error && error.name === "AbortError") {
             engine = null;
