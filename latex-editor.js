@@ -20,6 +20,7 @@
   let pendingPath = "";
   let suppressChange = false;
   let resizeObserver = null;
+  let latexLanguageRegistered = false;
 
   function prefersMobileEditor() {
     try {
@@ -35,6 +36,134 @@
     if (/\.(md|markdown)$/i.test(name)) return "markdown";
     if (/\.json$/i.test(name)) return "json";
     return "plaintext";
+  }
+
+  /**
+   * Monaco does not ship a LaTeX tokenizer. Register a Monarch grammar so
+   * .tex / .sty / .cls get real highlighting on desktop.
+   */
+  function registerLatexLanguage(monaco) {
+    if (latexLanguageRegistered) {
+      return;
+    }
+    latexLanguageRegistered = true;
+
+    const existing = monaco.languages.getLanguages().some(function (lang) {
+      return lang.id === "latex";
+    });
+    if (!existing) {
+      monaco.languages.register({
+        id: "latex",
+        extensions: [".tex", ".sty", ".cls", ".clo", ".ltx", ".dtx"],
+        aliases: ["LaTeX", "latex", "TeX", "tex"],
+        mimetypes: ["text/x-tex", "text/latex"],
+      });
+    }
+
+    monaco.languages.setLanguageConfiguration("latex", {
+      comments: { lineComment: "%" },
+      brackets: [
+        ["{", "}"],
+        ["[", "]"],
+        ["(", ")"],
+      ],
+      autoClosingPairs: [
+        { open: "{", close: "}" },
+        { open: "[", close: "]" },
+        { open: "(", close: ")" },
+        { open: "$", close: "$" },
+        { open: "`", close: "'" },
+      ],
+      surroundingPairs: [
+        { open: "{", close: "}" },
+        { open: "[", close: "]" },
+        { open: "(", close: ")" },
+        { open: "$", close: "$" },
+      ],
+      folding: {
+        markers: {
+          start: /\\begin\s*\{/,
+          end: /\\end\s*\{/,
+        },
+      },
+    });
+
+    const structural =
+      "documentclass|usepackage|RequirePackage|begin|end|input|include|includeonly|" +
+      "newcommand|renewcommand|providecommand|newenvironment|renewenvironment|" +
+      "section|subsection|subsubsection|paragraph|subparagraph|chapter|part|" +
+      "label|ref|eqref|pageref|cite|nocite|bibliography|bibliographystyle|" +
+      "item|caption|title|author|date|maketitle|tableofcontents|" +
+      "includegraphics|href|url|footnote|emph|textbf|textit|texttt|" +
+      "centering|hspace|vspace|newline|newpage|clearpage";
+
+    monaco.languages.setMonarchTokensProvider("latex", {
+      defaultToken: "",
+      tokenPostfix: ".latex",
+      tokenizer: {
+        root: [
+          [/%.*$/, "comment"],
+          [/\$\$/, { token: "delimiter.math", next: "@displaymath" }],
+          [/\$/, { token: "delimiter.math", next: "@inlinemath" }],
+          [/\\\(/, { token: "delimiter.math", next: "@inlinemathParen" }],
+          [/\\\[/, { token: "delimiter.math", next: "@displaymathBracket" }],
+          [
+            /(\\begin)(\s*)(\{)([^\}]*)(\})/,
+            ["keyword.control", "white", "delimiter.bracket", "tag", "delimiter.bracket"],
+          ],
+          [
+            /(\\end)(\s*)(\{)([^\}]*)(\})/,
+            ["keyword.control", "white", "delimiter.bracket", "tag", "delimiter.bracket"],
+          ],
+          [
+            new RegExp("\\\\(" + structural + ")(?![A-Za-z@])"),
+            "keyword.control",
+          ],
+          [/\\[a-zA-Z@]+/, "keyword"],
+          [/\\[^a-zA-Z@]/, "keyword"],
+          [/[{}]/, "delimiter.bracket"],
+          [/[\[\]]/, "delimiter.square"],
+          [/[()]/, "delimiter.parenthesis"],
+          [/#+\d?/, "number"],
+          [/\d+(?:\.\d+)?(?:em|ex|pt|pc|bp|sp|cm|mm|in|mu)?/, "number"],
+          [/[&~^_]/, "operator"],
+          [/[^\\%$\[\]{}()#&\s]+/, ""],
+          [/\s+/, "white"],
+        ],
+        inlinemath: [
+          [/\$/, { token: "delimiter.math", next: "@pop" }],
+          [/\\[a-zA-Z@]+/, "keyword"],
+          [/\\[^a-zA-Z@]/, "keyword"],
+          [/[{}]/, "delimiter.bracket"],
+          [/[^$\\]+/, "string"],
+          [/./, "string"],
+        ],
+        displaymath: [
+          [/\$\$/, { token: "delimiter.math", next: "@pop" }],
+          [/\\[a-zA-Z@]+/, "keyword"],
+          [/\\[^a-zA-Z@]/, "keyword"],
+          [/[{}]/, "delimiter.bracket"],
+          [/[^$\\]+/, "string"],
+          [/./, "string"],
+        ],
+        inlinemathParen: [
+          [/\\\)/, { token: "delimiter.math", next: "@pop" }],
+          [/\\[a-zA-Z@]+/, "keyword"],
+          [/\\[^a-zA-Z@]/, "keyword"],
+          [/[{}]/, "delimiter.bracket"],
+          [/[^\\]+/, "string"],
+          [/./, "string"],
+        ],
+        displaymathBracket: [
+          [/\\\]/, { token: "delimiter.math", next: "@pop" }],
+          [/\\[a-zA-Z@]+/, "keyword"],
+          [/\\[^a-zA-Z@]/, "keyword"],
+          [/[{}]/, "delimiter.bracket"],
+          [/[^\\]+/, "string"],
+          [/./, "string"],
+        ],
+      },
+    });
   }
 
   function emitChange() {
@@ -114,14 +243,28 @@
         });
       })
       .then(function (monaco) {
+        registerLatexLanguage(monaco);
+
         monaco.editor.defineTheme("undertwig-dark", {
           base: "vs-dark",
           inherit: true,
           rules: [
             { token: "comment", foreground: "7f8b99", fontStyle: "italic" },
+            { token: "comment.latex", foreground: "7f8b99", fontStyle: "italic" },
             { token: "keyword", foreground: "d08a45" },
+            { token: "keyword.latex", foreground: "d08a45" },
+            { token: "keyword.control", foreground: "e0a05a", fontStyle: "bold" },
+            { token: "keyword.control.latex", foreground: "e0a05a", fontStyle: "bold" },
+            { token: "tag", foreground: "7eb6e0" },
+            { token: "tag.latex", foreground: "7eb6e0" },
             { token: "string", foreground: "8fbf8f" },
+            { token: "string.latex", foreground: "8fbf8f" },
             { token: "number", foreground: "c9a0dc" },
+            { token: "number.latex", foreground: "c9a0dc" },
+            { token: "delimiter", foreground: "96a4b3" },
+            { token: "delimiter.bracket.latex", foreground: "c7d1dc" },
+            { token: "delimiter.math.latex", foreground: "e0a05a" },
+            { token: "operator.latex", foreground: "d08a45" },
           ],
           colors: {
             "editor.background": "#111820",
@@ -137,9 +280,10 @@
           },
         });
 
+        const initialLang = languageForPath(pendingPath);
         const editor = monaco.editor.create(hostEl, {
           value: pendingValue,
-          language: languageForPath(pendingPath) === "latex" ? "latex" : "plaintext",
+          language: initialLang === "latex" ? "latex" : initialLang,
           theme: "undertwig-dark",
           automaticLayout: false,
           fontFamily:
@@ -169,12 +313,11 @@
           },
           setValue: function (text) {
             const next = text == null ? "" : String(text);
-            if (editor.getValue() === next) {
-              return;
+            if (editor.getValue() !== next) {
+              suppressChange = true;
+              editor.setValue(next);
+              suppressChange = false;
             }
-            suppressChange = true;
-            editor.setValue(next);
-            suppressChange = false;
           },
           setReadOnly: function (readOnly) {
             editor.updateOptions({ readOnly: Boolean(readOnly) });
@@ -191,10 +334,17 @@
               return;
             }
             const id = languageForPath(path);
-            monaco.editor.setModelLanguage(
-              model,
-              id === "latex" ? "latex" : id === "markdown" ? "markdown" : id === "json" ? "json" : "plaintext"
-            );
+            const lang =
+              id === "latex"
+                ? "latex"
+                : id === "markdown"
+                  ? "markdown"
+                  : id === "json"
+                    ? "json"
+                    : "plaintext";
+            if (model.getLanguageId() !== lang) {
+              monaco.editor.setModelLanguage(model, lang);
+            }
           },
           layout: function () {
             editor.layout();
