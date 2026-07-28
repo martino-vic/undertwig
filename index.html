@@ -1245,8 +1245,6 @@
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260728am"></script>
     <script>
-      const DEMO_HIPPO_PNG_BASE64 =
-        "iVBORw0KGgoAAAANSUhEUgAAAUAAAADICAIAAAAWZq/8AAAC30lEQVR42u3dMU7CUBzAYWs8QKemSxcGBo7g5OIdCBEPJ8YweQEWJo7AwMDccAo3wlCVF1ra1/d9EyENSM0vf5qXV7K8qB6AOD06BSBgQMCAgEHAgIABAQMCBgEDAgYEDAIGBAwIGBAwCBgQMCBgQMAgYEDAgIBBwICAAQEDAgYBAwIGBAwIGAQM9OXJKeAWzy+vnb7+brtxkk1gEDAgYEDAgIBBwICAgTDWgelEWZZBx9d17aSZwCBgQMCAgAEBg4ABAQPtsA7MVbre99vX+8a+39gEBgEDAgYEDAIGBAwIGGiQ5UXlLHDW13rv0MSyPmwCg6/QgIABAYOAAQEDAgYEDAIGBAwIGAQMCBgQMCBgGD33hWbQQvflpraf2QQGAQMCBlwDM07rZdH4/Hx1MoEBAQMCBlwDN3DfY0xgQMCAgME1MAxdyuu9JjAIGBAw4Br4L9Z7/R9NYEDAgIABAYOAAQEDAoZEZXlRjfKDWT9MU1mWg/p7vtcrExgQMAgYEDAgYBAwIGDg3twTi7t6f1sEHf/x+dXK+9Z13enn6mv92QQGX6EBAQMCBgEDAgYEDDSIZh3Y/l76cjzsz48n01nj89aBAQGDgAHXwDAGl9e91zxvAgMCBgEDroFjFbp/NXZt7b/t6/VNYEDAgIABAYOAAQEDAgbiWQfebTdBx9s/zKWh/W6wCQwIGAQMCBgQMAgYEDDQIfuBuUno+jwmMCBgEDAgYEDAIGBAwICAAQGDgAEBAwIGBAwCBgQMBLEf+B9+zxYTGBAwIGAQMCBgQMAgYCAyWV5USX3g0N8NPh72jc9PprNW/p5YXt/9n01gQMCAgEHAgIABAYOAgWgktx/4t/XM0PXh1F4fExgQMCBgEDAgYEDAIGBAwICAAQGDgAEBAwIGBAwCBnrR+X2h18vi/Hi+Ojne8Y43gQEBg4ABAQMCBgEDAga6ldzvA4MJDAgYEDAIGBAwIGBAwDByP0mSgTkt3IUXAAAAAElFTkSuQmCC";
 
       const DEMO_FIGURE_PNG_BASE64 =
         "iVBORw0KGgoAAAANSUhEUgAAAUAAAADICAYAAACZBDirAAAD0klEQVR4nO3dP2oUYRjH8VWsDQQ0aRQEq6Rw0QsEIRJvYLlnUAgeQRb0DLmFwTReQNnGVFba+AcEvYAWNuI7hFlmNu/M/D6fcpgNS4xfXp6H3ZnNAAAAAAAAAAAAAAAAAAAAAAAAoJortd/AUJ0s5r//v7Y4Wfl9wYRcrf0GAGoRQCCWAAKxBBCIda32Gxiq+d6N2m9hkCyHmBInQCCWAAKxBBCIJYBArN6XIKvlYTEknx+ftRqSj/G1adKWQ5Y+0+YECMQSQCCWAAKxBBCI1fsw9/nR3WJofLC/Vdy3u7NdXPvy9Udx7e2Hn8W1Wj+vaTEyxsWNpU97flfT5gQIxBJAIJYAArEEEIjV+zD30d7NYmh8//b14r73n34V14Z+39PHt4prQ1rSWPr0/1qmzQkQiCWAQCwBBGIJIBDLIHgNTZ9yabtUaVo8tF1QNN1n6dPt5x29fGf5ghMgkEsAgVgCCMQSQCCWgewGnD57UAy/uyw8Xpx+rPLv1GXpM/T7njy8U1wb45KGbpwAgVgCCMQSQCCWAAKxDFo3oO1zUV69/lxca/r0hYF4/4b+tW21Fl9pnACBWAIIxBJAIJYAArEMWi9J09DdwgPqcgIEYgkgEEsAgVgCCMQycK+o7ddNWZbAZjgBArEEEIglgEAsAQRiGaQPTJevabIsgfU4AQKxBBCIJYBALAEEYhmQj5RlCXTnBAjEEkAglgACsQQQiGXwPXFNy5Imb86/+VsgjhMgEEsAgVgCCMQSQCCWwXcgzyKBv5wAgVgCCMQSQCCWAAKxDLSZzWa+XotMToBALAEEYgkgEEsAgVgG1azFsoQpcQIEYgkgEEsAgVgCCMQygGYjLEsYAydAIJYAArEEEIglgEAsg2Wq8uB2anICBGIJIBBLAIFYAgjEMlhmcJoe3H6wv9XqtT4xwjqcAIFYAgjEEkAglgACsQyMGYW2nxhp+iqt3Z3t4tr8+MzfPk6AQC4BBGIJIBBLAIFYBsFMSttlyXJxr9XPsyyZNidAIJYAArEEEIglgEAsA14ieRYJs5kTIBBMAIFYAgjEEkAglgEvXGC1PGy1LPGJkXFyAgRiCSAQSwCBWAIIxDK4hQv4eq1pcwIEYgkgEEsAgVgCCMQykIUe9L0sWZ1/L64tTlb+v/bMCRCIJYBALAEEYgkgEMtQFS5R07Kk6bkjbe+jGydAIJYAArEEEIglgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPzrDyQSQd6NJcBKAAAAAElFTkSuQmCC";
@@ -1441,16 +1439,9 @@ Classic references such as \cite{lamport94} and \cite{knuth84} are resolved from
 at the end of \texttt{main.tex}. Remember the usual loop: compile $\to$
 bibliography tool $\to$ compile again.
 
-\subsection{Thanks---and a hippo}
-Thanks for reading through all of this.
-Here is a picture of a hippo.
-
-\begin{figure}[ht]
-  \centering
-  \includegraphics[width=0.55\textwidth]{figures/hippo.png}
-  \caption{A pixel hippo. You earned it.}
-  \label{fig:hippo}
-\end{figure}
+\subsection{Thanks}
+Thanks for reading through all of this---now open a blank section and start
+writing your own material, or import DummyHippo if you want a tougher compile.
 `;
 
       function createDefaultProject() {
@@ -1494,11 +1485,6 @@ Here is a picture of a hippo.
             [root + "/figures/diagram.png"]: {
               name: "diagram.png",
               content: DEMO_FIGURE_PNG_BASE64,
-              binary: true
-            },
-            [root + "/figures/hippo.png"]: {
-              name: "hippo.png",
-              content: DEMO_HIPPO_PNG_BASE64,
               binary: true
             }
           }
@@ -2681,10 +2667,16 @@ Here is a picture of a hippo.
           /pixel undertwig/.test(
             String((workspace.files[resultsPath] && workspace.files[resultsPath].content) || "")
           ) ||
-          !workspace.files[nextPath] ||
-          !workspace.files[hippoPath];
+          /Thanks---and a hippo/.test(
+            String((workspace.files[nextPath] && workspace.files[nextPath].content) || "")
+          ) ||
+          !workspace.files[nextPath];
 
         if (!isOldStarter) {
+          // Drop a leftover SampleProject hippo if DummyHippo owns that joke now.
+          if (workspace.files[hippoPath]) {
+            delete workspace.files[hippoPath];
+          }
           return workspace;
         }
 
@@ -2721,11 +2713,9 @@ Here is a picture of a hippo.
           content: DEFAULT_NEXT_STEPS_TEX,
           binary: false,
         };
-        workspace.files[hippoPath] = {
-          name: "hippo.png",
-          content: DEMO_HIPPO_PNG_BASE64,
-          binary: true,
-        };
+        if (workspace.files[hippoPath]) {
+          delete workspace.files[hippoPath];
+        }
         if (!workspace.folders.includes("SampleProject/sections")) {
           workspace.folders.push("SampleProject/sections");
         }
