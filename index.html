@@ -4771,9 +4771,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           row.draggable = true;
         }
         row.innerHTML = `<span class="tree-icon">${isFolder ? (isCollapsed ? ">" : "v") : "-"}</span><span class="tree-name"></span>`;
-        const nameEl = row.querySelector(".tree-name");
-        nameEl.textContent = node.name;
-        nameEl.title = node.name;
+        row.querySelector(".tree-name").textContent = node.name;
 
         if (isFolder) {
           row.addEventListener("click", () => {
