@@ -1458,6 +1458,179 @@
         }
       }
 
+      /* Phone landscape: desktop-like split — editor | preview, Convert centered */
+      @media (max-width: 920px) and (orientation: landscape) {
+        body {
+          overflow: hidden;
+          height: 100%;
+          height: 100dvh;
+        }
+
+        .app,
+        .app.explorer-collapsed {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          grid-template-rows: auto auto minmax(0, 1fr);
+          height: 100dvh;
+          max-height: 100dvh;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        .sidebar,
+        .workspace {
+          display: contents;
+          border: 0;
+        }
+
+        .sidebar-head {
+          grid-column: 1 / -1;
+          grid-row: 1;
+          order: unset;
+          position: static;
+          min-height: 40px;
+          padding: 4px 10px;
+          box-shadow: none;
+        }
+
+        .workspace .topbar {
+          grid-column: 1 / -1;
+          grid-row: 2;
+          order: unset;
+          position: relative;
+          flex-direction: row;
+          flex-wrap: nowrap;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          min-height: 44px;
+          padding: 4px 10px;
+          box-shadow: none;
+        }
+
+        .workspace .file-title {
+          order: 0;
+          position: absolute;
+          left: 10px;
+          top: 50%;
+          transform: translateY(-50%);
+          flex: 0 1 auto;
+          width: auto;
+          max-width: min(28vw, 160px);
+          z-index: 1;
+        }
+
+        .workspace .file-title span {
+          display: none;
+        }
+
+        .workspace .topbar-actions {
+          order: 0;
+          flex: 1 1 auto;
+          flex-wrap: nowrap;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          max-width: none;
+          margin: 0;
+          overflow-x: auto;
+          gap: 6px;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        .workspace .convert-button {
+          order: -20;
+          flex: 0 0 auto;
+          min-height: 40px;
+          min-width: 7.5rem;
+          padding: 0 18px;
+          font-size: 14px;
+        }
+
+        .workspace .convert-busy {
+          order: -19;
+        }
+
+        .workspace .collaborate-wrap,
+        .workspace .save-button,
+        .workspace .bib-wrap,
+        .workspace .bib-button,
+        .workspace .engine-wrap {
+          order: 0;
+          flex: 0 0 auto;
+        }
+
+        .workspace .editor-wrap {
+          grid-column: 1;
+          grid-row: 3;
+          order: unset;
+          display: flex;
+          flex-direction: column;
+          flex: unset;
+          align-self: stretch;
+          height: auto;
+          min-height: 0;
+          max-height: none;
+          border-right: 1px solid var(--border);
+          border-bottom: 0;
+          overflow: hidden;
+          background: #111820;
+        }
+
+        .workspace .editor-wrap #editor,
+        .workspace .editor-wrap .code-editor-host,
+        .workspace .editor-wrap .asset-preview {
+          flex: 1 1 auto;
+          height: auto;
+          min-height: 0;
+        }
+
+        .workspace .statusbar,
+        .sidebar-actions,
+        .tree,
+        .cloud-status,
+        .legal-links,
+        .mobile-page-hint,
+        .collapsed-rail,
+        .collapse-button {
+          display: none !important;
+        }
+
+        .preview {
+          grid-column: 2;
+          grid-row: 3;
+          order: unset;
+          display: flex;
+          flex-direction: column;
+          flex: unset;
+          align-self: stretch;
+          min-height: 0;
+          height: auto;
+          overflow: hidden;
+          scroll-margin-top: 0;
+          border-left: 0;
+        }
+
+        .preview .preview-title {
+          padding: 6px 10px;
+        }
+
+        .preview .preview-title span {
+          display: none;
+        }
+
+        .preview .viewer {
+          flex: 1 1 auto;
+          height: auto;
+          min-height: 0;
+        }
+
+        .hover-box {
+          top: max(8px, env(safe-area-inset-top));
+          max-height: min(calc(100dvh - 16px), 420px);
+        }
+      }
+
       .mobile-page-hint {
         display: none;
       }
@@ -2536,7 +2709,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           pdfFrame.src = pdfUrl;
         }
 
-        if (window.matchMedia("(max-width: 920px)").matches && previewSection) {
+        if (
+          window.matchMedia("(max-width: 920px) and (orientation: portrait)").matches &&
+          previewSection
+        ) {
           previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
         }
       }
@@ -3666,6 +3842,21 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             true
           );
         });
+
+      function relayoutEditorSoon() {
+        window.setTimeout(function () {
+          UndertwigEditor.layout();
+        }, 250);
+      }
+      window.addEventListener("orientationchange", relayoutEditorSoon);
+      if (window.matchMedia) {
+        const landscapeQuery = window.matchMedia("(max-width: 920px) and (orientation: landscape)");
+        if (landscapeQuery.addEventListener) {
+          landscapeQuery.addEventListener("change", relayoutEditorSoon);
+        } else if (landscapeQuery.addListener) {
+          landscapeQuery.addListener(relayoutEditorSoon);
+        }
+      }
 
       function loadProject() {
         try {
