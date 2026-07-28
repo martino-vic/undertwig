@@ -887,9 +887,8 @@
           luaWorker.postMessage({
             files: files,
             main_tex_path: "main.tex",
-            // Auto-run bibtex8 only when the toolbar bibliography tool is BibTeX.
-            // Biber documents must use the Bibliography button / a prebuilt .bbl.
-            bibtex: selectedBibTool === BIBTEX,
+            // Bibliography is only via Update Bibliography — never auto-run on Convert.
+            bibtex: false,
             makeindex: null,
             rerun: true,
             verbose: "silent",
