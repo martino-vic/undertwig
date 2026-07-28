@@ -2681,6 +2681,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           /Thanks---and a hippo/.test(
             String((workspace.files[nextPath] && workspace.files[nextPath].content) || "")
           ) ||
+          /Import that folder the same way you would any other/.test(
+            String((workspace.files[nextPath] && workspace.files[nextPath].content) || "")
+          ) ||
           !workspace.files[nextPath];
 
         if (!isOldStarter) {
