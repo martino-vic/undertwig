@@ -1590,12 +1590,10 @@
           position: relative;
           top: auto;
           z-index: 5;
-          display: flex;
-          flex-direction: row;
-          flex-wrap: nowrap;
+          display: grid;
+          grid-template-columns: minmax(4.5rem, 7rem) minmax(0, 1fr);
           align-items: center;
-          justify-content: flex-start;
-          gap: 10px;
+          gap: 8px;
           height: 48px;
           min-height: 48px;
           max-height: 48px;
@@ -1607,16 +1605,18 @@
         }
 
         .workspace .file-title {
+          grid-column: 1;
           order: 0;
           position: static;
           top: auto;
           left: auto;
           transform: none;
-          flex: 0 1 7.5rem;
+          flex: unset;
           width: auto;
-          max-width: 7.5rem;
+          max-width: none;
           min-width: 0;
           z-index: auto;
+          overflow: hidden;
         }
 
         .workspace .file-title span {
@@ -1624,15 +1624,17 @@
         }
 
         .workspace .topbar-actions {
+          grid-column: 2;
           order: 0;
-          flex: 1 1 auto;
+          flex: unset;
+          display: flex;
           flex-wrap: nowrap;
           align-items: center;
-          justify-content: center;
+          justify-content: flex-start;
           gap: 6px;
           width: auto;
           min-width: 0;
-          max-width: none;
+          max-width: 100%;
           margin: 0;
           overflow-x: auto;
           overflow-y: hidden;
@@ -1642,6 +1644,10 @@
 
         .workspace .topbar-actions::-webkit-scrollbar {
           display: none;
+        }
+
+        .workspace .topbar-actions > * {
+          flex: 0 0 auto;
         }
 
         .workspace .convert-button {
@@ -1793,6 +1799,144 @@
         .hover-box {
           top: max(8px, env(safe-area-inset-top));
           max-height: min(calc(100dvh - 16px), 420px);
+        }
+      }
+
+      /*
+        Tablet landscape: desktop 3-column kicks in above 920px, but the workspace
+        column is too narrow for Collaborate / Login / Save / … — give the toolbar
+        a full-width fixed row and a dedicated scrolling actions lane.
+      */
+      @media (orientation: landscape) and (min-width: 921px) and (max-width: 1180px) {
+        .app,
+        .app.explorer-collapsed,
+        .app.preview-collapsed,
+        .app.explorer-collapsed.preview-collapsed {
+          grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1fr);
+          grid-template-rows: auto minmax(0, 1fr);
+          height: 100vh;
+          height: 100dvh;
+          overflow: hidden;
+        }
+
+        .app.explorer-collapsed,
+        .app.explorer-collapsed.preview-collapsed {
+          grid-template-columns: 48px minmax(0, 1fr) minmax(0, 1fr);
+        }
+
+        .app.preview-collapsed {
+          grid-template-columns: 200px minmax(0, 1fr) 48px;
+        }
+
+        .app.explorer-collapsed.preview-collapsed {
+          grid-template-columns: 48px minmax(0, 1fr) 48px;
+        }
+
+        .workspace {
+          display: contents;
+          border: 0;
+        }
+
+        .sidebar {
+          grid-column: 1;
+          grid-row: 2;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        .workspace .topbar {
+          grid-column: 1 / -1;
+          grid-row: 1;
+          display: grid;
+          grid-template-columns: minmax(6rem, 11rem) minmax(0, 1fr);
+          align-items: center;
+          gap: 12px;
+          height: 52px;
+          min-height: 52px;
+          max-height: 52px;
+          padding: 0 12px;
+          overflow: hidden;
+          box-shadow: none;
+        }
+
+        .workspace .file-title {
+          grid-column: 1;
+          min-width: 0;
+          overflow: hidden;
+        }
+
+        .workspace .file-title span {
+          display: none;
+        }
+
+        .workspace .topbar-actions {
+          grid-column: 2;
+          display: flex;
+          flex: unset;
+          flex-wrap: nowrap;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 8px;
+          min-width: 0;
+          max-width: 100%;
+          overflow-x: auto;
+          overflow-y: hidden;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: thin;
+        }
+
+        .workspace .topbar-actions > * {
+          flex: 0 0 auto;
+        }
+
+        .workspace .convert-button {
+          order: 20;
+          flex: 0 0 auto;
+          min-height: 36px;
+          padding: 0 14px;
+        }
+
+        .workspace .convert-busy {
+          order: 21;
+        }
+
+        .workspace .bib-button {
+          display: none !important;
+        }
+
+        .workspace #collaborate svg {
+          display: none;
+        }
+
+        .workspace .toolbar-button,
+        .workspace .engine-button,
+        .workspace .save-button {
+          min-height: 36px;
+          padding: 0 10px;
+          font-size: 13px;
+        }
+
+        .workspace .editor-wrap {
+          grid-column: 2;
+          grid-row: 2;
+          min-height: 0;
+          overflow: hidden;
+          border-right: 1px solid var(--border);
+        }
+
+        .workspace .statusbar {
+          display: none;
+        }
+
+        .preview {
+          grid-column: 3;
+          grid-row: 2;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        .app.preview-collapsed .preview {
+          grid-column: 3;
         }
       }
 
@@ -4110,11 +4254,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
       window.addEventListener("orientationchange", relayoutEditorSoon);
       if (window.matchMedia) {
-        const landscapeQuery = window.matchMedia("(max-width: 920px) and (orientation: landscape)");
-        if (landscapeQuery.addEventListener) {
-          landscapeQuery.addEventListener("change", relayoutEditorSoon);
-        } else if (landscapeQuery.addListener) {
-          landscapeQuery.addListener(relayoutEditorSoon);
+        const compactLandscapeQuery = window.matchMedia(
+          "(orientation: landscape) and (max-width: 1180px)"
+        );
+        if (compactLandscapeQuery.addEventListener) {
+          compactLandscapeQuery.addEventListener("change", relayoutEditorSoon);
+        } else if (compactLandscapeQuery.addListener) {
+          compactLandscapeQuery.addListener(relayoutEditorSoon);
         }
       }
 
