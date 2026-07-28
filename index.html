@@ -1220,7 +1220,7 @@
           order: 1;
           position: sticky;
           top: 0;
-          z-index: 50;
+          z-index: 60;
           min-height: 48px;
           padding: 8px 12px;
           border-bottom: 1px solid var(--border);
@@ -1238,15 +1238,23 @@
           flex: 0 0 auto;
         }
 
+        .sidebar-head #accountWrap:not(.hidden) {
+          display: block;
+        }
+
         .sidebar-head #loginButton,
         .sidebar-head .account-button {
           min-height: 36px;
         }
 
+        .sidebar-head .account-button {
+          max-width: min(42vw, 140px);
+        }
+
         .workspace .topbar {
           order: 2;
           position: sticky;
-          top: 0;
+          top: 48px;
           z-index: 55;
           flex-direction: column;
           align-items: stretch;
@@ -3122,7 +3130,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (session) {
           loginButton.classList.add("hidden");
           accountWrap.classList.remove("hidden");
-          accountLabel.textContent = session.name || session.email || "Account";
+          // Mobile header is tight; keep a short label so Account/Log out stays tappable.
+          const mobileHeader =
+            typeof window.matchMedia === "function" &&
+            window.matchMedia("(max-width: 920px)").matches;
+          accountLabel.textContent = mobileHeader
+            ? "Account"
+            : session.name || session.email || "Account";
           accountMessage.textContent =
             "Signed in as " +
             (session.email || session.name) +
