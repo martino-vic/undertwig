@@ -834,7 +834,7 @@
           new Error(
             "Bibliography helper timed out after " +
               Math.round(timeoutMs / 1000) +
-              "s. Convert once, then try Bibliography again."
+              "s. Convert once, then try Update Bibliography again."
           )
         );
       }, timeoutMs);
@@ -940,7 +940,7 @@
       closeEngineQuietly(result && result.engine);
       if (!findMainAux(merged)) {
         throw new Error(
-          "Could not create main.aux. Convert the project once, then run Bibliography."
+          "Could not create main.aux. Convert the project once, then run Update Bibliography."
         );
       }
       return { files: merged, wroteAux: true, aux: aux };
