@@ -1512,6 +1512,10 @@
           min-height: 280px;
         }
 
+        .log {
+          max-height: min(28vh, 180px);
+        }
+
         .toolbar-button,
         .bib-button,
         .engine-button,
@@ -1775,6 +1779,15 @@
           flex: 1 1 auto;
           height: auto;
           min-height: 0;
+        }
+
+        /* Don't let an expanded compiler log eat the landscape PDF column */
+        .preview .log:not(.hidden) {
+          max-height: min(22vh, 100px);
+        }
+
+        .preview:has(.log:not(.hidden):not(.is-collapsed)) .viewer {
+          min-height: 45%;
         }
 
         .hover-box {
