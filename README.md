@@ -26,6 +26,10 @@ Use the live site: [undertwig.com](https://undertwig.com).
 
 Convert writes the current project into the SwiftLaTeX in-browser PdfTeX engine and renders the returned PDF in the preview pane. Compilation happens on the user's device. Package resolution may fetch TeX Live resources from the configured on-demand endpoint when needed.
 
+## Performance
+
+Undertwig was measured against the [Uni Stuttgart / ITP3 LaTeX Benchmark](https://web.itp3.uni-stuttgart.de/latex-benchmark/) (QFT lecture-notes workload). On an AMD Ryzen 5 PRO 6650U, warm in-browser pdfLaTeX averaged **15.1 s** versus **14.4 s** for native TeX Live on the same machine. Full hardware notes, method, caveats, and raw timings: [`docs/benchmarks/latex-benchmark.md`](docs/benchmarks/latex-benchmark.md).
+
 ## Authentication and cloud storage
 
 Sign-in is available at [`login.html`](login.html) and supports Google accounts only, via Google Identity Services.
@@ -66,6 +70,7 @@ Signed-in session details are stored in the browser under `undertwig-auth-v2`.
 - `LICENSE` — GNU AGPL v3.0
 - `THIRD_PARTY_NOTICES.md` — third-party dependency notes
 - `COMPLIANCE.md` — release checklist
+- `docs/benchmarks/latex-benchmark.md` — Uni Stuttgart LaTeX Benchmark results
 
 ## Source
 
