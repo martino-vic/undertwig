@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Undertwig LaTeX Benchmark Harness</title>
+</head>
+<body>
+  <pre id="out">starting…</pre>
+  <script src="/vendor/swiftlatex/PdfTeXEngine.js"></script>
+  <script>
+    const out = document.getElementById("out");
+    const log = (msg) => {
+      out.textContent += "\n" + msg;
+      console.log(msg);
+    };
+    window.__bench = { status: "init", results: null, error: null, log: "" };
+
+    function base64FromBytes(bytes) {
+      let binary = "";
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      return btoa(binary);
+    }
+
+    async function fetchProjectFiles() {
+      const manifest = await (await fetch("/project-manifest.json")).json();
+      const files = {};
+      for (const entry of manifest) {
+        if (entry.binary) {
+          const buf = await (await fetch(entry.url)).arrayBuffer();
+          files[entry.path] = {
+            binary: true,
+            content: base64FromBytes(new Uint8Array(buf)),
+          };
+        } else {
+          files[entry.path] = {
+            binary: false,
+            content: await (await fetch(entry.url)).text(),
+          };
+        }
+      }
+      return files;
+    }
+
+    function base64ToBytes(b64) {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes;
+    }
+
+    async function compileOnce(engine, projectFiles, auxFiles) {
+      const folders = new Set();
+      Object.keys(projectFiles).forEach((path) => {
+        const parts = path.split("/");
+        parts.pop();
+        let current = "";
+        parts.forEach((part) => {
+          current = current ? current + "/" + part : part;
+          folders.add(current);
+        });
+      });
+      Array.from(folders)
+        .sort((a, b) => a.split("/").length - b.split("/").length)
+        .forEach((folder) => engine.makeMemFSFolder(folder));
+
+      Object.keys(projectFiles).forEach((path) => {
+        const file = projectFiles[path];
+        const content = file.binary ? base64ToBytes(file.content) : file.content;
+        engine.writeMemFSFile(path, content);
+      });
+      Object.keys(auxFiles || {}).forEach((path) => {
+        engine.writeMemFSFile(path, auxFiles[path]);
+      });
+      engine.setEngineMainFile("main.tex");
+      const t0 = performance.now();
+      const result = await engine.compileLaTeX();
+      const ms = performance.now() - t0;
+      return { result, ms };
+    }
+
+    (async () => {
+      try {
+        const timedRuns = Math.max(
+          1,
+          Number(new URLSearchParams(location.search).get("runs") || "3") || 3
+        );
+
+        log("Loading project files…");
+        const projectFiles = await fetchProjectFiles();
+        log("Files: " + Object.keys(projectFiles).length);
+
+        log("Loading PdfTeXEngine…");
+        const engine = new PdfTeXEngine();
+        await engine.loadEngine();
+        log("Engine ready");
+
+        log("Prepare pass 1…");
+        let { result, ms } = await compileOnce(engine, projectFiles, {});
+        let aux = (result && result.aux) || {};
+        log(
+          "Prepare pass 1 done in " +
+            (ms / 1000).toFixed(2) +
+            "s status=" +
+            result.status +
+            " pdf=" +
+            Boolean(result.pdf)
+        );
+        window.__bench.log = result.log || "";
+        if (!result.pdf) {
+          window.__bench.status = "failed";
+          window.__bench.error =
+            "Prepare pass 1 failed (no PDF, status=" + result.status + ")";
+          log("FAIL prepare 1\n" + (result.log || "").slice(-4000));
+          return;
+        }
+        log("Prepare pass 1 PDF bytes=" + result.pdf.byteLength);
+
+        log("Prepare pass 2…");
+        ({ result, ms } = await compileOnce(engine, projectFiles, aux));
+        aux = (result && result.aux) || aux;
+        log(
+          "Prepare pass 2 done in " +
+            (ms / 1000).toFixed(2) +
+            "s status=" +
+            result.status
+        );
+        window.__bench.log = result.log || "";
+        if (!result.pdf) {
+          window.__bench.status = "failed";
+          window.__bench.error =
+            "Prepare pass 2 failed (no PDF, status=" + result.status + ")";
+          log("FAIL prepare 2\n" + (result.log || "").slice(-4000));
+          return;
+        }
+
+        const times = [];
+        for (let i = 1; i <= timedRuns; i++) {
+          log("Timed run " + i + "…");
+          ({ result, ms } = await compileOnce(engine, projectFiles, aux));
+          aux = (result && result.aux) || aux;
+          const sec = Math.round(ms / 100) / 10;
+          times.push(sec);
+          log(
+            "Timed run " +
+              i +
+              " T=" +
+              sec.toFixed(1) +
+              "s status=" +
+              result.status +
+              " pdf=" +
+              Boolean(result.pdf)
+          );
+          if (!result.pdf) {
+            window.__bench.status = "failed";
+            window.__bench.error = "Timed run " + i + " failed (no PDF)";
+            window.__bench.log = result.log || "";
+            log("FAIL timed\n" + (result.log || "").slice(-4000));
+            return;
+          }
+        }
+
+        const avg = times.reduce((a, b) => a + b, 0) / times.length;
+        const min = Math.min(...times);
+        const max = Math.max(...times);
+        window.__bench.status = "ok";
+        window.__bench.results = {
+          times,
+          avg: Math.round(avg * 10) / 10,
+          min: Math.round(min * 10) / 10,
+          max: Math.round(max * 10) / 10,
+          pdfBytes: result.pdf ? result.pdf.byteLength : 0,
+        };
+        log("RESULTS " + JSON.stringify(window.__bench.results));
+      } catch (error) {
+        window.__bench.status = "failed";
+        window.__bench.error = String(error && error.stack ? error.stack : error);
+        log("EXCEPTION " + window.__bench.error);
+      }
+    })();
+  </script>
+</body>
+</html>

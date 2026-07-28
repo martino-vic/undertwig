@@ -28,7 +28,7 @@ Convert writes the current project into the SwiftLaTeX in-browser PdfTeX engine 
 
 ## Performance
 
-Undertwig was measured against the [Uni Stuttgart / ITP3 LaTeX Benchmark](https://web.itp3.uni-stuttgart.de/latex-benchmark/) (QFT lecture-notes workload). On an AMD Ryzen 5 PRO 6650U, warm in-browser pdfLaTeX averaged **15.1 s** versus **14.4 s** for native TeX Live on the same machine. Full hardware notes, method, caveats, and raw timings: [`docs/benchmarks/latex-benchmark.md`](docs/benchmarks/latex-benchmark.md).
+Undertwig was measured against the [Uni Stuttgart / ITP3 LaTeX Benchmark](https://web.itp3.uni-stuttgart.de/latex-benchmark/) (QFT lecture-notes workload). On an AMD Ryzen 5 PRO 6650U, warm in-browser pdfLaTeX averaged **15.1 s** versus **14.4 s** for native TeX Live on the same machine. Full hardware notes, method, caveats, and raw timings: [`docs/benchmarks/latex-benchmark.md`](docs/benchmarks/latex-benchmark.md). Re-run via Actions → **LaTeX Benchmark** (manual workflow; green check means Wasm compile succeeded).
 
 ## Authentication and cloud storage
 

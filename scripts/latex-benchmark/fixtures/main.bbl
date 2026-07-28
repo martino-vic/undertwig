@@ -1,0 +1,40 @@
+\begin{thebibliography}{1}
+\providecommand{\url}[1]{\texttt{#1}}
+\providecommand{\urlprefix}{URL }
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi:\discretionary{}{}{}#1}\else
+  \providecommand{\doi}{doi:\discretionary{}{}{}\begingroup
+  \urlstyle{rm}\Url}\fi
+\providecommand{\eprint}[2][]{\url{#2}}
+
+\bibitem{Weinberg1996}
+S.~Weinberg,
+\newblock \emph{The Quantum Theory of Fields}, vol.~1,
+\newblock Cambridge University Press,
+\newblock ISBN 9780521585552 (1996).
+
+\bibitem{Itzykson2005}
+C.~Itzykson and J.-B. Zuber,
+\newblock \emph{Quantum field theory},
+\newblock Dover Publications,
+\newblock ISBN 0486445682 (2005).
+
+\bibitem{Peskin1995}
+M.~E. Peskin and D.~V. Schroeder,
+\newblock \emph{An introduction to quantum field theory},
+\newblock Addison-Wesley Pub. Co.,
+\newblock ISBN 0201503972 (1995).
+
+\bibitem{Zee2010}
+A.~Zee,
+\newblock \emph{Quantum Field Theory in a Nutshell},
+\newblock Princeton University Press,
+\newblock ISBN 9780691140346 (2010).
+
+\bibitem{Francesco2012}
+P.~Francesco, P.~Mathieu and D.~Senechal,
+\newblock \emph{Conformal Field Theory},
+\newblock Springer,
+\newblock ISBN 9781461222569 (2012).
+
+\end{thebibliography}

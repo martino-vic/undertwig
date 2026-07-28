@@ -91,6 +91,17 @@ The public scoreboard ranks **native CPUs** by the same document. An average of 
 - This run used a local static harness + Playwright against Undertwig’s vendored `PdfTeXEngine.js` / `swiftlatexpdftex.wasm` (not the live website UI).
 - Native baseline needed `tensor.sty` and `simplewick.sty` in a user TEXMF tree (not present in the host’s default Debian TeX Live set).
 
+## CI workflow
+
+A manually triggered GitHub Actions workflow runs the same harness:
+
+- Workflow: [`.github/workflows/latex-benchmark.yml`](../../.github/workflows/latex-benchmark.yml) (`workflow_dispatch`)
+- Runner script: [`scripts/latex-benchmark/run.sh`](../../scripts/latex-benchmark/run.sh)
+- **Green check** = prepare + timed Wasm compiles each produced a PDF (`results.json` status `ok`)
+- **Red check** = compile failure, timeout, or harness error
+
+Trigger via the Actions tab → **LaTeX Benchmark** → **Run workflow**. Timings are written to the job summary and uploaded as an artifact; they are informational and do not gate the pass/fail outcome beyond successful PDF production.
+
 ## Summary
 
 Undertwig’s browser pdfLaTeX engine **can** compile the Uni Stuttgart LaTeX Benchmark document end-to-end (with the `\clearpage` harness fix and a prepared `.bbl`). On an AMD Ryzen 5 PRO 6650U laptop, warm compile time was **15.1 s average**, versus **14.4 s** for native `pdflatex` on the same machine.

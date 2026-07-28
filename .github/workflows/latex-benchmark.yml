@@ -1,0 +1,94 @@
+name: LaTeX Benchmark
+
+# Manual run of the Uni Stuttgart LaTeX Benchmark through Undertwig's in-browser
+# pdfLaTeX engine. The job succeeds (green check) only when Convert-equivalent
+# Wasm compilation produces a PDF for prepare + timed runs.
+on:
+  workflow_dispatch:
+    inputs:
+      timed_runs:
+        description: Number of timed compile runs after prepare
+        required: false
+        default: "3"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  latex-benchmark:
+    name: latex-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: scripts/latex-benchmark/package-lock.json
+
+      - name: Install npm deps and Chromium
+        working-directory: scripts/latex-benchmark
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run Undertwig LaTeX Benchmark
+        env:
+          BENCH_RUNS: ${{ inputs.timed_runs }}
+          BENCH_RESULTS_PATH: ${{ github.workspace }}/scripts/latex-benchmark/results.json
+        run: |
+          chmod +x scripts/latex-benchmark/run.sh
+          # Playwright already installed above; skip reinstall in run.sh
+          SKIP_PLAYWRIGHT_INSTALL=1 scripts/latex-benchmark/run.sh
+
+      - name: Write job summary
+        if: always()
+        run: |
+          RESULTS="${{ github.workspace }}/scripts/latex-benchmark/results.json"
+          {
+            echo "## Undertwig LaTeX Benchmark"
+            echo
+            if [[ -f "$RESULTS" ]]; then
+              python3 - "$RESULTS" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))
+          status = data.get("status")
+          print(f"**Status:** `{status}`")
+          print()
+          if status == "ok" and data.get("results"):
+              r = data["results"]
+              print("| Metric | Value |")
+              print("| --- | ---: |")
+              print(f"| Min | {r.get('min')} s |")
+              print(f"| Avg | {r.get('avg')} s |")
+              print(f"| Max | {r.get('max')} s |")
+              print(f"| PDF bytes | {r.get('pdfBytes')} |")
+              print()
+              print(f"Timed runs: `{r.get('times')}`")
+          elif data.get("error"):
+              print("**Error:**")
+              print()
+              print("```")
+              print(str(data["error"])[:4000])
+              print("```")
+          PY
+            else
+              echo "_No results.json produced._"
+            fi
+            echo
+            echo "Details: \`docs/benchmarks/latex-benchmark.md\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: latex-benchmark-results
+          path: |
+            scripts/latex-benchmark/results.json
+          if-no-files-found: ignore
