@@ -3880,7 +3880,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         cloudStatus.classList.add("is-logged-out");
         cloudStatusDot.textContent = "";
         const login = document.createElement("a");
-        login.href = UndertwigAuth.loginUrl("/");
+        login.href = cloudLoginUrl();
         login.textContent = "Log in";
         cloudStatusText.appendChild(login);
         cloudStatusText.appendChild(document.createTextNode(" to connect to Google Drive (free)"));
@@ -4279,6 +4279,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return id ? "/?project=" + encodeURIComponent(id) : "/";
       }
 
+      /** Login URL that resumes a shared-project invite when one is pending. */
+      function cloudLoginUrl() {
+        return UndertwigAuth.loginUrl(inviteResumePath(resolveSharedProjectId()));
+      }
+
       function clearProjectIdFromUrl() {
         try {
           const url = new URL(window.location.href);
@@ -4369,7 +4374,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         inviteForm.classList.add("hidden");
         collaborateNote.classList.remove("hidden");
         collaborateLoginLink.classList.remove("hidden");
-        collaborateLoginLink.href = UndertwigAuth.loginUrl("/");
+        collaborateLoginLink.href = cloudLoginUrl();
         collaborateLoginLink.textContent = "Log in";
         resetInviteForm();
       }
@@ -4443,9 +4448,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
         } else {
           loginButton.classList.remove("hidden");
+          loginButton.href = cloudLoginUrl();
           accountWrap.classList.add("hidden");
           collaborateLoginLink.classList.remove("hidden");
-          collaborateLoginLink.href = UndertwigAuth.loginUrl("/");
+          collaborateLoginLink.href = cloudLoginUrl();
           inviteForm.classList.add("hidden");
           if (saveButton) {
             saveButton.title = "Save in this browser";
@@ -7537,7 +7543,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (options && options.offerCloudLogin && !UndertwigAuth.isLoggedIn()) {
           status.appendChild(document.createTextNode(String(message || "") + " "));
           const link = document.createElement("a");
-          link.href = UndertwigAuth.loginUrl("/");
+          link.href = cloudLoginUrl();
           link.textContent = "Log in";
           status.appendChild(link);
           status.appendChild(document.createTextNode(" to use Google Cloud storage (free)."));
