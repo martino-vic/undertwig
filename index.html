@@ -1468,6 +1468,73 @@
       #pdfFrame.hidden {
         display: none;
       }
+
+      .pdfjs-viewer {
+        position: absolute;
+        inset: 0;
+        display: none;
+        flex-direction: column;
+        background: #0c1117;
+      }
+
+      .pdfjs-viewer:not(.hidden) {
+        display: flex;
+      }
+
+      .pdfjs-toolbar {
+        display: flex;
+        flex: 0 0 auto;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 40px;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        background: #16202a;
+      }
+
+      .pdfjs-toolbar button {
+        min-height: 36px;
+        min-width: 36px;
+        padding: 0 10px;
+      }
+
+      .pdfjs-toolbar span {
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .pdfjs-pages {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+        padding: 10px;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .pdfjs-pages canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+        margin: 0 auto 10px;
+        background: #fff;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+
+      .pdfjs-status {
+        margin: 0;
+        padding: 16px;
+        color: var(--muted);
+        font-size: 13px;
+        text-align: center;
+      }
+
+      .pdfjs-status.hidden {
+        display: none;
+      }
     </style>
   </head>
   <body>
@@ -1632,9 +1699,19 @@
         </div>
         <div class="viewer">
           <iframe id="pdfFrame" class="hidden" title="Compiled PDF preview"></iframe>
+          <div class="pdfjs-viewer hidden" id="pdfJsViewer" aria-label="PDF preview pages">
+            <div class="pdfjs-toolbar">
+              <button type="button" id="pdfJsZoomOut" title="Zoom out">−</button>
+              <span id="pdfJsZoomLabel">100%</span>
+              <button type="button" id="pdfJsZoomIn" title="Zoom in">+</button>
+              <span id="pdfJsPageCount"></span>
+            </div>
+            <div class="pdfjs-pages" id="pdfJsPages"></div>
+            <p class="pdfjs-status hidden" id="pdfJsStatus">Loading preview…</p>
+          </div>
           <div class="pdf-fallback hidden" id="pdfFallback">
             <strong>PDF ready</strong>
-            <p>
+            <p id="pdfFallbackMessage">
               This browser can't show PDFs inside the page. Open it in your device PDF viewer, or download the file.
             </p>
             <div class="pdf-fallback-actions">
@@ -2096,7 +2173,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       const folderInput = document.getElementById("folderInput");
       const projectFolderInput = document.getElementById("projectFolderInput");
       const pdfFrame = document.getElementById("pdfFrame");
+      const pdfJsViewer = document.getElementById("pdfJsViewer");
+      const pdfJsPages = document.getElementById("pdfJsPages");
+      const pdfJsStatus = document.getElementById("pdfJsStatus");
+      const pdfJsZoomIn = document.getElementById("pdfJsZoomIn");
+      const pdfJsZoomOut = document.getElementById("pdfJsZoomOut");
+      const pdfJsZoomLabel = document.getElementById("pdfJsZoomLabel");
+      const pdfJsPageCount = document.getElementById("pdfJsPageCount");
       const pdfFallback = document.getElementById("pdfFallback");
+      const pdfFallbackMessage = document.getElementById("pdfFallbackMessage");
       const emptyPreview = document.getElementById("emptyPreview");
       const previewMeta = document.getElementById("previewMeta");
       const previewActions = document.getElementById("previewActions");
@@ -2111,6 +2196,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       const copyLogButton = document.getElementById("copyLog");
       let copyLogResetTimer = null;
       const PDF_PREVIEW_NAME = "undertwig-preview.pdf";
+      const PDFJS_VERSION = "4.10.38";
+      const PDFJS_CDN =
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@" + PDFJS_VERSION + "/build/pdf.min.mjs";
+      const PDFJS_WORKER_CDN =
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@" + PDFJS_VERSION + "/build/pdf.worker.min.mjs";
+      let pdfJsLibPromise = null;
+      let pdfJsRenderToken = 0;
+      let lastPdfBytes = null;
+      let pdfJsScaleFactor = 1;
+      let pdfJsDoc = null;
 
       function browserBlocksInlinePdf() {
         const ua = navigator.userAgent || "";
@@ -2135,13 +2230,171 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         });
       }
 
+      function toPdfUint8Array(pdfData) {
+        if (pdfData instanceof Uint8Array) {
+          return pdfData;
+        }
+        if (pdfData instanceof ArrayBuffer) {
+          return new Uint8Array(pdfData);
+        }
+        if (ArrayBuffer.isView(pdfData)) {
+          return new Uint8Array(pdfData.buffer, pdfData.byteOffset, pdfData.byteLength);
+        }
+        return new Uint8Array(pdfData || []);
+      }
+
+      function loadPdfJs() {
+        if (!pdfJsLibPromise) {
+          pdfJsLibPromise = import(PDFJS_CDN)
+            .then((lib) => {
+              lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN;
+              return lib;
+            })
+            .catch((error) => {
+              pdfJsLibPromise = null;
+              throw error;
+            });
+        }
+        return pdfJsLibPromise;
+      }
+
+      function clearPdfJsViewer() {
+        pdfJsRenderToken += 1;
+        if (pdfJsDoc) {
+          try {
+            pdfJsDoc.destroy();
+          } catch (_error) {
+            /* ignore */
+          }
+          pdfJsDoc = null;
+        }
+        if (pdfJsPages) {
+          pdfJsPages.innerHTML = "";
+        }
+      }
+
+      function showPdfFallback(message) {
+        if (pdfJsViewer) {
+          pdfJsViewer.classList.add("hidden");
+        }
+        if (pdfJsStatus) {
+          pdfJsStatus.classList.add("hidden");
+        }
+        pdfFrame.classList.add("hidden");
+        pdfFrame.removeAttribute("src");
+        if (pdfFallbackMessage && message) {
+          pdfFallbackMessage.textContent = message;
+        }
+        if (pdfFallback) {
+          pdfFallback.classList.remove("hidden");
+        }
+      }
+
+      async function renderPdfJsPages(doc, token) {
+        if (!pdfJsPages || !pdfJsViewer) {
+          return;
+        }
+        const baseWidth = Math.max(280, pdfJsPages.clientWidth || pdfJsViewer.clientWidth || 320);
+        pdfJsPages.innerHTML = "";
+        for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
+          if (token !== pdfJsRenderToken) {
+            return;
+          }
+          const page = await doc.getPage(pageNumber);
+          if (token !== pdfJsRenderToken) {
+            return;
+          }
+          const unscaled = page.getViewport({ scale: 1 });
+          const fitScale = (baseWidth - 4) / unscaled.width;
+          const viewport = page.getViewport({
+            scale: Math.max(0.4, fitScale * pdfJsScaleFactor),
+          });
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d", { alpha: false });
+          const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+          canvas.width = Math.floor(viewport.width * outputScale);
+          canvas.height = Math.floor(viewport.height * outputScale);
+          canvas.style.width = Math.floor(viewport.width) + "px";
+          canvas.style.height = Math.floor(viewport.height) + "px";
+          const transform =
+            outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+          pdfJsPages.appendChild(canvas);
+          await page.render({
+            canvasContext: context,
+            viewport: viewport,
+            transform: transform || undefined,
+          }).promise;
+        }
+        if (pdfJsPageCount) {
+          pdfJsPageCount.textContent =
+            doc.numPages === 1 ? "1 page" : doc.numPages + " pages";
+        }
+        if (pdfJsZoomLabel) {
+          pdfJsZoomLabel.textContent = Math.round(pdfJsScaleFactor * 100) + "%";
+        }
+      }
+
+      async function showPdfWithPdfJs(pdfData) {
+        const bytes = toPdfUint8Array(pdfData);
+        lastPdfBytes = bytes.slice();
+        clearPdfJsViewer();
+        const token = pdfJsRenderToken;
+
+        pdfFrame.classList.add("hidden");
+        pdfFrame.removeAttribute("src");
+        if (pdfFallback) {
+          pdfFallback.classList.add("hidden");
+        }
+        if (pdfJsViewer) {
+          pdfJsViewer.classList.remove("hidden");
+        }
+        if (pdfJsStatus) {
+          pdfJsStatus.textContent = "Loading preview…";
+          pdfJsStatus.classList.remove("hidden");
+        }
+        if (pdfJsPages) {
+          pdfJsPages.innerHTML = "";
+        }
+
+        try {
+          const pdfjsLib = await loadPdfJs();
+          if (token !== pdfJsRenderToken) {
+            return;
+          }
+          const loadingTask = pdfjsLib.getDocument({ data: lastPdfBytes.slice() });
+          const doc = await loadingTask.promise;
+          if (token !== pdfJsRenderToken) {
+            try {
+              doc.destroy();
+            } catch (_error) {
+              /* ignore */
+            }
+            return;
+          }
+          pdfJsDoc = doc;
+          if (pdfJsStatus) {
+            pdfJsStatus.classList.add("hidden");
+          }
+          await renderPdfJsPages(doc, token);
+        } catch (error) {
+          if (token !== pdfJsRenderToken) {
+            return;
+          }
+          console.warn("PDF.js preview failed:", error);
+          showPdfFallback(
+            "Inline preview couldn't load. Open the PDF in your device viewer, or download it."
+          );
+        }
+      }
+
       function showGeneratedPdf(pdfData) {
         if (pdfUrl) {
           URL.revokeObjectURL(pdfUrl);
           pdfUrl = null;
         }
 
-        const file = new File([pdfData], PDF_PREVIEW_NAME, { type: "application/pdf" });
+        const bytes = toPdfUint8Array(pdfData);
+        const file = new File([bytes], PDF_PREVIEW_NAME, { type: "application/pdf" });
         pdfUrl = URL.createObjectURL(file);
         bindPdfActionLinks(pdfUrl);
 
@@ -2151,14 +2404,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         previewMeta.textContent = "Generated " + new Date().toLocaleTimeString();
 
-        const useFallback = browserBlocksInlinePdf();
-        if (useFallback) {
-          pdfFrame.classList.add("hidden");
-          pdfFrame.removeAttribute("src");
-          if (pdfFallback) {
-            pdfFallback.classList.remove("hidden");
-          }
+        if (browserBlocksInlinePdf()) {
+          pdfJsScaleFactor = 1;
+          showPdfWithPdfJs(bytes);
         } else {
+          clearPdfJsViewer();
+          if (pdfJsViewer) {
+            pdfJsViewer.classList.add("hidden");
+          }
           if (pdfFallback) {
             pdfFallback.classList.add("hidden");
           }
@@ -2169,6 +2422,32 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (window.matchMedia("(max-width: 920px)").matches && previewSection) {
           previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
         }
+      }
+
+      function bumpPdfJsZoom(delta) {
+        if (!browserBlocksInlinePdf() || !pdfJsDoc || !lastPdfBytes) {
+          return;
+        }
+        const next = Math.min(2.5, Math.max(0.6, Math.round((pdfJsScaleFactor + delta) * 10) / 10));
+        if (next === pdfJsScaleFactor) {
+          return;
+        }
+        pdfJsScaleFactor = next;
+        const token = pdfJsRenderToken;
+        renderPdfJsPages(pdfJsDoc, token).catch(function (error) {
+          console.warn("PDF.js zoom render failed:", error);
+        });
+      }
+
+      if (pdfJsZoomIn) {
+        pdfJsZoomIn.addEventListener("click", function () {
+          bumpPdfJsZoom(0.15);
+        });
+      }
+      if (pdfJsZoomOut) {
+        pdfJsZoomOut.addEventListener("click", function () {
+          bumpPdfJsZoom(-0.15);
+        });
       }
 
       function setLogCollapsed(collapsed) {
