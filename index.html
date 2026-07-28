@@ -856,7 +856,8 @@
       }
 
       .invite-form button[type="submit"],
-      .invite-form button.invite-copy-link {
+      .invite-form button.invite-copy-link,
+      .invite-form button.invite-cancel {
         width: 100%;
         min-height: var(--btn-height);
         padding: 0 var(--btn-pad-x);
@@ -871,6 +872,17 @@
       .invite-form button[type="submit"]:hover {
         background: var(--brand-strong);
         border-color: transparent;
+      }
+
+      .invite-form button.invite-cancel {
+        border-color: var(--border);
+        background: transparent;
+        color: var(--muted);
+      }
+
+      .invite-form button.invite-cancel:hover {
+        color: var(--text);
+        border-color: color-mix(in srgb, var(--border) 70%, var(--text));
       }
 
       .invite-status {
@@ -2694,6 +2706,7 @@
                   <input id="inviteEmail" name="email" type="email" autocomplete="email" placeholder="colleague@example.com" required>
                   <button type="submit" id="inviteSubmit">Send invite</button>
                   <button type="button" class="invite-copy-link" id="copyInviteLink">Copy invitation link</button>
+                  <button type="button" class="invite-cancel hidden" id="inviteCancel" hidden>Cancel upload</button>
                   <p class="invite-status" id="inviteStatus" aria-live="polite"></p>
                 </form>
                 <p class="hover-box-note" id="collaborateNote">Undertwig is free.</p>
@@ -2968,7 +2981,7 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260729b"></script>
-    <script src="cloud-storage.js?v=20260728ax"></script>
+    <script src="cloud-storage.js?v=20260729c"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -3755,6 +3768,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       const inviteEmail = document.getElementById("inviteEmail");
       const inviteStatus = document.getElementById("inviteStatus");
       const copyInviteLinkButton = document.getElementById("copyInviteLink");
+      const inviteCancelButton = document.getElementById("inviteCancel");
+      let inviteAbortController = null;
       const loginButton = document.getElementById("loginButton");
       const accountWrap = document.getElementById("accountWrap");
       const accountButton = document.getElementById("accountButton");
@@ -4188,6 +4203,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       function closeHoverBoxes() {
+        if (inviteAbortController) {
+          try {
+            inviteAbortController.abort();
+          } catch (_error) {
+            // Ignore.
+          }
+        }
         restoreHoverBoxHost(collaborateBox);
         restoreHoverBoxHost(accountBox);
         collaborateBox.classList.add("hidden");
@@ -4348,15 +4370,57 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
       }
 
-      function resetInviteForm() {
-        inviteForm.reset();
-        setInviteStatus("");
+      function setInviteBusy(busy) {
         const submit = document.getElementById("inviteSubmit");
         if (submit) {
-          submit.disabled = false;
+          submit.disabled = busy;
         }
         if (copyInviteLinkButton) {
-          copyInviteLinkButton.disabled = false;
+          copyInviteLinkButton.disabled = busy;
+        }
+        if (inviteEmail) {
+          inviteEmail.disabled = busy;
+        }
+        if (inviteCancelButton) {
+          inviteCancelButton.hidden = !busy;
+          inviteCancelButton.classList.toggle("hidden", !busy);
+          inviteCancelButton.disabled = false;
+        }
+      }
+
+      function beginInviteOperation() {
+        if (inviteAbortController) {
+          try {
+            inviteAbortController.abort();
+          } catch (_error) {
+            // Ignore.
+          }
+        }
+        inviteAbortController = new AbortController();
+        setInviteBusy(true);
+        return inviteAbortController;
+      }
+
+      function endInviteOperation(controller) {
+        if (inviteAbortController === controller) {
+          inviteAbortController = null;
+        }
+        setInviteBusy(false);
+      }
+
+      function resetInviteForm() {
+        if (inviteAbortController) {
+          try {
+            inviteAbortController.abort();
+          } catch (_error) {
+            // Ignore.
+          }
+          inviteAbortController = null;
+        }
+        inviteForm.reset();
+        setInviteStatus("");
+        setInviteBusy(false);
+        if (copyInviteLinkButton) {
           copyInviteLinkButton.textContent = "Copy invitation link";
         }
       }
@@ -4384,7 +4448,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
       }
 
-      async function prepareInviteLink() {
+      async function prepareInviteLink(signal) {
         const projectName = getActiveProjectName();
         if (!projectName) {
           throw new Error("Set a current project in the file tree before copying an invitation link.");
@@ -4407,7 +4471,21 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
 
         setInviteStatus("Uploading “" + projectName + "” to Google Drive / Undertwig…");
-        await UndertwigCloud.saveProject(state, { projectName: projectName });
+        await UndertwigCloud.saveProject(state, {
+          projectName: projectName,
+          signal: signal,
+          onProgress: function (message) {
+            if (signal && signal.aborted) {
+              return;
+            }
+            setInviteStatus(message || "Uploading to Google Drive…");
+          },
+        });
+        if (signal && signal.aborted) {
+          const cancelled = new Error("Upload cancelled.");
+          cancelled.name = "AbortError";
+          throw cancelled;
+        }
         if (UndertwigCloud.setActiveProjectByName) {
           UndertwigCloud.setActiveProjectByName(projectName);
         }
@@ -4545,6 +4623,22 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         event.stopPropagation();
       });
 
+      if (inviteCancelButton) {
+        inviteCancelButton.addEventListener("click", function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!inviteAbortController) {
+            return;
+          }
+          setInviteStatus("Cancelling upload…");
+          try {
+            inviteAbortController.abort();
+          } catch (_error) {
+            // Ignore.
+          }
+        });
+      }
+
       copyInviteLinkButton.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -4554,26 +4648,23 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
-        copyInviteLinkButton.disabled = true;
-        const submit = document.getElementById("inviteSubmit");
-        if (submit) {
-          submit.disabled = true;
-        }
+        const controller = beginInviteOperation();
         try {
-          const prepared = await prepareInviteLink();
+          const prepared = await prepareInviteLink(controller.signal);
           await copyTextToClipboard(prepared.inviteUrl);
           setInviteStatus("Invitation link copied.", "success");
           setStatus("Copied invitation link for “" + prepared.projectName + "”.");
         } catch (error) {
-          setInviteStatus(
-            (error && error.message) || "Could not copy the invitation link.",
-            "error"
-          );
-        } finally {
-          copyInviteLinkButton.disabled = false;
-          if (submit) {
-            submit.disabled = false;
+          if (error && error.name === "AbortError") {
+            setInviteStatus("Upload cancelled.");
+          } else {
+            setInviteStatus(
+              (error && error.message) || "Could not copy the invitation link.",
+              "error"
+            );
           }
+        } finally {
+          endInviteOperation(controller);
         }
       });
 
@@ -4592,11 +4683,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
-        const submit = document.getElementById("inviteSubmit");
-        submit.disabled = true;
-        if (copyInviteLinkButton) {
-          copyInviteLinkButton.disabled = true;
-        }
+        const controller = beginInviteOperation();
         try {
           const projectName = getActiveProjectName();
           if (!projectName) {
@@ -4612,11 +4699,34 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           // One popup for Drive + Gmail, opened from this click (no await before it).
           setInviteStatus("Allow Google permission if a popup appears…");
           await UndertwigInvite.connectForCollaboration();
+          if (controller.signal.aborted) {
+            throw Object.assign(new Error("Upload cancelled."), { name: "AbortError" });
+          }
+
+          const active = state.files[state.activeFile];
+          if (active && !active.binary) {
+            active.content = UndertwigEditor.getValue();
+          }
 
           setInviteStatus("Uploading “" + projectName + "” to Google Drive / Undertwig…");
-          await UndertwigCloud.saveProject(state, { projectName: projectName });
+          await UndertwigCloud.saveProject(state, {
+            projectName: projectName,
+            signal: controller.signal,
+            onProgress: function (message) {
+              if (controller.signal.aborted) {
+                return;
+              }
+              setInviteStatus(message || "Uploading to Google Drive…");
+            },
+          });
+          if (controller.signal.aborted) {
+            throw Object.assign(new Error("Upload cancelled."), { name: "AbortError" });
+          }
           setInviteStatus("Sharing “" + projectName + "” with " + email + "…");
           await UndertwigCloud.shareProjectWithEmail(email, "writer", projectName);
+          if (controller.signal.aborted) {
+            throw Object.assign(new Error("Upload cancelled."), { name: "AbortError" });
+          }
           const inviteUrl = buildInviteProjectUrl();
           setInviteStatus("Sending invitation email…");
           await UndertwigInvite.sendCollaborationInvite(email, inviteUrl);
@@ -4628,15 +4738,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           setStatus("Shared “" + projectName + "” and invited " + email + ".");
           renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
         } catch (error) {
-          setInviteStatus(
-            (error && error.message) || "Could not send the invitation.",
-            "error"
-          );
-        } finally {
-          submit.disabled = false;
-          if (copyInviteLinkButton) {
-            copyInviteLinkButton.disabled = false;
+          if (error && error.name === "AbortError") {
+            setInviteStatus("Upload cancelled.");
+          } else {
+            setInviteStatus(
+              (error && error.message) || "Could not send the invitation.",
+              "error"
+            );
           }
+        } finally {
+          endInviteOperation(controller);
         }
       });
 

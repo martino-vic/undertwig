@@ -29,6 +29,21 @@
   let cachedOwnerEmail = null;
   let projectFolderMap = {};
   let saveChain = Promise.resolve();
+  // Optional AbortSignal for the in-flight save/upload (invite / copy-link / Save).
+  let activeOperationSignal = null;
+
+  function createAbortError(message) {
+    const error = new Error(message || "Upload cancelled.");
+    error.name = "AbortError";
+    return error;
+  }
+
+  function throwIfAborted(signal) {
+    const active = signal || activeOperationSignal;
+    if (active && active.aborted) {
+      throw createAbortError();
+    }
+  }
 
   function auth() {
     return global.UndertwigAuth;
@@ -595,7 +610,9 @@
   }
 
   async function driveFetch(url, init, retried) {
+    throwIfAborted(init && init.signal);
     const token = await getAccessToken();
+    throwIfAborted(init && init.signal);
     const headers = Object.assign({}, (init && init.headers) || {}, {
       Authorization: "Bearer " + token,
     });
@@ -603,7 +620,7 @@
       typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
         ? AbortSignal.timeout(FETCH_TIMEOUT_MS)
         : null;
-    const userSignal = init && init.signal;
+    const userSignal = (init && init.signal) || activeOperationSignal;
     const signal = timeout || userSignal ? mergeAbortSignals([timeout, userSignal].filter(Boolean)) : undefined;
 
     let response;
@@ -616,7 +633,13 @@
         ? await request
         : await withTimeout(request, FETCH_TIMEOUT_MS, "Google Drive request timed out.");
     } catch (error) {
-      if (error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      if (error && error.name === "AbortError") {
+        if (userSignal && userSignal.aborted) {
+          throw createAbortError();
+        }
+        throw new Error("Google Drive request timed out.");
+      }
+      if (error && error.name === "TimeoutError") {
         throw new Error("Google Drive request timed out.");
       }
       throw error;
@@ -1354,8 +1377,12 @@
 
   async function syncFilesIntoExistingFolder(folderId, state, projectName, options) {
     const opts = options || {};
+    const signal = opts.signal;
+    const notify = typeof opts.onProgress === "function" ? opts.onProgress : null;
     const relativeFiles = filesForProject(state, projectName);
     const relativeFolders = foldersForProject(state, projectName);
+
+    throwIfAborted(signal);
 
     // Refresh owner email so transfers/deletes work for shared projects.
     try {
@@ -1363,22 +1390,39 @@
     } catch (_error) {
       // Continue; ownership helpers will no-op without an owner email.
     }
+    throwIfAborted(signal);
     await reclaimSharedOwnershipUnderFolder(folderId);
+    throwIfAborted(signal);
 
     if (opts.deleteMissing) {
       const deletions = await findDriveDeletions(folderId, state, projectName);
       for (let i = 0; i < deletions.length; i += 1) {
+        throwIfAborted(signal);
         await removeDriveItemFromProject(deletions[i]);
       }
     }
 
     for (let i = 0; i < relativeFolders.length; i += 1) {
+      throwIfAborted(signal);
       await ensurePathFolders(folderId, relativeFolders[i]);
     }
 
     const paths = Object.keys(relativeFiles);
     for (let i = 0; i < paths.length; i += 1) {
+      throwIfAborted(signal);
       const relPath = paths[i];
+      if (notify) {
+        notify(
+          "Uploading “" +
+            projectName +
+            "” to Google Drive (" +
+            (i + 1) +
+            "/" +
+            paths.length +
+            "): " +
+            relPath
+        );
+      }
       const parts = relPath.split("/");
       const fileName = parts.pop();
       const parentId = await ensurePathFolders(folderId, parts.join("/"));
@@ -1413,46 +1457,64 @@
 
   async function saveProject(state, options) {
     const opts = options || {};
-    const syncOpts = { deleteMissing: Boolean(opts.deleteMissing) };
+    const signal = opts.signal;
+    const syncOpts = {
+      deleteMissing: Boolean(opts.deleteMissing),
+      signal: signal,
+      onProgress: opts.onProgress,
+    };
     const run = async function () {
-      await connect();
-      const projectName =
-        opts.projectName || inferProjectName(state.activeFile) || listRootProjects(state)[0];
+      const previousSignal = activeOperationSignal;
+      if (signal) {
+        activeOperationSignal = signal;
+      }
+      try {
+        throwIfAborted(signal);
+        await connect();
+        throwIfAborted(signal);
+        const projectName =
+          opts.projectName || inferProjectName(state.activeFile) || listRootProjects(state)[0];
 
-      // Shared / invited projects always write into the owner's folder.
-      if (projectName && isCurrentProjectShared(projectName)) {
-        const sharedId = getMappedFolderId(projectName) || getProjectFolderId();
-        if (!sharedId) {
-          throw new Error("Missing shared project folder. Open the invite link again.");
+        // Shared / invited projects always write into the owner's folder.
+        if (projectName && isCurrentProjectShared(projectName)) {
+          const sharedId = getMappedFolderId(projectName) || getProjectFolderId();
+          if (!sharedId) {
+            throw new Error("Missing shared project folder. Open the invite link again.");
+          }
+          const meta = await refreshProjectMeta(sharedId);
+          if (!meta) {
+            throw new Error("Shared project folder is no longer accessible.");
+          }
+          setMappedProject(projectName, sharedId, cachedRole || "writer");
+          await syncFilesIntoExistingFolder(sharedId, state, projectName, syncOpts);
+          return { folderIds: [sharedId], role: cachedRole };
         }
-        const meta = await refreshProjectMeta(sharedId);
-        if (!meta) {
-          throw new Error("Shared project folder is no longer accessible.");
-        }
-        setMappedProject(projectName, sharedId, cachedRole || "writer");
-        await syncFilesIntoExistingFolder(sharedId, state, projectName, syncOpts);
-        return { folderIds: [sharedId], role: cachedRole };
-      }
 
-      if (isCollaborator() && !projectName) {
-        const sharedId = getProjectFolderId();
-        if (!sharedId) {
-          throw new Error("Missing shared project folder. Open the invite link again.");
+        if (isCollaborator() && !projectName) {
+          const sharedId = getProjectFolderId();
+          if (!sharedId) {
+            throw new Error("Missing shared project folder. Open the invite link again.");
+          }
+          throw new Error("Select a file inside the shared project before saving.");
         }
-        throw new Error("Select a file inside the shared project before saving.");
-      }
 
-      const projects = opts.projectName ? [opts.projectName] : listRootProjects(state);
-      if (!projects.length) {
-        await ensureUndertwigFolder();
-        writeRole("owner");
-        return { folderIds: [] };
+        const projects = opts.projectName ? [opts.projectName] : listRootProjects(state);
+        if (!projects.length) {
+          await ensureUndertwigFolder();
+          writeRole("owner");
+          return { folderIds: [] };
+        }
+        const folderIds = [];
+        for (let i = 0; i < projects.length; i += 1) {
+          throwIfAborted(signal);
+          folderIds.push(await syncOneProject(state, projects[i], syncOpts));
+        }
+        return { folderIds: folderIds, role: "owner" };
+      } finally {
+        if (signal && activeOperationSignal === signal) {
+          activeOperationSignal = previousSignal;
+        }
       }
-      const folderIds = [];
-      for (let i = 0; i < projects.length; i += 1) {
-        folderIds.push(await syncOneProject(state, projects[i], syncOpts));
-      }
-      return { folderIds: folderIds, role: "owner" };
     };
 
     saveChain = saveChain.then(run, run);
