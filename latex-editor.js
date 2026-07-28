@@ -24,6 +24,13 @@
 
   function prefersMobileEditor() {
     try {
+      const params = new URLSearchParams(global.location && global.location.search);
+      if (params.get("editor") === "cm" || params.get("editor") === "mobile") {
+        return true;
+      }
+      if (params.get("editor") === "monaco" || params.get("editor") === "desktop") {
+        return false;
+      }
       return global.matchMedia(MOBILE_QUERY).matches;
     } catch (_error) {
       return false;
@@ -357,32 +364,158 @@
   }
 
   function createCodeMirrorImpl() {
+    // Matching package versions only — mixing codemirror@6.0.1 basicSetup with a
+    // separately pinned @codemirror/view breaks the editor (duplicate copies).
+    // Pin state into view/commands so ViewPlugin decorations share one EditorState.
+    const cmDeps = "deps=@codemirror/state@6.5.2,@codemirror/view@6.36.2";
     return Promise.all([
-      import("https://esm.sh/codemirror@6.0.1"),
-      import("https://esm.sh/@codemirror/view@6.36.2"),
+      import("https://esm.sh/@codemirror/view@6.36.2?" + cmDeps),
       import("https://esm.sh/@codemirror/state@6.5.2"),
-      import("https://esm.sh/@codemirror/language@6.10.8"),
-      import("https://esm.sh/@codemirror/commands@6.8.0"),
-      import("https://esm.sh/@codemirror/legacy-modes@6.4.2/mode/stex?bundle"),
-      import("https://esm.sh/@codemirror/theme-one-dark@6.1.2"),
+      import("https://esm.sh/@codemirror/commands@6.8.0?" + cmDeps),
     ]).then(function (mods) {
-      const codemirror = mods[0];
-      const viewMod = mods[1];
-      const stateMod = mods[2];
-      const languageMod = mods[3];
-      const commandsMod = mods[4];
-      const stexMod = mods[5];
-      const oneDarkMod = mods[6];
+      const viewMod = mods[0];
+      const stateMod = mods[1];
+      const commandsMod = mods[2];
 
       const EditorView = viewMod.EditorView;
-      const basicSetup = codemirror.basicSetup;
+      const decoApi = viewMod.Decoration;
+      const ViewPlugin = viewMod.ViewPlugin;
       const EditorState = stateMod.EditorState;
+      const RangeSetBuilder = stateMod.RangeSetBuilder;
       const Compartment = stateMod.Compartment;
-      const StreamLanguage = languageMod.StreamLanguage;
       const indentWithTab = commandsMod.indentWithTab;
+      const defaultKeymap = commandsMod.defaultKeymap || [];
+      const historyKeymap = commandsMod.historyKeymap || [];
+      const history = commandsMod.history;
       const keymap = viewMod.keymap;
-      const stex = stexMod.stex || stexMod.stexMath;
-      const oneDark = oneDarkMod.oneDark;
+
+      if (!decoApi || !ViewPlugin || !RangeSetBuilder) {
+        throw new Error("CodeMirror decoration APIs unavailable.");
+      }
+
+      const markCache = Object.create(null);
+      function markFor(cls) {
+        if (!markCache[cls]) {
+          markCache[cls] = decoApi.mark({ class: cls });
+        }
+        return markCache[cls];
+      }
+
+      function tokenizeLatexLine(lineText, lineStart, builder) {
+        const len = lineText.length;
+        let i = 0;
+        while (i < len) {
+          const ch = lineText.charAt(i);
+          if (ch === "%") {
+            builder.add(
+              lineStart + i,
+              lineStart + len,
+              markFor("ut-tex-comment")
+            );
+            return;
+          }
+          if (ch === "\\") {
+            const start = i;
+            i += 1;
+            if (i < len && /[a-zA-Z@]/.test(lineText.charAt(i))) {
+              while (i < len && /[a-zA-Z@]/.test(lineText.charAt(i))) {
+                i += 1;
+              }
+            } else if (i < len) {
+              i += 1;
+            }
+            builder.add(lineStart + start, lineStart + i, markFor("ut-tex-cmd"));
+            continue;
+          }
+          if (ch === "{" || ch === "}" || ch === "[" || ch === "]") {
+            builder.add(
+              lineStart + i,
+              lineStart + i + 1,
+              markFor("ut-tex-brace")
+            );
+            i += 1;
+            continue;
+          }
+          if (ch === "$") {
+            const start = i;
+            const display = lineText.charAt(i + 1) === "$";
+            i += display ? 2 : 1;
+            const closer = display ? "$$" : "$";
+            const end = lineText.indexOf(closer, i);
+            if (end === -1) {
+              builder.add(
+                lineStart + start,
+                lineStart + len,
+                markFor("ut-tex-math")
+              );
+              return;
+            }
+            i = end + closer.length;
+            builder.add(
+              lineStart + start,
+              lineStart + i,
+              markFor("ut-tex-math")
+            );
+            continue;
+          }
+          if (/\d/.test(ch)) {
+            const start = i;
+            while (i < len && /[\d.]/.test(lineText.charAt(i))) {
+              i += 1;
+            }
+            const unit = lineText.slice(i).match(
+              /^(em|ex|pt|pc|bp|sp|cm|mm|in|mu)\b/
+            );
+            if (unit) {
+              i += unit[1].length;
+            }
+            builder.add(
+              lineStart + start,
+              lineStart + i,
+              markFor("ut-tex-number")
+            );
+            continue;
+          }
+          i += 1;
+        }
+      }
+
+      function buildLatexDecorations(view) {
+        const builder = new RangeSetBuilder();
+        if (languageForPath(pendingPath) !== "latex") {
+          return builder.finish();
+        }
+        // Full-doc tokenize: visibleRanges is often empty on first paint.
+        const doc = view.state.doc;
+        for (let n = 1; n <= doc.lines; n += 1) {
+          const line = doc.line(n);
+          tokenizeLatexLine(line.text, line.from, builder);
+        }
+        return builder.finish();
+      }
+
+      const UndertwigHighlight = ViewPlugin.define(
+        function (view) {
+          return {
+            decorations: buildLatexDecorations(view),
+            update: function (update) {
+              if (
+                update.docChanged ||
+                update.viewportChanged ||
+                update.transactions.length
+              ) {
+                this.decorations = buildLatexDecorations(update.view);
+              }
+            },
+          };
+        },
+        {
+          decorations: function (value) {
+            return value.decorations;
+          },
+        }
+      );
+
       const readOnlyCompartment = new Compartment();
 
       const undertwigTheme = EditorView.theme(
@@ -417,28 +550,42 @@
           "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
             backgroundColor: "#27354588",
           },
+          ".ut-tex-cmd": { color: "#d08a45" },
+          ".ut-tex-comment": { color: "#7f8b99", fontStyle: "italic" },
+          ".ut-tex-brace": { color: "#96a4b3" },
+          ".ut-tex-math": { color: "#8fbf8f" },
+          ".ut-tex-number": { color: "#c9a0dc" },
         },
         { dark: true }
       );
+
+      const extensions = [
+        viewMod.lineNumbers ? viewMod.lineNumbers() : [],
+        viewMod.highlightActiveLineGutter
+          ? viewMod.highlightActiveLineGutter()
+          : [],
+        viewMod.highlightActiveLine ? viewMod.highlightActiveLine() : [],
+        viewMod.drawSelection ? viewMod.drawSelection() : [],
+        history ? history() : [],
+        keymap.of(
+          [].concat(defaultKeymap).concat(historyKeymap).concat([indentWithTab])
+        ),
+        UndertwigHighlight,
+        undertwigTheme,
+        EditorView.lineWrapping,
+        readOnlyCompartment.of(EditorState.readOnly.of(pendingReadOnly)),
+        EditorView.updateListener.of(function (update) {
+          if (update.docChanged) {
+            emitChange();
+          }
+        }),
+      ];
 
       const view = new EditorView({
         parent: hostEl,
         state: EditorState.create({
           doc: pendingValue,
-          extensions: [
-            basicSetup,
-            keymap.of([indentWithTab]),
-            StreamLanguage.define(stex),
-            oneDark,
-            undertwigTheme,
-            EditorView.lineWrapping,
-            readOnlyCompartment.of(EditorState.readOnly.of(pendingReadOnly)),
-            EditorView.updateListener.of(function (update) {
-              if (update.docChanged) {
-                emitChange();
-              }
-            }),
-          ],
+          extensions: extensions,
         }),
       });
 
@@ -471,7 +618,12 @@
             view.requestMeasure();
           }
         },
-        setLanguageForPath: function () {},
+        setLanguageForPath: function (path) {
+          pendingPath = String(path || "");
+          view.dispatch({
+            userEvent: "undertwig.setLanguage",
+          });
+        },
         layout: function () {
           view.requestMeasure();
         },
