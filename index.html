@@ -4779,7 +4779,7 @@ Here is a picture of a hippo.
         } catch (error) {
           if (error && error.name === "AbortError") {
             engine = null;
-            setStatus("Conversion aborted.");
+            setStatus("Conversion cancelled.");
             return;
           }
           setStatus(`Conversion failed: ${error && error.message ? error.message : error}`, true);
