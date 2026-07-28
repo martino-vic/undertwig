@@ -1512,21 +1512,48 @@
     if (mimeType && mimeType.indexOf("text/") === 0) {
       return false;
     }
-    if (mimeType === "application/json") {
+    if (
+      mimeType === "application/json" ||
+      mimeType === "application/xml" ||
+      mimeType === "application/javascript" ||
+      mimeType === "application/x-tex" ||
+      mimeType === "application/x-latex"
+    ) {
       return false;
     }
-    const lower = String(path || "").toLowerCase();
-    return !(
-      lower.endsWith(".tex") ||
-      lower.endsWith(".bib") ||
-      lower.endsWith(".txt") ||
-      lower.endsWith(".md") ||
-      lower.endsWith(".csv") ||
-      lower.endsWith(".json") ||
-      lower.endsWith(".log") ||
-      lower.endsWith(".sty") ||
-      lower.endsWith(".cls")
-    );
+    const name = String(path || "").split("/").pop() || "";
+    const dot = name.lastIndexOf(".");
+    if (dot <= 0) {
+      return false;
+    }
+    const ext = name.slice(dot + 1).toLowerCase();
+    const binaryExts = {
+      pdf: 1,
+      png: 1,
+      jpg: 1,
+      jpeg: 1,
+      webp: 1,
+      bmp: 1,
+      tif: 1,
+      tiff: 1,
+      ico: 1,
+      svg: 1,
+      gif: 1,
+      avif: 1,
+      heic: 1,
+      heif: 1,
+      mp4: 1,
+      webm: 1,
+      mov: 1,
+      zip: 1,
+      gz: 1,
+      wasm: 1,
+      woff: 1,
+      woff2: 1,
+      ttf: 1,
+      otf: 1,
+    };
+    return Boolean(binaryExts[ext]);
   }
 
   /**

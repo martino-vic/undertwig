@@ -13,8 +13,10 @@ Deliberately heavy multi-file LaTeX project for manual Undertwig Convert checks.
 
 - Nested `\input` chapters under `chapters/`
 - Shared preamble macros in `inc/`
-- TikZ + PGFPlots figures under `figures/tikz/`
-- A PNG figure at `figures/hippo-grid.png`
+- TikZ + PGFPlots figures under `figures/tikz/` (`.tikz` sources open as text in Undertwig)
+- Image assets under `figures/` for format coverage:
+  - pdfLaTeX-friendly: `hippo.png`, `hippo-grid.png`, `hippo.jpg` / `hippo.jpeg`, `hippo-figure.pdf`
+  - also present for import/preview/mount tests: `hippo.webp`, `hippo.bmp`, `hippo.tif` / `hippo.tiff`, `hippo.ico`, `hippo.svg`
 - BibTeX database at `bib/references.bib`
 - Theorems, tcolorbox callouts, dense math, and wide tables
 

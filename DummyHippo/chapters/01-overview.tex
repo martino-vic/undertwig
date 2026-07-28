@@ -6,7 +6,7 @@
 converters. It is meant to be imported into Undertwig as a folder and converted
 locally. The document deliberately mixes nested \texttt{\textbackslash input}
 files, TikZ/PGFPlots figures, large equation blocks, theorem environments,
-colorbox callouts, tables, a bitmap figure, and a bibliography.
+colorbox callouts, tables, several figure formats, and a bibliography.
 
 \begin{hipponote}
 Import the entire \texttt{DummyHippo} folder (so that \texttt{main.tex} sits at
@@ -18,7 +18,8 @@ The project expands across several directories:
 \begin{itemize}[leftmargin=*]
   \item \texttt{inc/} --- shared packages, settings, and macros;
   \item \texttt{chapters/} --- long-form content with cross-chapter references;
-  \item \texttt{figures/} --- PNG assets and TikZ sources;
+  \item \texttt{figures/} --- raster/vector assets (PNG, JPEG, WebP, BMP, TIFF,
+        ICO, SVG, PDF) plus TikZ sources under \texttt{figures/tikz/};
   \item \texttt{bib/} --- BibTeX database.
 \end{itemize}
 
@@ -30,6 +31,18 @@ Wasm TeX Live mirror and on how faithfully the engine reproduces layout.}
   \includegraphics[width=0.72\linewidth]{hippo-grid.png}
   \caption{Raster stress figure: copper-tinted grid with a cartoon hippo blob.}
   \label{fig:hippo-grid}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.45\linewidth]{hippo.jpg}\hfill
+  \includegraphics[width=0.45\linewidth]{hippo-figure.pdf}
+  \caption{Formats pdfLaTeX includes natively: JPEG (\texttt{hippo.jpg}) and a
+  PDF figure (\texttt{hippo-figure.pdf}). Sibling assets
+  (\texttt{.jpeg}, \texttt{.webp}, \texttt{.bmp}, \texttt{.tif}/\texttt{.tiff},
+  \texttt{.ico}, \texttt{.svg}) also live under \texttt{figures/} so Undertwig
+  mounts them during Convert even when this engine cannot draw them.}
+  \label{fig:hippo-formats}
 \end{figure}
 
 \section{Notation}

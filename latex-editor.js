@@ -39,7 +39,7 @@
 
   function languageForPath(path) {
     const name = String(path || "").toLowerCase();
-    if (/\.(tex|sty|cls|clo|dtx|ltx)$/i.test(name)) return "latex";
+    if (/\.(tex|sty|cls|clo|dtx|ltx|tikz|pgf)$/i.test(name)) return "latex";
     if (/\.(md|markdown)$/i.test(name)) return "markdown";
     if (/\.json$/i.test(name)) return "json";
     return "plaintext";
@@ -61,7 +61,7 @@
     if (!existing) {
       monaco.languages.register({
         id: "latex",
-        extensions: [".tex", ".sty", ".cls", ".clo", ".ltx", ".dtx"],
+        extensions: [".tex", ".sty", ".cls", ".clo", ".ltx", ".dtx", ".tikz", ".pgf"],
         aliases: ["LaTeX", "latex", "TeX", "tex"],
         mimetypes: ["text/x-tex", "text/latex"],
       });

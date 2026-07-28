@@ -1870,12 +1870,12 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260728q"></script>
-    <script src="cloud-storage.js?v=20260728q"></script>
+    <script src="cloud-storage.js?v=20260728ax"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260728an"></script>
-    <script src="latex-editor.js?v=20260728aw"></script>
+    <script src="latex-editor.js?v=20260728ax"></script>
     <script>
 
       const DEMO_FIGURE_PNG_BASE64 =
@@ -2136,20 +2136,62 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       const STORAGE_KEY = "undertwig-latex-workspace-v2";
       const LEGACY_STORAGE_KEY = "undertwig-latex-project-v1";
-      const TEXT_EXTENSIONS = new Set([
-        "tex",
-        "bib",
-        "bbl",
-        "blg",
-        "aux",
-        "bcf",
-        "cls",
-        "sty",
-        "txt",
-        "md",
-        "csv",
-        "json",
-        "log",
+      // Known binary assets. Anything else (including unknown extensions and
+      // extensionless names) opens in the text editor by default.
+      const BINARY_EXTENSIONS = new Set([
+        "pdf",
+        "png",
+        "jpg",
+        "jpeg",
+        "webp",
+        "bmp",
+        "tif",
+        "tiff",
+        "ico",
+        "svg",
+        "gif",
+        "avif",
+        "heic",
+        "heif",
+        "mp4",
+        "webm",
+        "mov",
+        "avi",
+        "mkv",
+        "mp3",
+        "wav",
+        "ogg",
+        "flac",
+        "zip",
+        "gz",
+        "tgz",
+        "bz2",
+        "xz",
+        "7z",
+        "rar",
+        "wasm",
+        "woff",
+        "woff2",
+        "ttf",
+        "otf",
+        "eot",
+        "bin",
+        "dat",
+        "exe",
+        "dll",
+        "so",
+        "dylib",
+      ]);
+      const IMAGE_PREVIEW_EXTENSIONS = new Set([
+        "png",
+        "jpg",
+        "jpeg",
+        "webp",
+        "bmp",
+        "tif",
+        "tiff",
+        "ico",
+        "svg",
       ]);
       const state = loadProject();
       let engine = null;
@@ -3711,6 +3753,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           if (root && !next.folders.includes(root)) {
             next.folders.push(root);
           }
+          const file = next.files[path];
+          if (file) {
+            next.files[path] = coerceFileTyping(path, file);
+          }
         });
         const roots = listLocalRootProjects(next);
         if (next.currentProject && !roots.includes(next.currentProject)) {
@@ -4454,12 +4500,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       function imageMimeFromPath(path) {
-        const name = String(path || "").split("/").pop() || "";
-        const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+        const ext = fileExtension(path);
+        if (!IMAGE_PREVIEW_EXTENSIONS.has(ext)) {
+          return "";
+        }
         if (ext === "png") return "image/png";
         if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
-        if (ext === "gif") return "image/gif";
         if (ext === "webp") return "image/webp";
+        if (ext === "bmp") return "image/bmp";
+        if (ext === "tif" || ext === "tiff") return "image/tiff";
+        if (ext === "ico") return "image/x-icon";
         if (ext === "svg") return "image/svg+xml";
         return "";
       }
@@ -4505,14 +4555,22 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       function render() {
         renderTree();
-        const file = state.files[state.activeFile];
-        activeFileName.textContent = state.activeFile || "No file selected";
+        const path = state.activeFile;
+        let file = state.files[path];
+        if (file) {
+          const coerced = coerceFileTyping(path, file);
+          if (coerced !== file) {
+            state.files[path] = coerced;
+            file = coerced;
+          }
+        }
+        activeFileName.textContent = path || "No file selected";
         UndertwigEditor.setReadOnly(!file || Boolean(file.binary));
         UndertwigEditor.setValue(
           file && !file.binary ? file.content : "",
-          state.activeFile || ""
+          path || ""
         );
-        renderAssetPreview(file, state.activeFile);
+        renderAssetPreview(file, path);
         updateMeta();
       }
 
@@ -6086,9 +6144,55 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           .join("/");
       }
 
+      function fileExtension(path) {
+        const name = String(path || "").split("/").pop() || "";
+        const dot = name.lastIndexOf(".");
+        // No extension, or dotfile like ".gitignore" → treat as extensionless text.
+        if (dot <= 0) {
+          return "";
+        }
+        return name.slice(dot + 1).toLowerCase();
+      }
+
       function isTextFile(path) {
-        const extension = path.split(".").pop().toLowerCase();
-        return TEXT_EXTENSIONS.has(extension);
+        const extension = fileExtension(path);
+        if (!extension) {
+          return true;
+        }
+        if (BINARY_EXTENSIONS.has(extension)) {
+          return false;
+        }
+        // Unknown extensions default to the text editor.
+        return true;
+      }
+
+      function coerceFileTyping(path, file) {
+        if (!file) {
+          return file;
+        }
+        const wantText = isTextFile(path);
+        if (wantText && file.binary) {
+          try {
+            const bytes = base64ToBytes(file.content || "");
+            const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+            return {
+              name: file.name,
+              content: text,
+              binary: false,
+            };
+          } catch (_error) {
+            return {
+              name: file.name,
+              content: String(file.content || ""),
+              binary: false,
+            };
+          }
+        }
+        if (!wantText && !file.binary && typeof file.content === "string") {
+          // Leave as-is; rare path (e.g. renamed). Import paths set binary correctly.
+          return file;
+        }
+        return file;
       }
 
       function bytesToBase64(bytes) {
