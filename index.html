@@ -1470,7 +1470,7 @@
         .app.explorer-collapsed {
           display: grid;
           grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-          grid-template-rows: auto auto minmax(0, 1fr);
+          grid-template-rows: auto minmax(0, 1fr);
           height: 100dvh;
           max-height: 100dvh;
           min-height: 0;
@@ -1483,41 +1483,45 @@
           border: 0;
         }
 
+        /* One toolbar row only — brand/account bar would steal vertical space */
         .sidebar-head {
-          grid-column: 1 / -1;
-          grid-row: 1;
-          order: unset;
-          position: static;
-          min-height: 40px;
-          padding: 4px 10px;
-          box-shadow: none;
+          display: none !important;
         }
 
         .workspace .topbar {
           grid-column: 1 / -1;
-          grid-row: 2;
+          grid-row: 1;
           order: unset;
           position: relative;
+          top: auto;
+          z-index: 5;
+          display: flex;
           flex-direction: row;
           flex-wrap: nowrap;
           align-items: center;
-          justify-content: center;
-          gap: 8px;
-          min-height: 44px;
-          padding: 4px 10px;
+          justify-content: flex-start;
+          gap: 10px;
+          height: 48px;
+          min-height: 48px;
+          max-height: 48px;
+          padding: 0 10px;
+          border-bottom: 1px solid var(--border);
+          background: #16202a;
           box-shadow: none;
+          overflow: hidden;
         }
 
         .workspace .file-title {
           order: 0;
-          position: absolute;
-          left: 10px;
-          top: 50%;
-          transform: translateY(-50%);
-          flex: 0 1 auto;
+          position: static;
+          top: auto;
+          left: auto;
+          transform: none;
+          flex: 0 1 7.5rem;
           width: auto;
-          max-width: min(28vw, 160px);
-          z-index: 1;
+          max-width: 7.5rem;
+          min-width: 0;
+          z-index: auto;
         }
 
         .workspace .file-title span {
@@ -1530,21 +1534,29 @@
           flex-wrap: nowrap;
           align-items: center;
           justify-content: center;
-          width: 100%;
+          gap: 6px;
+          width: auto;
+          min-width: 0;
           max-width: none;
           margin: 0;
           overflow-x: auto;
-          gap: 6px;
+          overflow-y: hidden;
           -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+        }
+
+        .workspace .topbar-actions::-webkit-scrollbar {
+          display: none;
         }
 
         .workspace .convert-button {
           order: -20;
           flex: 0 0 auto;
-          min-height: 40px;
-          min-width: 7.5rem;
-          padding: 0 18px;
+          min-height: 36px;
+          min-width: 6.75rem;
+          padding: 0 16px;
           font-size: 14px;
+          font-weight: 700;
         }
 
         .workspace .convert-busy {
@@ -1554,15 +1566,39 @@
         .workspace .collaborate-wrap,
         .workspace .save-button,
         .workspace .bib-wrap,
-        .workspace .bib-button,
-        .workspace .engine-wrap {
+        .workspace .engine-wrap,
+        .workspace #loginButton,
+        .workspace #accountWrap {
           order: 0;
           flex: 0 0 auto;
         }
 
+        /* Long labels crowd the short landscape toolbar */
+        .workspace .bib-button,
+        .workspace #collaborate svg {
+          display: none !important;
+        }
+
+        .workspace #collaborate {
+          min-width: 0;
+          padding: 0 10px;
+          font-size: 13px;
+        }
+
+        .workspace .save-button svg {
+          display: none;
+        }
+
+        .workspace .toolbar-button,
+        .workspace .engine-button {
+          min-height: 36px;
+          padding: 0 10px;
+          font-size: 13px;
+        }
+
         .workspace .editor-wrap {
           grid-column: 1;
-          grid-row: 3;
+          grid-row: 2;
           order: unset;
           display: flex;
           flex-direction: column;
@@ -1598,7 +1634,7 @@
 
         .preview {
           grid-column: 2;
-          grid-row: 3;
+          grid-row: 2;
           order: unset;
           display: flex;
           flex-direction: column;
@@ -1611,8 +1647,16 @@
           border-left: 0;
         }
 
+        .preview > .topbar {
+          flex: 0 0 40px;
+          height: 40px;
+          min-height: 40px;
+          max-height: 40px;
+          padding: 0 10px;
+        }
+
         .preview .preview-title {
-          padding: 6px 10px;
+          padding: 0;
         }
 
         .preview .preview-title span {
@@ -3706,6 +3750,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       (function syncMobileAuthPlacement() {
         const mobileQuery = window.matchMedia("(max-width: 920px)");
+        const landscapeQuery = window.matchMedia(
+          "(max-width: 920px) and (orientation: landscape)"
+        );
         const sidebarHead = document.querySelector(".sidebar-head");
         const topbarActions = document.querySelector(".workspace .topbar-actions");
         const saveButton = document.getElementById("saveProject");
@@ -3717,7 +3764,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           if (!sidebarHead || !topbarActions || !loginButton) {
             return;
           }
-          if (mobileQuery.matches) {
+          // Portrait mobile: Account lives in the brand bar.
+          // Landscape mobile / desktop: Account lives in the action toolbar.
+          if (mobileQuery.matches && !landscapeQuery.matches) {
             if (loginButton.parentElement !== sidebarHead) {
               sidebarHead.appendChild(loginButton);
             }
@@ -3726,7 +3775,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             }
             return;
           }
-          // Desktop: Collaborate → Log in → Account → Save …
+          // Desktop + phone landscape: Collaborate → Log in → Account → Save …
           if (collaborateWrap && loginButton.parentElement !== topbarActions) {
             topbarActions.insertBefore(loginButton, collaborateWrap.nextSibling);
           } else if (loginButton.parentElement !== topbarActions && saveButton) {
@@ -3738,10 +3787,20 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
 
         placeAuthControls();
+        function onPlacementQueryChange() {
+          placeAuthControls();
+          if (window.UndertwigEditor && UndertwigEditor.layout) {
+            window.setTimeout(function () {
+              UndertwigEditor.layout();
+            }, 250);
+          }
+        }
         if (typeof mobileQuery.addEventListener === "function") {
-          mobileQuery.addEventListener("change", placeAuthControls);
+          mobileQuery.addEventListener("change", onPlacementQueryChange);
+          landscapeQuery.addEventListener("change", onPlacementQueryChange);
         } else if (typeof mobileQuery.addListener === "function") {
-          mobileQuery.addListener(placeAuthControls);
+          mobileQuery.addListener(onPlacementQueryChange);
+          landscapeQuery.addListener(onPlacementQueryChange);
         }
       })();
 
