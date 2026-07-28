@@ -20,7 +20,7 @@
   );
   const BUSYTEX_TEXLIVE =
     "https://texlyre.github.io/texlyre-busytex/core/busytex";
-  const BUSYTEX_WORKER = "vendor/busytex/busytex_worker.js?v=20260728af";
+  const BUSYTEX_WORKER = "vendor/busytex/busytex_worker.js?v=20260728ak";
   // BusyTeX kpse_remote expects GET /<format_id>/<filename> (not the pdftex/ prefix).
   const TEXLIVE_REMOTE = "https://texlive2026.texlyre.org/";
   const TEXLIVE_TEX_FORMAT = 26;
@@ -719,6 +719,7 @@
         ok: Boolean(result && result.status === 0 && result.pdf),
         pdf: result && result.pdf,
         log: (result && result.log) || "No compiler log returned.",
+        aux: auxFiles,
         engine: engine,
         label: LABELS.pdflatex,
       };
@@ -818,31 +819,61 @@
         return;
       }
 
+      let settled = false;
+      const timeoutMs = 90000;
       const timeout = setTimeout(function () {
-        reject(new Error("Bibliography helper timed out."));
-      }, 300000);
+        if (settled) {
+          return;
+        }
+        settled = true;
+        // Drop a wedged worker so the next Bibliography/Convert can recover.
+        closeLuaWorker();
+        luaReady = false;
+        luaInitPromise = null;
+        reject(
+          new Error(
+            "Bibliography helper timed out after " +
+              Math.round(timeoutMs / 1000) +
+              "s. Convert once, then try Bibliography again."
+          )
+        );
+      }, timeoutMs);
+
+      const finish = function (fn) {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        fn();
+      };
 
       luaWorker.onmessage = function (event) {
         const data = event && event.data ? event.data : {};
         if (data.print && typeof notify === "function") {
           notify(String(data.print));
         }
-        if (data.tool || data.outputs || data.log) {
-          clearTimeout(timeout);
-          resolve(data);
+        // Final bibtool responses always include `tool` (bibtex | prepare_bcf).
+        // Do not treat progress `{print}` or empty partial objects as completion.
+        if (data.tool) {
+          finish(function () {
+            resolve(data);
+          });
           return;
         }
         if (data.exception) {
-          clearTimeout(timeout);
-          reject(new Error(String(data.exception)));
+          finish(function () {
+            reject(new Error(String(data.exception)));
+          });
         }
       };
 
       luaWorker.onerror = function (error) {
-        clearTimeout(timeout);
-        reject(
-          new Error((error && error.message) || "Bibliography worker failed.")
-        );
+        finish(function () {
+          reject(
+            new Error((error && error.message) || "Bibliography worker failed.")
+          );
+        });
       };
 
       luaWorker.postMessage({
@@ -852,6 +883,67 @@
         main_tex_path: "main.tex",
         main_job_path: "main.tex",
       });
+    });
+  }
+
+  function findMainAux(projectFiles) {
+    const keys = Object.keys(projectFiles || {});
+    return (
+      keys.find(function (path) {
+        return path === "main.aux" || /(^|\/)main\.aux$/i.test(path);
+      }) || null
+    );
+  }
+
+  function mergeAuxIntoProjectFiles(projectFiles, auxFiles) {
+    const next = Object.assign({}, projectFiles || {});
+    Object.keys(auxFiles || {}).forEach(function (path) {
+      const key = String(path).replace(/^\/+/, "");
+      if (!key || auxFiles[path] == null) {
+        return;
+      }
+      next[key] = {
+        name: key.split("/").pop(),
+        content: String(auxFiles[path]),
+        binary: false,
+      };
+    });
+    return next;
+  }
+
+  function closeEngineQuietly(engine) {
+    if (!engine || !engine.closeWorker) {
+      return;
+    }
+    try {
+      engine.closeWorker();
+    } catch (_error) {
+      // Ignore.
+    }
+  }
+
+  /**
+   * BibTeX needs main.aux. Prefer an existing file; otherwise create it with
+   * pdfLaTeX (SwiftLaTeX) instead of BusyTeX's LuaLaTeX fallback, which can hang.
+   */
+  function ensureBibtexAux(projectFiles, notify) {
+    if (findMainAux(projectFiles)) {
+      return Promise.resolve({ files: projectFiles, wroteAux: false });
+    }
+
+    notify("Creating main.aux with pdfLaTeX before BibTeX…");
+    return compileWithPdfLaTeX(projectFiles, { onProgress: notify }).then(function (
+      result
+    ) {
+      const aux = (result && result.aux) || {};
+      const merged = mergeAuxIntoProjectFiles(projectFiles, aux);
+      closeEngineQuietly(result && result.engine);
+      if (!findMainAux(merged)) {
+        throw new Error(
+          "Could not create main.aux. Convert the project once, then run Bibliography."
+        );
+      }
+      return { files: merged, wroteAux: true, aux: aux };
     });
   }
 
@@ -1030,14 +1122,48 @@
     const tool = selectedBibTool;
     const toolLabel = getSelectedBibToolLabel();
 
-    return ensureLuaWorker(function (message) {
-      const text = String(message || "");
-      if (/Preparing|Downloading|complete/i.test(text)) {
-        notify("Downloading LuaLaTeX assets… " + text);
-      } else {
-        notify(text);
-      }
-    })
+    const loadWorker = function () {
+      return ensureLuaWorker(function (message) {
+        const text = String(message || "");
+        if (/Preparing|Downloading|complete/i.test(text)) {
+          notify("Downloading LuaLaTeX assets… " + text);
+        } else {
+          notify(text);
+        }
+      });
+    };
+
+    if (tool !== BIBER) {
+      // BibTeX: create aux with pdfLaTeX if needed, then bibtex8 only (no Lua pass).
+      return ensureBibtexAux(projectFiles, notify).then(function (auxResult) {
+        return loadWorker().then(function () {
+          notify("Running " + toolLabel + "…");
+          const files = projectFilesToBusyTex(auxResult.files);
+          return postBibToolToWorker(files, tool, notify).then(function (data) {
+            const outputs = Object.assign({}, data.outputs || {});
+            // Surface freshly created aux so the app can persist it.
+            if (auxResult.wroteAux && auxResult.aux) {
+              Object.keys(auxResult.aux).forEach(function (path) {
+                const key = String(path).replace(/^\/+/, "");
+                if (key && outputs[key] == null && auxResult.aux[path] != null) {
+                  outputs[key] = String(auxResult.aux[path]);
+                }
+              });
+            }
+            return {
+              ok: Boolean(data.ok),
+              tool: data.tool || tool,
+              label: toolLabel,
+              log: data.log || "No bibliography log returned.",
+              outputs: outputs,
+              exit_code: data.exit_code,
+            };
+          });
+        });
+      });
+    }
+
+    return loadWorker()
       .then(function () {
         return ensureLuaTexJa(notify);
       })
@@ -1046,20 +1172,6 @@
       })
       .then(function () {
         const files = mergeLuaEngineFiles(projectFiles);
-        if (tool !== BIBER) {
-          notify("Running " + toolLabel + "…");
-          return postBibToolToWorker(files, tool, notify).then(function (data) {
-            return {
-              ok: Boolean(data.ok),
-              tool: data.tool || tool,
-              label: toolLabel,
-              log: data.log || "No bibliography log returned.",
-              outputs: data.outputs || {},
-              exit_code: data.exit_code,
-            };
-          });
-        }
-
         notify("Preparing Biber control file (.bcf)…");
         return postBibToolToWorker(files, BIBER, notify).then(function (prep) {
           const preparedFiles = mergePreparedOutputs(projectFiles, prep && prep.outputs);

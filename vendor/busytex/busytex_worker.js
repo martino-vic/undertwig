@@ -1,5 +1,5 @@
 importScripts("busytex_pipeline.js");
-importScripts("busytex_bibtool.js");
+importScripts("busytex_bibtool.js?v=20260728ak");
 
 self.pipeline = null;
 

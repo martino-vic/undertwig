@@ -141,30 +141,25 @@
 
     const relativeDir = PATH.dirname(mainTexPath || "main.tex");
     const job = PATH.basename(mainTexPath || "main.tex").replace(/\.tex$/i, "");
-    const mainFile = PATH.basename(mainTexPath || "main.tex");
     const workDir = PATH.join(this.project_dir, relativeDir === "." ? "" : relativeDir);
     FS.chdir(workDir || this.project_dir);
 
     const auxName = job + ".aux";
+    // Do not fall back to a full LuaLaTeX pass here: BusyTeX package resolution
+    // can hang the worker (status stuck on "/bin/busytex stderr: (end of list)").
+    // The main thread ensures main.aux exists via pdfLaTeX before posting bibtex.
     if (!FS.analyzePath(auxName).exists) {
-      this.print("$ # missing " + auxName + ", running one LuaLaTeX pass first");
-      const latexResult = this._runOneLuaPass(Module, mainFile);
-      if (!FS.analyzePath(auxName).exists) {
-        return {
-          ok: false,
-          exit_code: latexResult.exit_code || 1,
-          tool: "bibtex",
-          log:
-            "Could not create " +
-            auxName +
-            " for BibTeX.\n" +
-            "Convert the project once first, then run Bibliography.\n\n" +
-            (latexResult.stdout || "") +
-            "\n" +
-            (latexResult.stderr || ""),
-          outputs: {},
-        };
-      }
+      return {
+        ok: false,
+        exit_code: 1,
+        tool: "bibtex",
+        log:
+          "Could not find " +
+          auxName +
+          " for BibTeX.\n" +
+          "Convert the project once first, then run Bibliography.",
+        outputs: {},
+      };
     }
 
     this.print("$ busytex bibtex8 --8bit " + job);
