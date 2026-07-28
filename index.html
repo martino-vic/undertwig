@@ -1545,7 +1545,7 @@ Here is a picture of a hippo.
       let convertSpinnerFrame = 0;
       let conversionAbortController = null;
       const CONVERT_BUTTON_LABEL = "Convert";
-      const ABORT_BUTTON_LABEL = "Abort";
+      const ABORT_BUTTON_LABEL = "Cancel";
       const syncProjectButton = document.getElementById("syncProject");
       const SYNC_BUTTON_LABEL = "Load";
       let syncSpinnerTimer = null;
@@ -4700,7 +4700,7 @@ Here is a picture of a hippo.
       async function compileProject() {
         if (conversionAbortController) {
           conversionAbortController.abort();
-          setStatus("Aborting conversion…");
+          setStatus("Cancelling conversion…");
           return;
         }
 
@@ -4721,7 +4721,7 @@ Here is a picture of a hippo.
         bibliographyButton.disabled = true;
         convertButton.setAttribute("aria-busy", "true");
         convertButton.textContent = ABORT_BUTTON_LABEL;
-        convertButton.title = "Abort the current conversion";
+        convertButton.title = "Cancel the current conversion";
         startConvertSpinner();
         setStatus("Loading " + engineLabel + "…");
         compileLog.textContent = "";
