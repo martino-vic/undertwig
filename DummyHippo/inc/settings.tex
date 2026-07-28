@@ -1,0 +1,47 @@
+\setlength{\parskip}{0.35em}
+\setlength{\parindent}{1.2em}
+
+\definecolor{hippoCopper}{HTML}{B87333}
+\definecolor{hippoInk}{HTML}{18212B}
+\definecolor{hippoMist}{HTML}{E8EDF3}
+
+\newtcolorbox{hipponote}[1][]{%
+  enhanced,breakable,
+  colback=hippoMist!40,colframe=hippoCopper,
+  fonttitle=\bfseries,title={Note},#1
+}
+
+\newtcolorbox{hippowarn}[1][]{%
+  enhanced,breakable,
+  colback=orange!8,colframe=orange!70!black,
+  fonttitle=\bfseries,title={Warning},#1
+}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[chapter]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\newtheorem{assumption}[theorem]{Assumption}
+
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\newcommand{\abs}[1]{\left\lvert#1\right\rvert}
+\newcommand{\inner}[2]{\left\langle#1,#2\right\rangle}
+\newcommand{\pd}[2]{\frac{\partial #1}{\partial #2}}
+\newcommand{\pdd}[2]{\frac{\partial^{2} #1}{\partial #2^{2}}}
+\newcommand{\Hippo}{\textsc{DummyHippo}}

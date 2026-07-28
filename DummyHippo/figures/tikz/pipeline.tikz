@@ -1,0 +1,30 @@
+\begin{tikzpicture}[
+  font=\small,
+  box/.style={draw=hippoCopper,thick,rounded corners=2pt,align=center,
+    fill=hippoMist!50,minimum height=1.1cm,minimum width=2.4cm},
+  arr/.style={-Latex,thick,hippoInk}
+]
+\node[box] (src) {Sources};
+\node[box,right=1.1cm of src] (parse) {Parse\\macro expand};
+\node[box,right=1.1cm of parse] (layout) {Page\\builder};
+\node[box,right=1.1cm of layout] (pdf) {PDF\\shipout};
+
+\draw[arr] (src) -- (parse);
+\draw[arr] (parse) -- (layout);
+\draw[arr] (layout) -- (pdf);
+
+\node[box,below=1.3cm of parse,fill=orange!12] (tikz) {TikZ /\\PGFPlots};
+\node[box,below=1.3cm of layout,fill=orange!12] (fonts) {Fonts /\\metrics};
+
+\draw[arr] (tikz.north) -- (parse.south);
+\draw[arr] (fonts.north) -- (layout.south);
+
+\begin{scope}[on background layer]
+  \node[draw=hippoCopper!60,dashed,inner sep=8pt,fit=(parse)(layout)(tikz)(fonts),
+    label={[text=hippoCopper]above:Wasm engine hot path}] {};
+\end{scope}
+
+\draw[decorate,decoration={brace,amplitude=6pt,mirror},hippoCopper]
+  ([yshift=-4pt]src.south west) -- ([yshift=-4pt]pdf.south east)
+  node[midway,below=8pt,font=\scriptsize] {end-to-end Convert latency};
+\end{tikzpicture}

@@ -1,0 +1,20 @@
+\begin{tikzpicture}[
+  every node/.style={circle,draw=hippoInk,thick,inner sep=1.5pt,font=\tiny},
+  every edge/.style={draw=hippoCopper!80,thick}
+]
+\def\N{12}
+\foreach \i in {1,...,\N}{
+  \pgfmathsetmacro{\ang}{90-(\i-1)*360/\N}
+  \node (n\i) at (\ang:2.6) {$v_{\i}$};
+}
+\foreach \i in {1,...,\N}{
+  \pgfmathtruncatemacro{\j}{Mod(\i,\N)+1}
+  \pgfmathtruncatemacro{\k}{Mod(\i+2,\N)+1}
+  \pgfmathtruncatemacro{\m}{Mod(\i+4,\N)+1}
+  \draw (n\i) edge (n\j);
+  \draw (n\i) edge (n\k);
+  \draw[hippoInk!40] (n\i) edge (n\m);
+}
+\node[draw=hippoCopper,rectangle,rounded corners,inner sep=3pt,font=\scriptsize]
+  at (0,0) {mesh};
+\end{tikzpicture}

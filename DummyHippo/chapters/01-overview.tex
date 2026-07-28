@@ -1,0 +1,65 @@
+\chapter{Overview and Motivation}
+\label{ch:overview}
+
+\section{What this project is for}
+\Hippo{} is a synthetic, multi-file \LaTeX{} project built to stress browser-based
+converters. It is meant to be imported into Undertwig as a folder and converted
+locally. The document deliberately mixes nested \texttt{\textbackslash input}
+files, TikZ/PGFPlots figures, large equation blocks, theorem environments,
+colorbox callouts, tables, a bitmap figure, and a bibliography.
+
+\begin{hipponote}
+Import the entire \texttt{DummyHippo} folder (so that \texttt{main.tex} sits at
+the project root). Prefer pdfLaTeX first; LuaLaTeX is a useful second check.
+\end{hipponote}
+
+\section{Architecture of the source tree}
+The project expands across several directories:
+\begin{itemize}[leftmargin=*]
+  \item \texttt{inc/} --- shared packages, settings, and macros;
+  \item \texttt{chapters/} --- long-form content with cross-chapter references;
+  \item \texttt{figures/} --- PNG assets and TikZ sources;
+  \item \texttt{bib/} --- BibTeX database.
+\end{itemize}
+
+\stressparagraph{Conversion quality depends on package availability in the
+Wasm TeX Live mirror and on how faithfully the engine reproduces layout.}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.72\linewidth]{hippo-grid.png}
+  \caption{Raster stress figure: copper-tinted grid with a cartoon hippo blob.}
+  \label{fig:hippo-grid}
+\end{figure}
+
+\section{Notation}
+\begin{definition}[State space]
+Let $X\subseteq\R^{d}$ be compact and nonempty. A trajectory is a map
+$x:[0,T]\to X$ that is absolutely continuous and satisfies the ODE constraint
+in \cref{eq:ode-core}.
+\end{definition}
+
+\begin{equation}
+\label{eq:ode-core}
+\dot x(t)=f\bigl(x(t),u(t)\bigr),\qquad
+u(t)\in U\subseteq\R^{m},\qquad
+x(0)=x_{0}.
+\end{equation}
+
+\begin{lemma}[Lipschitz well-posedness]
+If $f$ is globally Lipschitz in $x$ uniformly in $u\in U$, then
+\cref{eq:ode-core} admits a unique absolutely continuous solution for every
+measurable control $u$.
+\end{lemma}
+
+\begin{proof}
+Picard--Lindelöf on successive intervals, then glue. Details appear in
+\cref{ch:analysis}.
+\end{proof}
+
+\section{Roadmap}
+\Cref{ch:analysis} develops analytic estimates;
+\cref{ch:geometry} loads geometry-heavy TikZ;
+\cref{ch:numerics} runs PGFPlots and dense linear algebra displays;
+\cref{ch:systems} layers interconnected diagrams;
+\cref{ch:appendix} dumps additional symbolic mass for the compiler.
