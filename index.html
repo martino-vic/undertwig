@@ -7,16 +7,13 @@
     <title>Undertwig LaTeX Editor</title>
     <script>
       (function () {
-        var key = "undertwig-prefer-browser-v1";
         try {
-          if (localStorage.getItem(key) === "1") {
-            document.documentElement.classList.add("prefer-browser");
-            return;
-          }
+          // Always show the app gate again after a refresh on mobile.
+          localStorage.removeItem("undertwig-prefer-browser-v1");
         } catch (error) {
           /* ignore */
         }
-        if (window.matchMedia("(max-width: 920px)").matches) {
+        if (window.matchMedia("(max-width: 1180px)").matches) {
           document.documentElement.classList.add("mobile-gate");
         }
       })();
@@ -1364,6 +1361,90 @@
         border-color: transparent;
       }
 
+      .get-app-bar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 180;
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        min-height: 52px;
+        padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+        border-top: 1px solid var(--border);
+        background: color-mix(in srgb, #16202a 94%, transparent);
+        box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.28);
+        backdrop-filter: blur(10px);
+      }
+
+      .get-app-bar-copy {
+        min-width: 0;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 650;
+        line-height: 1.25;
+      }
+
+      .get-app-bar-copy span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .get-app-bar-actions {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .get-app-bar-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 40px;
+        padding: 0 14px;
+        border: 1px solid transparent;
+        border-radius: var(--btn-radius);
+        background: var(--brand);
+        color: var(--text);
+        font-family: var(--btn-font);
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .get-app-bar-button:hover {
+        background: var(--brand-strong);
+      }
+
+      .get-app-bar-link {
+        color: var(--brand-strong);
+        font-size: 12px;
+        font-weight: 650;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .get-app-bar-link:hover {
+        text-decoration: underline;
+      }
+
+      @media (max-width: 1180px) {
+        html:not(.mobile-gate) .get-app-bar {
+          display: flex;
+        }
+
+        html:not(.mobile-gate) .app {
+          padding-bottom: calc(52px + env(safe-area-inset-bottom));
+        }
+      }
+
       @media (max-width: 920px) {
         body {
           overflow: auto;
@@ -1697,6 +1778,15 @@
           overflow: hidden;
           height: 100%;
           height: 100dvh;
+        }
+
+        html:not(.mobile-gate) .app,
+        html:not(.mobile-gate) .app.explorer-collapsed,
+        html:not(.mobile-gate) .app.preview-collapsed,
+        html:not(.mobile-gate) .app.explorer-collapsed.preview-collapsed {
+          height: calc(100dvh - 52px - env(safe-area-inset-bottom)) !important;
+          max-height: calc(100dvh - 52px - env(safe-area-inset-bottom));
+          padding-bottom: 0 !important;
         }
 
         .app,
@@ -2487,7 +2577,7 @@
         </div>
         <h1 id="mobileAppGateTitle">Get the app for a smoother mobile experience</h1>
         <p id="mobileAppGateCopy">
-          Editing and compiling on a phone works best in the native apps. You can still continue here in your browser.
+          Editing and compiling on a phone or tablet works best in the native apps. You can still continue here in your browser.
         </p>
         <div class="mobile-app-gate-stores">
           <a class="mobile-store-button" id="mobileAppIos" href="https://apps.apple.com/" target="_blank" rel="noopener noreferrer">
@@ -2512,6 +2602,18 @@
         <button class="mobile-continue-browser" id="mobileContinueBrowser" type="button">
           Continue in browser
         </button>
+      </div>
+    </div>
+
+    <div class="get-app-bar" id="getAppBar" hidden>
+      <div class="get-app-bar-copy">
+        Get the Undertwig app
+        <span>Smoother editing on phone and tablet</span>
+      </div>
+      <div class="get-app-bar-actions">
+        <a class="get-app-bar-link" id="getAppBarIos" href="https://apps.apple.com/" target="_blank" rel="noopener noreferrer">iOS</a>
+        <a class="get-app-bar-link" id="getAppBarAndroid" href="https://play.google.com/store" target="_blank" rel="noopener noreferrer">Android</a>
+        <button class="get-app-bar-button" id="getAppOpenGate" type="button">Get the app</button>
       </div>
     </div>
 
@@ -2705,11 +2807,43 @@
 
     <script>
       (function initMobileAppGate() {
-        var STORAGE_KEY = "undertwig-prefer-browser-v1";
+        var MOBILE_QUERY = "(max-width: 1180px)";
         var gate = document.getElementById("mobileAppGate");
         var appRoot = document.getElementById("app");
         var continueButton = document.getElementById("mobileContinueBrowser");
+        var getAppBar = document.getElementById("getAppBar");
+        var getAppOpenGate = document.getElementById("getAppOpenGate");
         if (!gate) return;
+
+        function isMobileViewport() {
+          return window.matchMedia(MOBILE_QUERY).matches;
+        }
+
+        function syncGetAppBar() {
+          if (!getAppBar) {
+            return;
+          }
+          var showBar =
+            isMobileViewport() && !document.documentElement.classList.contains("mobile-gate");
+          getAppBar.hidden = !showBar;
+          getAppBar.setAttribute("aria-hidden", showBar ? "false" : "true");
+        }
+
+        function showGate() {
+          if (!isMobileViewport()) {
+            return;
+          }
+          document.documentElement.classList.add("mobile-gate");
+          document.documentElement.classList.remove("prefer-browser");
+          gate.setAttribute("aria-hidden", "false");
+          if (appRoot) {
+            appRoot.setAttribute("inert", "");
+          }
+          syncGetAppBar();
+          if (continueButton) {
+            continueButton.focus();
+          }
+        }
 
         function dismissGate() {
           document.documentElement.classList.remove("mobile-gate");
@@ -2718,29 +2852,42 @@
           if (appRoot) {
             appRoot.removeAttribute("inert");
           }
+          syncGetAppBar();
         }
 
-        if (document.documentElement.classList.contains("mobile-gate")) {
-          gate.setAttribute("aria-hidden", "false");
-          if (appRoot) {
-            appRoot.setAttribute("inert", "");
-          }
-          if (continueButton) {
-            continueButton.focus();
-          }
+        // Every mobile load/refresh starts on the landing gate (no persisted skip).
+        if (isMobileViewport()) {
+          showGate();
         } else {
           gate.setAttribute("aria-hidden", "true");
+          syncGetAppBar();
         }
 
         if (continueButton) {
           continueButton.addEventListener("click", function () {
-            try {
-              localStorage.setItem(STORAGE_KEY, "1");
-            } catch (error) {
-              /* ignore quota / private mode */
-            }
             dismissGate();
           });
+        }
+
+        if (getAppOpenGate) {
+          getAppOpenGate.addEventListener("click", function () {
+            showGate();
+          });
+        }
+
+        var mobileQuery = window.matchMedia(MOBILE_QUERY);
+        function onViewportChange() {
+          if (mobileQuery.matches) {
+            showGate();
+          } else {
+            dismissGate();
+            document.documentElement.classList.remove("prefer-browser");
+          }
+        }
+        if (typeof mobileQuery.addEventListener === "function") {
+          mobileQuery.addEventListener("change", onViewportChange);
+        } else if (typeof mobileQuery.addListener === "function") {
+          mobileQuery.addListener(onViewportChange);
         }
       })();
     </script>
