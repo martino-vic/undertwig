@@ -4464,6 +4464,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         closeHoverBoxes();
         refreshCloudStatus();
+        // Role suffixes on Current depend on login; refresh after login/logout.
+        if (typeof renderTree === "function") {
+          renderTree();
+        }
       }
 
       collaborateButton.addEventListener("click", (event) => {
