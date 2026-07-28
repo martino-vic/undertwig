@@ -1300,17 +1300,22 @@
         /* Keep Collaborate / Account dialogs on-screen (sticky toolbar was clipping them). */
         .hover-box {
           position: fixed;
-          top: max(12px, env(safe-area-inset-top));
+          top: calc(48px + max(8px, env(safe-area-inset-top)));
           left: 12px;
           right: 12px;
           width: auto;
           max-width: 420px;
-          max-height: min(70dvh, 520px);
+          max-height: min(calc(100dvh - 48px - max(8px, env(safe-area-inset-top)) - 16px), 520px);
           margin: 0 auto;
           overflow: auto;
           overscroll-behavior: contain;
-          z-index: 120;
+          z-index: 200;
           -webkit-overflow-scrolling: touch;
+        }
+
+        /* When portaled to body, escape sticky toolbar clipping entirely. */
+        body > .hover-box {
+          z-index: 200;
         }
 
         .hover-box::before {
@@ -2898,12 +2903,47 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       });
 
       function closeHoverBoxes() {
+        restoreHoverBoxHost(collaborateBox);
+        restoreHoverBoxHost(accountBox);
         collaborateBox.classList.add("hidden");
         accountBox.classList.add("hidden");
         collaborateButton.setAttribute("aria-expanded", "false");
         accountButton.setAttribute("aria-expanded", "false");
         closeEngineMenu();
         closeBibToolMenu();
+      }
+
+      function isMobileHoverLayout() {
+        return (
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(max-width: 920px)").matches
+        );
+      }
+
+      function rememberHoverBoxHost(box) {
+        if (!box || box.__undertwigHoverHost) {
+          return;
+        }
+        box.__undertwigHoverHost = box.parentElement;
+      }
+
+      function portalHoverBoxToBody(box) {
+        if (!box || !isMobileHoverLayout()) {
+          return;
+        }
+        rememberHoverBoxHost(box);
+        if (box.parentElement !== document.body) {
+          document.body.appendChild(box);
+        }
+      }
+
+      function restoreHoverBoxHost(box) {
+        if (!box || !box.__undertwigHoverHost) {
+          return;
+        }
+        if (box.parentElement !== box.__undertwigHoverHost) {
+          box.__undertwigHoverHost.appendChild(box);
+        }
       }
 
       function closeEngineMenu() {
@@ -3194,6 +3234,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           showCollaborateLoggedOut();
         }
         collaborateBox.classList.remove("hidden");
+        portalHoverBoxToBody(collaborateBox);
         collaborateButton.setAttribute("aria-expanded", "true");
         if (UndertwigAuth.isLoggedIn()) {
           inviteEmail.focus();
@@ -3307,6 +3348,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
         accountBox.classList.remove("hidden");
+        portalHoverBoxToBody(accountBox);
         accountButton.setAttribute("aria-expanded", "true");
       });
 
