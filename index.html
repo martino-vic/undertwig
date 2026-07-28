@@ -5,6 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Undertwig LaTeX Editor</title>
+    <script>
+      (function () {
+        var key = "undertwig-prefer-browser-v1";
+        try {
+          if (localStorage.getItem(key) === "1") {
+            document.documentElement.classList.add("prefer-browser");
+            return;
+          }
+        } catch (error) {
+          /* ignore */
+        }
+        if (window.matchMedia("(max-width: 920px)").matches) {
+          document.documentElement.classList.add("mobile-gate");
+        }
+      })();
+    </script>
     <style>
       :root {
         color-scheme: dark;
@@ -1028,6 +1044,150 @@
         border-color: transparent;
       }
 
+      .mobile-app-gate {
+        position: fixed;
+        inset: 0;
+        z-index: 2000;
+        display: none;
+        align-items: stretch;
+        justify-content: center;
+        padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+        background:
+          radial-gradient(ellipse 90% 55% at 50% -8%, color-mix(in srgb, var(--brand) 22%, transparent), transparent),
+          var(--bg);
+        color: var(--text);
+        overflow: auto;
+      }
+
+      html.mobile-gate .mobile-app-gate {
+        display: flex;
+      }
+
+      html.mobile-gate body {
+        overflow: hidden;
+      }
+
+      html.mobile-gate .app {
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .mobile-app-gate-card {
+        display: flex;
+        width: min(420px, 100%);
+        margin: auto;
+        flex-direction: column;
+        gap: 18px;
+        padding: 28px 22px 22px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: color-mix(in srgb, var(--panel) 92%, transparent);
+        box-shadow: var(--shadow);
+        text-align: center;
+      }
+
+      .mobile-app-gate-brand {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .mobile-app-gate-brand strong {
+        font-size: clamp(1.6rem, 6vw, 2rem);
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        line-height: 1.15;
+      }
+
+      .mobile-app-gate-brand span {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .mobile-app-gate-card h1 {
+        margin: 0;
+        font-size: 1.15rem;
+        font-weight: 650;
+        line-height: 1.35;
+      }
+
+      .mobile-app-gate-card > p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .mobile-app-gate-stores {
+        display: grid;
+        gap: 10px;
+      }
+
+      .mobile-store-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        min-height: 48px;
+        padding: 12px 16px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--panel-soft);
+        color: var(--text);
+        font-family: var(--btn-font);
+        font-size: 15px;
+        font-weight: 600;
+        text-decoration: none;
+        transition: background 120ms ease, border-color 120ms ease;
+      }
+
+      .mobile-store-button:hover {
+        background: var(--panel-strong);
+        border-color: #4b6073;
+      }
+
+      .mobile-store-button svg {
+        width: 22px;
+        height: 22px;
+        flex: 0 0 auto;
+      }
+
+      .mobile-store-button .store-meta {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1px;
+        line-height: 1.2;
+      }
+
+      .mobile-store-button .store-meta small {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .mobile-continue-browser {
+        min-height: 44px;
+        margin: 4px 0 0;
+        padding: 10px 14px;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--muted);
+        font-family: var(--btn-font);
+        font-size: 14px;
+        font-weight: 600;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        cursor: pointer;
+      }
+
+      .mobile-continue-browser:hover {
+        color: var(--text);
+        background: transparent;
+        border-color: transparent;
+      }
+
       @media (max-width: 920px) {
         body {
           overflow: auto;
@@ -1036,15 +1196,47 @@
         .app,
         .app.explorer-collapsed {
           grid-template-columns: 1fr;
-          grid-template-rows: auto minmax(520px, 70vh) minmax(520px, 70vh);
+          grid-template-rows: auto minmax(420px, 62vh) minmax(420px, 62vh);
           height: auto;
           min-height: 100vh;
+          min-height: 100dvh;
         }
 
         .sidebar,
         .workspace {
           border-right: 0;
           border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar .tree {
+          max-height: min(42vh, 360px);
+        }
+
+        .topbar {
+          flex-wrap: wrap;
+          align-items: flex-start;
+          min-height: 0;
+          gap: 10px;
+          padding: 10px 12px;
+        }
+
+        .topbar-actions {
+          flex: 1 1 100%;
+          flex-wrap: wrap;
+          justify-content: flex-start;
+          row-gap: 8px;
+        }
+
+        .toolbar-button,
+        .bib-button,
+        .engine-button,
+        .convert-button,
+        .sidebar-actions button {
+          min-height: 40px;
+        }
+
+        .collapse-button {
+          display: none;
         }
 
         .app.explorer-collapsed .sidebar-actions,
@@ -1078,6 +1270,49 @@
     </style>
   </head>
   <body>
+    <div
+      class="mobile-app-gate"
+      id="mobileAppGate"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mobileAppGateTitle"
+      aria-describedby="mobileAppGateCopy"
+    >
+      <div class="mobile-app-gate-card">
+        <div class="mobile-app-gate-brand">
+          <strong>Undertwig</strong>
+          <span>LaTeX in your browser</span>
+        </div>
+        <h1 id="mobileAppGateTitle">Get the app for a smoother mobile experience</h1>
+        <p id="mobileAppGateCopy">
+          Editing and compiling on a phone works best in the native apps. You can still continue here in your browser.
+        </p>
+        <div class="mobile-app-gate-stores">
+          <a class="mobile-store-button" id="mobileAppIos" href="https://apps.apple.com/" target="_blank" rel="noopener noreferrer">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+              <path d="M16.37 12.29c-.03-2.3 1.88-3.41 1.97-3.46-1.07-1.57-2.74-1.78-3.33-1.8-1.42-.14-2.77.84-3.49.84-.72 0-1.84-.82-3.03-.8-1.56.02-3 .91-3.8 2.3-1.62 2.81-.41 6.97 1.16 9.25.77 1.12 1.69 2.37 2.9 2.33 1.16-.05 1.6-.75 3-.75s1.8.75 3.02.72c1.25-.02 2.04-1.14 2.8-2.27.88-1.29 1.24-2.54 1.26-2.6-.03-.01-2.42-.93-2.46-3.66zM14.4 5.52c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.8-.97 2.86 1.03.08 2.08-.52 2.71-1.31z"/>
+            </svg>
+            <span class="store-meta">
+              <span>Download for iOS</span>
+              <small>App Store · link placeholder</small>
+            </span>
+          </a>
+          <a class="mobile-store-button" id="mobileAppAndroid" href="https://play.google.com/store" target="_blank" rel="noopener noreferrer">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+              <path d="M3.18 2.95c-.24.25-.37.62-.37 1.08v15.94c0 .46.13.83.37 1.08l.07.07 8.95-8.95v-.2L3.25 2.88l-.07.07zm11.01 6.3-2.05 2.05 2.05 2.05 4.84-2.76c.55-.31.55-.82 0-1.13l-4.84-2.21zm-2.77 2.77L3.4 20.01c.28.3.74.33 1.27.03l10.16-5.8-3.41-3.22zm0-1.99 3.41-3.22L4.67 1.01C4.14.71 3.68.74 3.4 1.04l8.02 8.99z"/>
+            </svg>
+            <span class="store-meta">
+              <span>Download for Android</span>
+              <small>Google Play · link placeholder</small>
+            </span>
+          </a>
+        </div>
+        <button class="mobile-continue-browser" id="mobileContinueBrowser" type="button">
+          Continue in browser
+        </button>
+      </div>
+    </div>
+
     <main class="app" id="app">
       <aside class="sidebar" aria-label="Project file explorer">
         <div class="sidebar-head">
@@ -1218,6 +1453,48 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
       <input class="hidden" id="projectFolderInput" type="file" multiple webkitdirectory directory>
     </main>
+
+    <script>
+      (function initMobileAppGate() {
+        var STORAGE_KEY = "undertwig-prefer-browser-v1";
+        var gate = document.getElementById("mobileAppGate");
+        var appRoot = document.getElementById("app");
+        var continueButton = document.getElementById("mobileContinueBrowser");
+        if (!gate) return;
+
+        function dismissGate() {
+          document.documentElement.classList.remove("mobile-gate");
+          document.documentElement.classList.add("prefer-browser");
+          gate.setAttribute("aria-hidden", "true");
+          if (appRoot) {
+            appRoot.removeAttribute("inert");
+          }
+        }
+
+        if (document.documentElement.classList.contains("mobile-gate")) {
+          gate.setAttribute("aria-hidden", "false");
+          if (appRoot) {
+            appRoot.setAttribute("inert", "");
+          }
+          if (continueButton) {
+            continueButton.focus();
+          }
+        } else {
+          gate.setAttribute("aria-hidden", "true");
+        }
+
+        if (continueButton) {
+          continueButton.addEventListener("click", function () {
+            try {
+              localStorage.setItem(STORAGE_KEY, "1");
+            } catch (error) {
+              /* ignore quota / private mode */
+            }
+            dismissGate();
+          });
+        }
+      })();
+    </script>
 
     <div class="modal-overlay hidden" id="driveDeleteDialog" hidden aria-hidden="true" inert aria-labelledby="driveDeleteTitle" aria-describedby="driveDeleteMessage">
       <div class="modal-card">
