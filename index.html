@@ -159,8 +159,8 @@
       }
 
       .sidebar-actions {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        display: flex;
+        flex-direction: column;
         gap: 8px;
         padding: 12px;
         border-bottom: 1px solid var(--border);
@@ -171,19 +171,24 @@
       }
 
       .sidebar-options-panel {
-        display: contents;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
       }
 
-      .sidebar-actions button {
+      .sidebar-actions button,
+      .sidebar-options-panel button {
         min-height: var(--btn-height);
         padding: 0 var(--btn-pad-x);
       }
 
-      .sidebar-actions button.wide {
+      .sidebar-actions button.wide,
+      .sidebar-options-panel button.wide {
         grid-column: 1 / -1;
       }
 
-      .sidebar-actions button.is-syncing {
+      .sidebar-actions button.is-syncing,
+      .sidebar-options-panel button.is-syncing {
         font-variant-numeric: tabular-nums;
         letter-spacing: 0.02em;
         cursor: wait;
@@ -1500,8 +1505,8 @@
           background: #121b24;
         }
 
-        .sidebar-options-toggle {
-          display: inline-flex;
+        .sidebar-actions > .sidebar-options-toggle {
+          display: inline-flex !important;
           align-items: center;
           justify-content: space-between;
           width: 100%;
@@ -1515,25 +1520,25 @@
           cursor: pointer;
         }
 
-        .sidebar-options-toggle::after {
+        .sidebar-actions > .sidebar-options-toggle::after {
           content: "v";
           color: var(--muted);
           font-size: 12px;
           font-weight: 700;
         }
 
-        .sidebar-actions.is-options-open .sidebar-options-toggle::after {
+        .sidebar-actions.is-options-open > .sidebar-options-toggle::after {
           content: "^";
         }
 
-        .sidebar-options-panel {
-          display: none;
+        .sidebar-actions > .sidebar-options-panel {
+          display: none !important;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 8px;
         }
 
-        .sidebar-actions.is-options-open .sidebar-options-panel {
-          display: grid;
+        .sidebar-actions.is-options-open > .sidebar-options-panel {
+          display: grid !important;
         }
 
         .tree {
@@ -4117,13 +4122,25 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       (function setupSidebarOptionsToggle() {
         const sidebarActions = document.getElementById("sidebarActions");
         const toggle = document.getElementById("sidebarOptionsToggle");
-        if (!sidebarActions || !toggle) {
+        const panel = document.getElementById("sidebarOptionsPanel");
+        if (!sidebarActions || !toggle || !panel) {
           return;
         }
-        toggle.addEventListener("click", function () {
-          const open = !sidebarActions.classList.contains("is-options-open");
+
+        function setOpen(open) {
           sidebarActions.classList.toggle("is-options-open", open);
           toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        }
+
+        toggle.addEventListener("click", function () {
+          setOpen(!sidebarActions.classList.contains("is-options-open"));
+        });
+
+        // After picking an action, collapse again so the tree stays roomy.
+        panel.addEventListener("click", function (event) {
+          if (event.target.closest("button")) {
+            setOpen(false);
+          }
         });
       })();
 
