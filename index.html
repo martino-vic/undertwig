@@ -1685,13 +1685,14 @@
           top: auto;
           z-index: 5;
           display: grid;
-          grid-template-columns: minmax(4.5rem, 7rem) minmax(0, 1fr);
+          /* File name | left actions | Convert | engine actions */
+          grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr);
           align-items: center;
-          gap: 8px;
+          column-gap: 6px;
           height: 48px;
           min-height: 48px;
           max-height: 48px;
-          padding: 0 10px;
+          padding: 0 8px;
           border-bottom: 1px solid var(--border);
           background: #16202a;
           box-shadow: none;
@@ -1700,6 +1701,7 @@
 
         .workspace .file-title {
           grid-column: 1;
+          grid-row: 1;
           order: 0;
           position: static;
           top: auto;
@@ -1709,8 +1711,9 @@
           width: auto;
           max-width: none;
           min-width: 0;
-          z-index: auto;
+          z-index: 1;
           overflow: hidden;
+          padding: 0 4px 0 0;
         }
 
         .workspace .file-title span {
@@ -1718,60 +1721,94 @@
         }
 
         .workspace .topbar-actions {
-          grid-column: 2;
-          order: 0;
+          grid-column: 1 / -1;
+          grid-row: 1;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr);
+          align-items: center;
+          column-gap: 6px;
           flex: unset;
+          width: auto;
+          min-width: 0;
+          max-width: none;
+          margin: 0;
+          overflow: visible;
+          pointer-events: none;
+        }
+
+        .workspace .topbar-actions > * {
+          pointer-events: auto;
+        }
+
+        .workspace .topbar-actions-left {
           display: flex;
+          grid-column: 2;
+          flex-wrap: nowrap;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 6px;
+          width: auto;
+          min-width: 0;
+          overflow: visible;
+          z-index: 2;
+        }
+
+        .workspace .topbar-actions-left > * {
+          flex: 0 0 auto;
+          order: 0 !important;
+        }
+
+        .workspace .topbar-convert-cluster {
+          display: inline-flex;
+          grid-column: 3;
+          order: 0 !important;
+          flex: 0 0 auto;
+          justify-self: center;
+          z-index: 2;
+        }
+
+        .workspace .topbar-actions-right {
+          display: flex;
+          grid-column: 4;
           flex-wrap: nowrap;
           align-items: center;
           justify-content: flex-start;
           gap: 6px;
-          width: auto;
           min-width: 0;
           max-width: 100%;
-          margin: 0;
           overflow-x: auto;
           overflow-y: hidden;
           -webkit-overflow-scrolling: touch;
           scrollbar-width: none;
         }
 
-        .workspace .topbar-actions::-webkit-scrollbar {
+        .workspace .topbar-actions-right::-webkit-scrollbar {
           display: none;
         }
 
-        .workspace .topbar-convert-cluster {
-          order: -20;
+        .workspace .topbar-actions-right > * {
           flex: 0 0 auto;
+          order: 0 !important;
         }
 
-        .workspace .topbar-actions-right {
-          display: contents;
+        .workspace .topbar-actions .bib-wrap,
+        .workspace .topbar-actions .bib-button,
+        .workspace .topbar-actions .engine-wrap {
+          order: 0 !important;
         }
 
         .workspace .convert-button {
           flex: 0 0 auto;
           min-height: 36px;
-          min-width: 6.75rem;
-          padding: 0 16px;
+          min-width: 6.5rem;
+          padding: 0 14px;
           font-size: 14px;
           font-weight: 700;
         }
 
-        .workspace .collaborate-wrap,
-        .workspace .save-button,
-        .workspace .bib-wrap,
-        .workspace .engine-wrap,
-        .workspace #loginButton,
-        .workspace #accountWrap {
-          order: 0;
-          flex: 0 0 auto;
-        }
-
-        /* Long labels crowd the short landscape toolbar */
-        .workspace .bib-button,
-        .workspace #collaborate svg {
-          display: none !important;
+        .workspace #collaborate svg,
+        .workspace .save-button svg {
+          display: none;
         }
 
         .workspace #collaborate {
@@ -1780,15 +1817,13 @@
           font-size: 13px;
         }
 
-        .workspace .save-button svg {
-          display: none;
-        }
-
         .workspace .toolbar-button,
-        .workspace .engine-button {
+        .workspace .engine-button,
+        .workspace .save-button,
+        .workspace .bib-button {
           min-height: 36px;
-          padding: 0 10px;
-          font-size: 13px;
+          padding: 0 8px;
+          font-size: 12px;
         }
 
         .workspace .editor-wrap {
@@ -1897,8 +1932,8 @@
       }
 
       /*
-        Tablet landscape: keep a full-width toolbar (workspace column is too narrow),
-        but use the classic desktop button order — Convert last.
+        Tablet landscape: full-width toolbar with Convert centered between
+        editor-side actions and engine/bibliography controls.
       */
       @media (orientation: landscape) and (min-width: 921px) and (max-width: 1180px) {
         .app,
@@ -1940,12 +1975,10 @@
         .workspace .topbar {
           grid-column: 1 / -1;
           grid-row: 1;
-          display: flex;
-          flex-direction: row;
-          flex-wrap: nowrap;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr);
           align-items: center;
-          justify-content: space-between;
-          gap: 12px;
+          column-gap: 8px;
           height: 52px;
           min-height: 52px;
           max-height: 52px;
@@ -1955,55 +1988,90 @@
         }
 
         .workspace .file-title {
-          flex: 0 1 12rem;
+          grid-column: 1;
+          grid-row: 1;
           min-width: 0;
-          max-width: 14rem;
+          max-width: none;
           overflow: hidden;
+          padding: 0 4px 0 0;
         }
 
         .workspace .file-title span {
           display: none;
         }
 
-        /* Same classic desktop order: … Save, Bib, Update Bib, Engine, Convert */
         .workspace .topbar-actions {
+          grid-column: 1 / -1;
+          grid-row: 1;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr);
+          align-items: center;
+          column-gap: 8px;
+          flex: unset;
+          min-width: 0;
+          max-width: none;
+          overflow: visible;
+          pointer-events: none;
+        }
+
+        .workspace .topbar-actions > * {
+          pointer-events: auto;
+        }
+
+        .workspace .topbar-actions-left {
           display: flex;
-          flex: 1 1 auto;
+          grid-column: 2;
           flex-wrap: nowrap;
           align-items: center;
           justify-content: flex-end;
           gap: 8px;
+          width: auto;
           min-width: 0;
-          max-width: none;
+          overflow: visible;
+          z-index: 2;
+        }
+
+        .workspace .topbar-actions-left > * {
+          flex: 0 0 auto;
+          order: 0 !important;
+        }
+
+        .workspace .topbar-convert-cluster {
+          display: inline-flex;
+          grid-column: 3;
+          order: 0 !important;
+          justify-self: center;
+          z-index: 2;
+        }
+
+        .workspace .topbar-actions-right {
+          display: flex;
+          grid-column: 4;
+          flex-wrap: nowrap;
+          align-items: center;
+          justify-content: flex-start;
+          gap: 8px;
+          min-width: 0;
+          max-width: 100%;
           overflow-x: auto;
           overflow-y: hidden;
           -webkit-overflow-scrolling: touch;
           scrollbar-width: none;
         }
 
-        .workspace .topbar-actions::-webkit-scrollbar {
+        .workspace .topbar-actions-right::-webkit-scrollbar {
           display: none;
         }
 
-        .workspace .topbar-actions-left,
-        .workspace .topbar-actions-right {
-          display: contents;
+        .workspace .topbar-actions-right > * {
+          flex: 0 0 auto;
+          order: 0 !important;
         }
 
-        .workspace .topbar-convert-cluster {
-          order: 30;
-        }
-
-        .workspace .topbar-actions .bib-wrap {
-          order: 10;
-        }
-
-        .workspace .topbar-actions .bib-button {
-          order: 11;
-        }
-
+        .workspace .topbar-actions .bib-wrap,
+        .workspace .topbar-actions .bib-button,
         .workspace .topbar-actions .engine-wrap {
-          order: 12;
+          order: 0 !important;
         }
 
         .workspace .toolbar-button,
@@ -2017,8 +2085,8 @@
         }
 
         .workspace .convert-button {
-          min-width: 6.75rem;
-          padding: 0 14px;
+          min-width: 7.25rem;
+          padding: 0 18px;
           font-weight: 700;
         }
 
