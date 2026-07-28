@@ -1243,7 +1243,7 @@
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
-    <script src="latex-engines.js?v=20260728al"></script>
+    <script src="latex-engines.js?v=20260728am"></script>
     <script>
       const DEMO_FIGURE_PNG_BASE64 =
         "iVBORw0KGgoAAAANSUhEUgAAAUAAAADICAYAAACZBDirAAAD0klEQVR4nO3dP2oUYRjH8VWsDQQ0aRQEq6Rw0QsEIRJvYLlnUAgeQRb0DLmFwTReQNnGVFba+AcEvYAWNuI7hFlmNu/M/D6fcpgNS4xfXp6H3ZnNAAAAAAAAAAAAAAAAAAAAAAAAoJortd/AUJ0s5r//v7Y4Wfl9wYRcrf0GAGoRQCCWAAKxBBCIda32Gxiq+d6N2m9hkCyHmBInQCCWAAKxBBCIJYBArN6XIKvlYTEknx+ftRqSj/G1adKWQ5Y+0+YECMQSQCCWAAKxBBCI1fsw9/nR3WJofLC/Vdy3u7NdXPvy9Udx7e2Hn8W1Wj+vaTEyxsWNpU97flfT5gQIxBJAIJYAArEEEIjV+zD30d7NYmh8//b14r73n34V14Z+39PHt4prQ1rSWPr0/1qmzQkQiCWAQCwBBGIJIBDLIHgNTZ9yabtUaVo8tF1QNN1n6dPt5x29fGf5ghMgkEsAgVgCCMQSQCCWgewGnD57UAy/uyw8Xpx+rPLv1GXpM/T7njy8U1wb45KGbpwAgVgCCMQSQCCWAAKxDFo3oO1zUV69/lxca/r0hYF4/4b+tW21Fl9pnACBWAIIxBJAIJYAArEMWi9J09DdwgPqcgIEYgkgEEsAgVgCCMQycK+o7ddNWZbAZjgBArEEEIglgEAsAQRiGaQPTJevabIsgfU4AQKxBBCIJYBALAEEYhmQj5RlCXTnBAjEEkAglgACsQQQiGXwPXFNy5Imb86/+VsgjhMgEEsAgVgCCMQSQCCWwXcgzyKBv5wAgVgCCMQSQCCWAAKxDLSZzWa+XotMToBALAEEYgkgEEsAgVgG1azFsoQpcQIEYgkgEEsAgVgCCMQygGYjLEsYAydAIJYAArEEEIglgEAsg2Wq8uB2anICBGIJIBBLAIFYAgjEMlhmcJoe3H6wv9XqtT4xwjqcAIFYAgjEEkAglgACsQyMGYW2nxhp+iqt3Z3t4tr8+MzfPk6AQC4BBGIJIBBLAIFYBsFMSttlyXJxr9XPsyyZNidAIJYAArEEEIglgEAsA14ieRYJs5kTIBBMAIFYAgjEEkAglgEvXGC1PGy1LPGJkXFyAgRiCSAQSwCBWAIIxDK4hQv4eq1pcwIEYgkgEEsAgVgCCMQykIUe9L0sWZ1/L64tTlb+v/bMCRCIJYBALAEEYgkgEMtQFS5R07Kk6bkjbe+jGydAIJYAArEEEIglgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPzrDyQSQd6NJcBKAAAAAElFTkSuQmCC";
@@ -1283,6 +1283,8 @@ Classic references such as \cite{lamport94} and \cite{knuth84} are resolved from
 \texttt{references.bib}.
 
 \bibliographystyle{plain}
+\phantomsection
+\addcontentsline{toc}{section}{\refname}
 \bibliography{references}
 
 \end{document}
@@ -2476,7 +2478,14 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         try {
           const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
           if (stored && stored.files && stored.activeFile) {
-            return normalizeWorkspace(stored);
+            const normalized = normalizeWorkspace(stored);
+            // Persist sample upgrades (bib / TOC / figure) so they stick across reloads.
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+            } catch (_error) {
+              // Ignore quota issues; in-memory upgrade still applies this session.
+            }
+            return normalized;
           }
         } catch (_) {
           // Fall through to legacy / default.
@@ -2615,33 +2624,47 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         const bibPath = "SampleProject/references.bib";
         const introPath = "SampleProject/sections/introduction.tex";
         const main = workspace.files && workspace.files[mainPath];
-        if (!main || main.binary || workspace.files[bibPath]) {
+        if (!main || main.binary) {
           return workspace;
         }
-        const content = String(main.content || "");
+        let content = String(main.content || "");
+
+        // Migrate handwritten thebibliography → BibTeX + references.bib.
         if (
-          !/\\begin\{thebibliography\}/.test(content) ||
-          !/lamport94/.test(content) ||
-          /\\bibliography\{references\}/.test(content)
+          /\\begin\{thebibliography\}/.test(content) &&
+          /lamport94/.test(content) &&
+          !/\\bibliography\{references\}/.test(content)
         ) {
-          return workspace;
+          content = content
+            .replace(
+              /This starter project shows common LaTeX patterns that work well in Undertwig:\nmulti-file \\texttt\{\\textbackslash input\}, figures, tables, cross-references, and math\.\nEdit any file in the tree and press \\textbf\{Convert\}\./,
+              "This starter project shows common LaTeX patterns that work well in Undertwig:\nmulti-file \\texttt{\\textbackslash input}, figures, tables, cross-references, math,\nand a tiny BibTeX bibliography. Edit any file in the tree and press \\textbf{Convert}.\nFor citations, press \\textbf{Update Bibliography} (BibTeX) after the first Convert, then Convert again."
+            )
+            .replace(
+              /You can delete these sample files, upload your own folder, or keep building on this layout\.\n\n\\begin\{thebibliography\}[\s\S]*?\\end\{thebibliography\}/,
+              "You can delete these sample files, upload your own folder, or keep building on this layout.\nClassic references such as \\cite{lamport94} and \\cite{knuth84} are resolved from\n\\texttt{references.bib}.\n\n\\bibliographystyle{plain}\n\\phantomsection\n\\addcontentsline{toc}{section}{\\refname}\n\\bibliography{references}"
+            );
+          main.content = content;
+          if (!workspace.files[bibPath]) {
+            workspace.files[bibPath] = {
+              name: "references.bib",
+              content: DEFAULT_REFERENCES_BIB,
+              binary: false,
+            };
+          }
         }
 
-        main.content = content
-          .replace(
-            /This starter project shows common LaTeX patterns that work well in Undertwig:\nmulti-file \\texttt\{\\textbackslash input\}, figures, tables, cross-references, and math\.\nEdit any file in the tree and press \\textbf\{Convert\}\./,
-            "This starter project shows common LaTeX patterns that work well in Undertwig:\nmulti-file \\texttt{\\textbackslash input}, figures, tables, cross-references, math,\nand a tiny BibTeX bibliography. Edit any file in the tree and press \\textbf{Convert}.\nFor citations, press \\textbf{Update Bibliography} (BibTeX) after the first Convert, then Convert again."
-          )
-          .replace(
-            /You can delete these sample files, upload your own folder, or keep building on this layout\.\n\n\\begin\{thebibliography\}[\s\S]*?\\end\{thebibliography\}/,
-            "You can delete these sample files, upload your own folder, or keep building on this layout.\nClassic references such as \\cite{lamport94} and \\cite{knuth84} are resolved from\n\\texttt{references.bib}.\n\n\\bibliographystyle{plain}\n\\bibliography{references}"
+        // Ensure BibTeX sample lists References in the table of contents.
+        content = String(main.content || "");
+        if (
+          /\\bibliography\{references\}/.test(content) &&
+          !/\\addcontentsline\{toc\}\{section\}\{\\refname\}/.test(content)
+        ) {
+          main.content = content.replace(
+            /\\bibliographystyle\{plain\}\s*\\bibliography\{references\}/,
+            "\\bibliographystyle{plain}\n\\phantomsection\n\\addcontentsline{toc}{section}{\\refname}\n\\bibliography{references}"
           );
-
-        workspace.files[bibPath] = {
-          name: "references.bib",
-          content: DEFAULT_REFERENCES_BIB,
-          binary: false,
-        };
+        }
 
         const intro = workspace.files[introPath];
         if (

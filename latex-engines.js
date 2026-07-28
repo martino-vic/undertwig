@@ -922,16 +922,58 @@
     }
   }
 
+  function readMainTexContent(projectFiles) {
+    const file = projectFiles && projectFiles["main.tex"];
+    if (!file || file.binary || file.content == null) {
+      return "";
+    }
+    return String(file.content);
+  }
+
+  function projectUsesHandwrittenBibliography(projectFiles) {
+    const content = readMainTexContent(projectFiles);
+    return (
+      /\\begin\{thebibliography\}/.test(content) &&
+      !/\\bibliography\s*\{/.test(content) &&
+      !/\\addbibresource\s*\{/.test(content)
+    );
+  }
+
+  function auxHasBibtexHooks(projectFiles) {
+    const auxPath = findMainAux(projectFiles);
+    if (!auxPath) {
+      return false;
+    }
+    const file = projectFiles[auxPath];
+    const content = file && file.content != null ? String(file.content) : "";
+    // BibTeX needs these markers from a LaTeX pass over \cite / \bibliography.
+    return /\\bibdata\s*\{/.test(content) && /\\bibstyle\s*\{/.test(content);
+  }
+
   /**
-   * BibTeX needs main.aux. Prefer an existing file; otherwise create it with
-   * pdfLaTeX (SwiftLaTeX) instead of BusyTeX's LuaLaTeX fallback, which can hang.
+   * BibTeX needs a fresh main.aux with \bibdata / \bibstyle. Reuse an aux that
+   * already has those hooks; otherwise rebuild with pdfLaTeX (stale aux without
+   * bibliography markers is a common cause of false "BibTeX failed" reports).
    */
   function ensureBibtexAux(projectFiles, notify) {
-    if (findMainAux(projectFiles)) {
+    if (projectUsesHandwrittenBibliography(projectFiles)) {
+      return Promise.reject(
+        new Error(
+          "This project uses a handwritten thebibliography environment. " +
+            "Update Bibliography is only needed for \\bibliography{...} with a .bib file."
+        )
+      );
+    }
+
+    if (auxHasBibtexHooks(projectFiles)) {
       return Promise.resolve({ files: projectFiles, wroteAux: false });
     }
 
-    notify("Creating main.aux with pdfLaTeX before BibTeX…");
+    notify(
+      findMainAux(projectFiles)
+        ? "Refreshing main.aux with pdfLaTeX before BibTeX…"
+        : "Creating main.aux with pdfLaTeX before BibTeX…"
+    );
     return compileWithPdfLaTeX(projectFiles, { onProgress: notify }).then(function (
       result
     ) {
@@ -941,6 +983,11 @@
       if (!findMainAux(merged)) {
         throw new Error(
           "Could not create main.aux. Convert the project once, then run Update Bibliography."
+        );
+      }
+      if (!auxHasBibtexHooks(merged)) {
+        throw new Error(
+          "main.aux has no bibliography commands. Add \\cite{...}, \\bibliographystyle{...}, and \\bibliography{yourfile} to main.tex, Convert once, then run Update Bibliography."
         );
       }
       return { files: merged, wroteAux: true, aux: aux };
