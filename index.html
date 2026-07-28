@@ -166,6 +166,14 @@
         border-bottom: 1px solid var(--border);
       }
 
+      .sidebar-options-toggle {
+        display: none;
+      }
+
+      .sidebar-options-panel {
+        display: contents;
+      }
+
       .sidebar-actions button {
         min-height: var(--btn-height);
         padding: 0 var(--btn-pad-x);
@@ -1469,15 +1477,59 @@
 
         .sidebar-actions {
           order: 5;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 8px 12px;
           border-bottom: 1px solid var(--border);
           background: #121b24;
         }
 
+        .sidebar-options-toggle {
+          display: inline-flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+          min-height: 40px;
+          padding: 0 12px;
+          border: 1px solid var(--border);
+          border-radius: var(--btn-radius);
+          background: var(--panel-soft);
+          color: var(--text);
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .sidebar-options-toggle::after {
+          content: "v";
+          color: var(--muted);
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .sidebar-actions.is-options-open .sidebar-options-toggle::after {
+          content: "^";
+        }
+
+        .sidebar-options-panel {
+          display: none;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .sidebar-actions.is-options-open .sidebar-options-panel {
+          display: grid;
+        }
+
         .tree {
           order: 6;
-          max-height: min(36vh, 320px);
+          max-height: min(52vh, 480px);
           border-bottom: 1px solid var(--border);
           background: #121b24;
+        }
+
+        .sidebar-actions.is-options-open ~ .tree {
+          max-height: min(36vh, 320px);
         }
 
         .cloud-status {
@@ -2211,7 +2263,17 @@
           <button class="collapse-button" id="collapseExplorer" type="button" aria-label="Collapse file explorer">&lt;</button>
         </div>
         <div class="collapsed-rail" aria-hidden="true">Files</div>
-        <div class="sidebar-actions">
+        <div class="sidebar-actions" id="sidebarActions">
+          <button
+            type="button"
+            class="sidebar-options-toggle"
+            id="sidebarOptionsToggle"
+            aria-expanded="false"
+            aria-controls="sidebarOptionsPanel"
+          >
+            Options
+          </button>
+          <div class="sidebar-options-panel" id="sidebarOptionsPanel">
           <button id="newFile" type="button">New file</button>
           <button id="newFolder" type="button">New folder</button>
           <button id="uploadFiles" type="button">Import files</button>
@@ -2220,6 +2282,7 @@
           <button class="wide" id="newProject" type="button">New project</button>
           <button class="wide" id="importProject" type="button" title="Import a local project folder as the current project">Import new project</button>
           <button class="wide" id="syncProject" type="button" title="Load the current project from Google Drive into the file tree">Load</button>
+          </div>
         </div>
         <div class="tree" id="tree"></div>
         <div class="cloud-status is-logged-out" id="cloudStatus" role="status" aria-live="polite">
@@ -4072,6 +4135,19 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
         }, 230);
       });
+
+      (function setupSidebarOptionsToggle() {
+        const sidebarActions = document.getElementById("sidebarActions");
+        const toggle = document.getElementById("sidebarOptionsToggle");
+        if (!sidebarActions || !toggle) {
+          return;
+        }
+        toggle.addEventListener("click", function () {
+          const open = !sidebarActions.classList.contains("is-options-open");
+          sidebarActions.classList.toggle("is-options-open", open);
+          toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        });
+      })();
 
       (function setupPreviewCollapse() {
         const PREVIEW_COLLAPSED_KEY = "undertwig-preview-collapsed";
