@@ -2654,7 +2654,7 @@
           <button class="wide" id="downloadZip" type="button">Download ZIP</button>
           <button class="wide" id="newProject" type="button">New project</button>
           <button class="wide" id="importProject" type="button" title="Import a local project folder as the current project">Import new project</button>
-          <button class="wide" id="syncProject" type="button" title="Load the current project from Google Drive into the file tree">Load</button>
+          <button class="wide hidden" id="syncProject" type="button" title="Load the current project from Google Drive into the file tree" hidden>Load</button>
           </div>
         </div>
         <div class="tree" id="tree"></div>
@@ -4422,6 +4422,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       function refreshAuthUi() {
         const session = UndertwigAuth.readSession();
         const saveButton = document.getElementById("saveProject");
+        if (syncProjectButton) {
+          const showLoad = Boolean(session);
+          syncProjectButton.hidden = !showLoad;
+          syncProjectButton.classList.toggle("hidden", !showLoad);
+        }
         if (session) {
           loginButton.classList.add("hidden");
           accountWrap.classList.remove("hidden");
