@@ -158,6 +158,11 @@
         padding: 0;
       }
 
+      /* File title lives in the workspace topbar except phone landscape */
+      .sidebar-head > .file-title {
+        display: none;
+      }
+
       .sidebar-actions {
         display: flex;
         flex-direction: column;
@@ -1711,8 +1716,8 @@
           display: flex !important;
           flex: 0 0 auto;
           align-items: center;
-          justify-content: flex-end;
-          gap: 0;
+          justify-content: flex-start;
+          gap: 6px;
           order: unset !important;
           position: static !important;
           top: auto !important;
@@ -1728,8 +1733,36 @@
           display: none !important;
         }
 
+        .sidebar-head .file-title {
+          display: block !important;
+          flex: 1 1 auto;
+          order: 0;
+          position: static;
+          top: auto;
+          left: auto;
+          transform: none;
+          width: auto;
+          max-width: none;
+          min-width: 0;
+          overflow: hidden;
+          padding: 0;
+          visibility: visible;
+          pointer-events: auto;
+        }
+
+        .sidebar-head .file-title span {
+          display: none;
+        }
+
+        .sidebar-head .file-title strong {
+          font-size: 12px;
+          line-height: 1.2;
+        }
+
         .sidebar .collapse-button {
           display: grid !important;
+          flex: 0 0 auto;
+          margin-left: auto;
           width: 32px;
           height: 32px;
           min-height: 32px;
@@ -1743,6 +1776,14 @@
           justify-content: center;
           padding: 4px 0;
           border-bottom: 1px solid var(--border);
+        }
+
+        .app.explorer-collapsed .sidebar-head .file-title {
+          display: none !important;
+        }
+
+        .app.explorer-collapsed .sidebar .collapse-button {
+          margin-left: 0;
         }
 
         .app.explorer-collapsed .sidebar-actions,
@@ -1813,20 +1854,7 @@
         }
 
         .workspace .file-title {
-          grid-column: 1;
-          grid-row: 1;
-          order: 0;
-          position: static;
-          top: auto;
-          left: auto;
-          transform: none;
-          flex: unset;
-          width: auto;
-          max-width: min(36vw, 10rem);
-          min-width: 0;
-          z-index: 1;
-          overflow: hidden;
-          padding: 0 4px 0 0;
+          display: none;
         }
 
         .workspace .file-title span {
@@ -1865,7 +1893,7 @@
           min-width: 0;
           overflow: visible;
           z-index: 2;
-          padding-left: min(36vw, 10rem);
+          padding-left: 0;
         }
 
         .workspace .topbar-actions-left > * {
@@ -4308,6 +4336,41 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
         });
       }
+
+      (function syncFileTitlePlacement() {
+        const landscapeQuery = window.matchMedia(
+          "(max-width: 920px) and (orientation: landscape)"
+        );
+        const fileTitle = document.querySelector(".file-title");
+        const sidebarHead = document.querySelector(".sidebar-head");
+        const workspaceTopbar = document.querySelector(".workspace .topbar");
+        const collapseButton = document.getElementById("collapseExplorer");
+        if (!fileTitle || !sidebarHead || !workspaceTopbar) {
+          return;
+        }
+
+        function placeFileTitle() {
+          if (landscapeQuery.matches) {
+            if (fileTitle.parentElement !== sidebarHead) {
+              sidebarHead.insertBefore(fileTitle, collapseButton || null);
+            }
+            return;
+          }
+          if (fileTitle.parentElement !== workspaceTopbar) {
+            workspaceTopbar.insertBefore(fileTitle, workspaceTopbar.firstChild);
+          }
+        }
+
+        placeFileTitle();
+        if (typeof landscapeQuery.addEventListener === "function") {
+          landscapeQuery.addEventListener("change", placeFileTitle);
+        } else if (typeof landscapeQuery.addListener === "function") {
+          landscapeQuery.addListener(placeFileTitle);
+        }
+        window.addEventListener("orientationchange", function () {
+          window.setTimeout(placeFileTitle, 50);
+        });
+      })();
 
       (function setupSidebarOptionsToggle() {
         const sidebarActions = document.getElementById("sidebarActions");
