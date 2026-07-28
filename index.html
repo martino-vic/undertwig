@@ -1886,7 +1886,7 @@ Table~\ref{tab:compare}.
 
 \subsection{Aligned math}
 Multi-line displays use \texttt{align} from \texttt{amsmath}. The
-\texttt{\&} marks the alignment point and \texttt{\textbackslash\textbackslash}
+\verb|&| character marks the alignment point and \verb|\\|
 breaks the line:
 
 \begin{align}
@@ -3273,7 +3273,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           next.currentProject =
             (fromActive && roots.includes(fromActive) ? fromActive : "") || roots[0] || "";
         }
-        return upgradeSampleTutorial(upgradeSampleFigure(upgradeSampleBibliography(next)));
+        return upgradeSampleTutorial(
+          upgradeSampleResultsTex(upgradeSampleFigure(upgradeSampleBibliography(next)))
+        );
       }
 
       /**
@@ -3360,22 +3362,63 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (!workspace.folders.includes("SampleProject/figures")) {
           workspace.folders.push("SampleProject/figures");
         }
+        workspace.files["SampleProject/figures/diagram.png"] = {
+          name: "diagram.png",
+          content: DEMO_FIGURE_PNG_BASE64,
+          binary: true,
+        };
         return workspace;
       }
 
       /**
-       * Existing local SampleProject copies still use the old green demo figure.
-       * Swap in the pixel figure when that known starter PNG is present.
+       * Ensure SampleProject always has figures/diagram.png (tutorial upgrades
+       * used to rewrite TeX without restoring the binary asset).
        */
       function upgradeSampleFigure(workspace) {
         const figPath = "SampleProject/figures/diagram.png";
-        const file = workspace.files && workspace.files[figPath];
-        if (file && file.binary) {
-          const content = String(file.content || "");
-          if (content.indexOf("iVBORw0KGgoAAAANSUhEUgAAAPAAAACMCAI") === 0) {
-            file.content = DEMO_FIGURE_PNG_BASE64;
-          }
+        if (!(workspace.files && workspace.files["SampleProject/main.tex"])) {
+          return workspace;
         }
+
+        if (!workspace.folders.includes("SampleProject/figures")) {
+          workspace.folders.push("SampleProject/figures");
+        }
+
+        const file = workspace.files[figPath];
+        if (!file || !file.binary || !String(file.content || "").trim()) {
+          workspace.files[figPath] = {
+            name: "diagram.png",
+            content: DEMO_FIGURE_PNG_BASE64,
+            binary: true,
+          };
+          return workspace;
+        }
+
+        const content = String(file.content || "");
+        // Old green demo PNG shipped with early SampleProject builds.
+        if (content.indexOf("iVBORw0KGgoAAAANSUhEUgAAAPAAAACMCAI") === 0) {
+          file.content = DEMO_FIGURE_PNG_BASE64;
+          file.binary = true;
+        }
+        return workspace;
+      }
+
+      /**
+       * Replace \texttt{\&} in SampleProject results — it forces OMS/cmtt.
+       */
+      function upgradeSampleResultsTex(workspace) {
+        const resultsPath = "SampleProject/sections/results.tex";
+        const file = workspace.files && workspace.files[resultsPath];
+        if (!file || file.binary || typeof file.content !== "string") {
+          return workspace;
+        }
+        if (!/\\texttt\{\\&\}/.test(file.content)) {
+          return workspace;
+        }
+        file.content = file.content.replace(
+          /The \\texttt\{\\&\} marks the alignment point and \\texttt\{\\textbackslash\\textbackslash\}\nbreaks the line:/,
+          "The \\verb|&| character marks the alignment point and \\verb|\\\\|\nbreaks the line:"
+        );
         return workspace;
       }
 
