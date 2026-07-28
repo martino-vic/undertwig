@@ -349,7 +349,8 @@
         margin: 0;
       }
 
-      .tree-delete {
+      .tree-delete,
+      .tree-rename {
         display: grid;
         width: 26px;
         height: 26px;
@@ -366,13 +367,21 @@
       }
 
       .tree-item:hover .tree-delete,
-      .tree-item:focus-within .tree-delete {
+      .tree-item:focus-within .tree-delete,
+      .tree-item:hover .tree-rename,
+      .tree-item:focus-within .tree-rename {
         opacity: 1;
       }
 
       .tree-delete:hover {
         background: rgba(225, 132, 132, 0.18);
         color: var(--danger);
+        border-color: transparent;
+      }
+
+      .tree-rename:hover {
+        background: color-mix(in srgb, var(--brand) 18%, transparent);
+        color: var(--brand-strong);
         border-color: transparent;
       }
 
@@ -758,6 +767,50 @@
         color: var(--muted);
       }
 
+      #editor.is-asset-hidden {
+        display: none;
+      }
+
+      .asset-preview {
+        display: none;
+        width: 100%;
+        height: 100%;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        padding: 24px;
+        overflow: auto;
+        background: #111820;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .asset-preview.is-visible {
+        display: flex;
+      }
+
+      .asset-preview img {
+        max-width: min(100%, 720px);
+        max-height: min(70vh, 560px);
+        object-fit: contain;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background:
+          linear-gradient(45deg, #1a2530 25%, transparent 25%) 0 0 / 16px 16px,
+          linear-gradient(-45deg, #1a2530 25%, transparent 25%) 0 8px / 16px 16px,
+          linear-gradient(45deg, transparent 75%, #1a2530 75%) 8px -8px / 16px 16px,
+          linear-gradient(-45deg, transparent 75%, #1a2530 75%) -8px 0 / 16px 16px,
+          #111820;
+      }
+
+      .asset-preview p {
+        margin: 0;
+        max-width: 36em;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
       .statusbar {
         min-height: 36px;
         padding: 8px 16px;
@@ -1121,6 +1174,10 @@
         </div>
         <div class="editor-wrap">
           <textarea id="editor" spellcheck="false"></textarea>
+          <div class="asset-preview" id="assetPreview" aria-live="polite">
+            <img id="assetPreviewImage" alt="">
+            <p id="assetPreviewNote"></p>
+          </div>
         </div>
         <div class="statusbar" id="status">Ready. Conversion runs locally in your browser with SwiftLaTeX WebAssembly.</div>
       </section>
@@ -1395,6 +1452,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const app = document.getElementById("app");
       const tree = document.getElementById("tree");
       const editor = document.getElementById("editor");
+      const assetPreview = document.getElementById("assetPreview");
+      const assetPreviewImage = document.getElementById("assetPreviewImage");
+      const assetPreviewNote = document.getElementById("assetPreviewNote");
       const status = document.getElementById("status");
       const convertButton = document.getElementById("convert");
       const convertBusy = document.getElementById("convertBusy");
@@ -3074,12 +3134,53 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         setStatus("The folder may be too large for browser storage.", true, { offerCloudLogin: true });
       }
 
+      function imageMimeFromPath(path) {
+        const name = String(path || "").split("/").pop() || "";
+        const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+        if (ext === "png") return "image/png";
+        if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+        if (ext === "gif") return "image/gif";
+        if (ext === "webp") return "image/webp";
+        if (ext === "svg") return "image/svg+xml";
+        return "";
+      }
+
+      function renderAssetPreview(file, path) {
+        if (!file || !file.binary) {
+          assetPreview.classList.remove("is-visible");
+          assetPreviewImage.removeAttribute("src");
+          assetPreviewImage.alt = "";
+          assetPreviewNote.textContent = "";
+          editor.classList.remove("is-asset-hidden");
+          return;
+        }
+
+        editor.classList.add("is-asset-hidden");
+        assetPreview.classList.add("is-visible");
+
+        const mime = imageMimeFromPath(path);
+        if (mime && file.content) {
+          assetPreviewImage.src = "data:" + mime + ";base64," + file.content;
+          assetPreviewImage.alt = "Preview of " + (path || "asset");
+          assetPreviewImage.hidden = false;
+          assetPreviewNote.textContent =
+            "Binary image asset. Available to LaTeX during conversion.";
+        } else {
+          assetPreviewImage.removeAttribute("src");
+          assetPreviewImage.alt = "";
+          assetPreviewImage.hidden = true;
+          assetPreviewNote.textContent =
+            "Binary asset selected. Uploads are available to LaTeX during conversion.";
+        }
+      }
+
       function render() {
         renderTree();
         const file = state.files[state.activeFile];
         activeFileName.textContent = state.activeFile || "No file selected";
         editor.disabled = !file || Boolean(file.binary);
-        editor.value = file ? (file.binary ? "Binary asset selected. Uploads are available to LaTeX during conversion." : file.content) : "";
+        editor.value = file && !file.binary ? file.content : "";
+        renderAssetPreview(file, state.activeFile);
         updateMeta();
       }
 
@@ -3368,6 +3469,22 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
         item.appendChild(row);
         if (opts.section === "current") {
+          const renameButton = document.createElement("button");
+          renameButton.type = "button";
+          renameButton.className = "tree-rename";
+          renameButton.title = `Rename ${node.name}`;
+          renameButton.setAttribute("aria-label", `Rename ${node.path}`);
+          renameButton.textContent = "✎";
+          renameButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            if (node.type === "folder") {
+              renameFolderEntry(node.path);
+            } else {
+              renameFileEntry(node.path);
+            }
+          });
+          item.appendChild(renameButton);
+
           const deleteButton = document.createElement("button");
           deleteButton.type = "button";
           deleteButton.className = "tree-delete";
@@ -3474,6 +3591,153 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           return false;
         }
         return cleaned === project || cleaned.startsWith(project + "/");
+      }
+
+      function sanitizeEntryName(raw) {
+        const cleaned = String(raw || "")
+          .replace(/\\/g, "/")
+          .split("/")
+          .filter(Boolean)
+          .pop();
+        return cleaned ? cleaned.trim() : "";
+      }
+
+      function renameFileEntry(path) {
+        path = normalizePath(path);
+        const file = state.files[path];
+        if (!file) return;
+        if (!pathBelongsToCurrentProject(path)) {
+          setStatus("Only files in the current project can be renamed.", true);
+          return;
+        }
+
+        const currentName = path.split("/").pop();
+        const nextName = sanitizeEntryName(prompt("Rename file", currentName));
+        if (!nextName || nextName === currentName) {
+          return;
+        }
+
+        const parent = parentFolder(path);
+        const destination = parent ? parent + "/" + nextName : nextName;
+        if (!destination.includes("/")) {
+          setStatus("Keep files inside the current project.", true);
+          return;
+        }
+        if (state.files[destination]) {
+          setStatus(`A file already exists at ${destination}.`, true);
+          return;
+        }
+
+        state.files[destination] = {
+          name: nextName,
+          content: file.content,
+          binary: Boolean(file.binary)
+        };
+        delete state.files[path];
+
+        if (state.activeFile === path) {
+          state.activeFile = destination;
+        }
+
+        persistProject({ immediateCloud: true });
+        render();
+        setStatus(`Renamed ${path} → ${destination}.`);
+      }
+
+      function renameFolderEntry(path) {
+        path = normalizePath(path);
+        if (!path) return;
+        if (!pathBelongsToCurrentProject(path)) {
+          setStatus("Only folders in the current project can be renamed.", true);
+          return;
+        }
+
+        const parts = path.split("/");
+        const currentName = parts[parts.length - 1];
+        const isRootProject = parts.length === 1;
+        const nextName = sanitizeEntryName(prompt("Rename folder", currentName));
+        if (!nextName || nextName === currentName) {
+          return;
+        }
+
+        if (isRootProject) {
+          if (listLocalRootProjects(state).includes(nextName)) {
+            setStatus(`A project named “${nextName}” already exists.`, true);
+            return;
+          }
+          renameRootProject(path, nextName);
+          persistProject({ immediateCloud: true });
+          render();
+          setStatus(`Renamed project ${path} → ${nextName}.`);
+          return;
+        }
+
+        const parent = parts.slice(0, -1).join("/");
+        const destination = parent + "/" + nextName;
+        const prefix = path + "/";
+        const destPrefix = destination + "/";
+
+        const folderClash = (state.folders || []).some(
+          (folderPath) => folderPath === destination || folderPath.startsWith(destPrefix)
+        );
+        const fileClash = Object.keys(state.files).some(
+          (filePath) => filePath === destination || filePath.startsWith(destPrefix)
+        );
+        if (folderClash || fileClash) {
+          setStatus(`“${destination}” already exists.`, true);
+          return;
+        }
+
+        const nextFiles = {};
+        Object.keys(state.files).forEach((filePath) => {
+          if (filePath.startsWith(prefix)) {
+            const nextPath = destPrefix + filePath.slice(prefix.length);
+            const file = state.files[filePath];
+            nextFiles[nextPath] = file
+              ? Object.assign({}, file, { name: nextPath.split("/").pop() })
+              : file;
+          } else {
+            nextFiles[filePath] = state.files[filePath];
+          }
+        });
+        state.files = nextFiles;
+
+        state.folders = (state.folders || [])
+          .map((folderPath) => {
+            if (folderPath === path) {
+              return destination;
+            }
+            if (folderPath.startsWith(prefix)) {
+              return destPrefix + folderPath.slice(prefix.length);
+            }
+            return folderPath;
+          })
+          .filter(Boolean);
+
+        const nextCollapsed = new Set();
+        collapsedFolders.forEach((folderPath) => {
+          if (folderPath === path) {
+            nextCollapsed.add(destination);
+          } else if (folderPath.startsWith(prefix)) {
+            nextCollapsed.add(destPrefix + folderPath.slice(prefix.length));
+          } else {
+            nextCollapsed.add(folderPath);
+          }
+        });
+        collapsedFolders.clear();
+        nextCollapsed.forEach((folderPath) => collapsedFolders.add(folderPath));
+        persistCollapsedFolders();
+
+        if (state.activeFile === path || (state.activeFile || "").startsWith(prefix)) {
+          state.activeFile =
+            state.activeFile === path
+              ? destination
+              : destPrefix + state.activeFile.slice(prefix.length);
+        }
+
+        persistProject({ immediateCloud: true });
+        render();
+        setStatus(`Renamed ${path} → ${destination}.`);
       }
 
       function deleteFile(path) {
@@ -4332,12 +4596,19 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         try {
           const result = await UndertwigEngines.runBibliography(projectFiles, {
             onProgress: function (message) {
-              setStatus(message || "Running " + toolLabel + "…");
+              const line = message || "Running " + toolLabel + "…";
+              setStatus(line);
+              // Keep the compiler log visible and informative while BusyTeX prints.
+              const existing = compileLog.textContent || "";
+              const next = existing.endsWith("\n") ? existing + line : existing + "\n" + line;
+              compileLog.textContent = next.slice(-8000);
+              compileLog.scrollTop = compileLog.scrollHeight;
             },
           });
 
           compileLog.textContent = (result && result.log) || "No bibliography log returned.";
           logPanel.classList.remove("hidden");
+          setLogCollapsed(false);
 
           const written = writeProjectOutputs(prefix, result && result.outputs);
           if (!result || !result.ok) {
