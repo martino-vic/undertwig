@@ -1153,7 +1153,7 @@
       <input class="hidden" id="projectFolderInput" type="file" multiple webkitdirectory directory>
     </main>
 
-    <div class="modal-overlay hidden" id="driveDeleteDialog" role="alertdialog" aria-modal="true" aria-labelledby="driveDeleteTitle" aria-describedby="driveDeleteMessage">
+    <div class="modal-overlay hidden" id="driveDeleteDialog" hidden aria-hidden="true" inert aria-labelledby="driveDeleteTitle" aria-describedby="driveDeleteMessage">
       <div class="modal-card">
         <h2 id="driveDeleteTitle">Remove files from Google Drive?</h2>
         <p id="driveDeleteMessage">
@@ -1792,8 +1792,24 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
       }
 
+      function setDriveDeleteDialogOpen(open) {
+        driveDeleteDialog.classList.toggle("hidden", !open);
+        driveDeleteDialog.hidden = !open;
+        if (open) {
+          driveDeleteDialog.setAttribute("role", "alertdialog");
+          driveDeleteDialog.setAttribute("aria-modal", "true");
+          driveDeleteDialog.removeAttribute("aria-hidden");
+          driveDeleteDialog.inert = false;
+        } else {
+          driveDeleteDialog.removeAttribute("role");
+          driveDeleteDialog.removeAttribute("aria-modal");
+          driveDeleteDialog.setAttribute("aria-hidden", "true");
+          driveDeleteDialog.inert = true;
+        }
+      }
+
       function closeDriveDeleteDialog(result) {
-        driveDeleteDialog.classList.add("hidden");
+        setDriveDeleteDialogOpen(false);
         const resolve = driveDeleteDialogResolver;
         driveDeleteDialogResolver = null;
         if (resolve) {
@@ -1824,7 +1840,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           driveDeleteList.appendChild(li);
         });
         driveDeleteDontShow.checked = false;
-        driveDeleteDialog.classList.remove("hidden");
+        setDriveDeleteDialogOpen(true);
         driveDeleteConfirm.focus();
 
         return new Promise(function (resolve) {
@@ -1847,7 +1863,7 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
       });
       document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !driveDeleteDialog.classList.contains("hidden")) {
+        if (event.key === "Escape" && !driveDeleteDialog.hidden) {
           event.preventDefault();
           closeDriveDeleteDialog(false);
         }
