@@ -20,7 +20,7 @@ Local editing and conversion run in the browser with the SwiftLaTeX PdfTeX WebAs
 
 ## Try it
 
-Use the live site: [undertwig.com](https://undertwig.com).
+Use the live site: [www.undertwig.com](https://www.undertwig.com).
 
 ## How conversion works
 
@@ -35,7 +35,7 @@ Undertwig was measured against the [Uni Stuttgart / ITP3 LaTeX Benchmark](https:
 Sign-in is available at [`login.html`](login.html) and supports Google accounts only, via Google Identity Services.
 
 1. Create an OAuth 2.0 Web client ID in Google Cloud Console.
-2. Add authorized JavaScript origins for `https://undertwig.com`, `https://www.undertwig.com`, and local origins as needed.
+2. Add authorized JavaScript origins for `https://www.undertwig.com` and local origins as needed.
 3. On the OAuth consent screen, add scopes:
    - `https://www.googleapis.com/auth/drive.appdata` (Google Drive app data)
    - `https://www.googleapis.com/auth/gmail.send` (collaboration invite emails)
