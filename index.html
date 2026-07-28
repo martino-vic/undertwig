@@ -1379,9 +1379,15 @@
           row-gap: 8px;
         }
 
-        .workspace .convert-button {
+        .workspace .topbar-convert-cluster {
           order: -20;
           flex: 1 1 100%;
+          width: 100%;
+        }
+
+        .workspace .convert-button {
+          flex: 1 1 auto;
+          width: 100%;
           min-height: 48px;
           padding: 0 16px;
           font-size: 15px;
@@ -1389,7 +1395,7 @@
         }
 
         .workspace .convert-busy {
-          order: -19;
+          flex: 0 0 auto;
         }
 
         .workspace .collaborate-wrap {
@@ -1661,22 +1667,22 @@
           display: none;
         }
 
-        .workspace .topbar-actions > * {
+        .workspace .topbar-convert-cluster {
+          order: -20;
           flex: 0 0 auto;
         }
 
+        .workspace .topbar-actions-right {
+          display: none;
+        }
+
         .workspace .convert-button {
-          order: -20;
           flex: 0 0 auto;
           min-height: 36px;
           min-width: 6.75rem;
           padding: 0 16px;
           font-size: 14px;
           font-weight: 700;
-        }
-
-        .workspace .convert-busy {
-          order: -19;
         }
 
         .workspace .collaborate-wrap,
