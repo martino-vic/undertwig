@@ -1650,8 +1650,7 @@
           height: 100dvh;
         }
 
-        .app,
-        .app.explorer-collapsed {
+        .app {
           display: grid;
           grid-template-columns: minmax(132px, 28vw) minmax(0, 1fr) minmax(0, 1fr);
           grid-template-rows: auto minmax(0, 1fr);
@@ -1661,9 +1660,16 @@
           overflow: hidden;
         }
 
-        .app.preview-collapsed,
-        .app.explorer-collapsed.preview-collapsed {
+        .app.explorer-collapsed {
+          grid-template-columns: 48px minmax(0, 1fr) minmax(0, 1fr);
+        }
+
+        .app.preview-collapsed {
           grid-template-columns: minmax(132px, 28vw) minmax(0, 1fr) 48px;
+        }
+
+        .app.explorer-collapsed.preview-collapsed {
+          grid-template-columns: 48px minmax(0, 1fr) 48px;
         }
 
         .workspace {
@@ -1671,7 +1677,7 @@
           border: 0;
         }
 
-        /* Keep the file tree as its own column (Options + tree) */
+        /* Keep the file tree as its own column (collapse + Options + tree) */
         .sidebar {
           display: flex !important;
           flex-direction: column;
@@ -1684,14 +1690,59 @@
           background: #121b24;
         }
 
-        .sidebar-head,
-        .sidebar .collapsed-rail,
-        .sidebar .collapse-button,
         .cloud-status,
         .legal-links,
         .mobile-page-hint,
         .workspace .statusbar {
           display: none !important;
+        }
+
+        .sidebar-head {
+          display: flex !important;
+          flex: 0 0 auto;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 0;
+          min-height: 36px;
+          padding: 4px 6px;
+          border-bottom: 1px solid var(--border);
+          background: #121b24;
+          box-shadow: none;
+          position: static;
+        }
+
+        .sidebar-head .brand {
+          display: none !important;
+        }
+
+        .sidebar .collapse-button {
+          display: grid !important;
+          width: 32px;
+          height: 32px;
+          min-height: 32px;
+        }
+
+        .sidebar .collapsed-rail {
+          display: none;
+        }
+
+        .app.explorer-collapsed .sidebar-head {
+          justify-content: center;
+          padding: 4px 0;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .app.explorer-collapsed .sidebar-actions,
+        .app.explorer-collapsed .tree {
+          display: none !important;
+        }
+
+        .app.explorer-collapsed .collapsed-rail {
+          display: flex !important;
+          flex: 1 1 auto;
+          align-items: center;
+          justify-content: flex-start;
+          padding: 10px 0;
         }
 
         .sidebar-actions {
@@ -1744,6 +1795,16 @@
           background: #16202a;
           box-shadow: none;
           overflow: hidden;
+        }
+
+        .app.explorer-collapsed .workspace .topbar,
+        .app.explorer-collapsed .workspace .topbar-actions {
+          grid-template-columns: 48px minmax(0, 1fr) auto minmax(0, 1fr);
+        }
+
+        .app.explorer-collapsed .workspace .file-title {
+          visibility: hidden;
+          pointer-events: none;
         }
 
         .workspace .file-title {
@@ -4214,14 +4275,32 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       });
 
       document.getElementById("collapseExplorer").addEventListener("click", () => {
-        app.classList.toggle("explorer-collapsed");
-        document.getElementById("collapseExplorer").textContent = app.classList.contains("explorer-collapsed") ? ">" : "<";
+        const button = document.getElementById("collapseExplorer");
+        const collapsed = !app.classList.contains("explorer-collapsed");
+        app.classList.toggle("explorer-collapsed", collapsed);
+        button.textContent = collapsed ? ">" : "<";
+        button.setAttribute(
+          "aria-label",
+          collapsed ? "Expand file explorer" : "Collapse file explorer"
+        );
+        button.title = collapsed ? "Expand file explorer" : "Collapse file explorer";
         window.setTimeout(function () {
           if (window.UndertwigEditor && UndertwigEditor.layout) {
             UndertwigEditor.layout();
           }
         }, 230);
       });
+
+      const collapsedRail = document.querySelector(".collapsed-rail");
+      if (collapsedRail) {
+        collapsedRail.style.cursor = "pointer";
+        collapsedRail.title = "Expand file explorer";
+        collapsedRail.addEventListener("click", function () {
+          if (app.classList.contains("explorer-collapsed")) {
+            document.getElementById("collapseExplorer").click();
+          }
+        });
+      }
 
       (function setupSidebarOptionsToggle() {
         const sidebarActions = document.getElementById("sidebarActions");
