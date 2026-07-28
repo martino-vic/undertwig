@@ -1289,6 +1289,26 @@
           order: -10;
         }
 
+        /* Keep Collaborate / Account dialogs on-screen (sticky toolbar was clipping them). */
+        .hover-box {
+          position: fixed;
+          top: max(12px, env(safe-area-inset-top));
+          left: 12px;
+          right: 12px;
+          width: auto;
+          max-width: 420px;
+          max-height: min(70dvh, 520px);
+          margin: 0 auto;
+          overflow: auto;
+          overscroll-behavior: contain;
+          z-index: 120;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        .hover-box::before {
+          display: none;
+        }
+
         .workspace .save-button {
           order: -9;
         }
