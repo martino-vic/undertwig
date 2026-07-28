@@ -1196,7 +1196,7 @@
         .app,
         .app.explorer-collapsed {
           grid-template-columns: 1fr;
-          grid-template-rows: auto minmax(420px, 62vh) minmax(420px, 62vh);
+          grid-template-rows: auto auto auto;
           height: auto;
           min-height: 100vh;
           min-height: 100dvh;
@@ -1209,7 +1209,40 @@
         }
 
         .sidebar .tree {
-          max-height: min(42vh, 360px);
+          max-height: min(28vh, 240px);
+        }
+
+        .workspace {
+          /* Keep the editor compact so the PDF preview header peeks into view. */
+          flex: 0 0 auto;
+        }
+
+        .workspace .editor-wrap {
+          flex: 0 0 auto;
+          height: min(36vh, 300px);
+          min-height: 200px;
+        }
+
+        .preview {
+          flex: 0 0 auto;
+          scroll-margin-top: 8px;
+        }
+
+        .preview .viewer {
+          flex: 0 0 auto;
+          height: min(70vh, 640px);
+          min-height: 280px;
+        }
+
+        .mobile-page-hint {
+          display: block;
+          padding: 10px 16px 12px;
+          border-bottom: 1px solid var(--border);
+          background: #121b24;
+          color: var(--muted);
+          font-size: 12px;
+          line-height: 1.4;
+          text-align: center;
         }
 
         .topbar {
@@ -1266,6 +1299,80 @@
         .collapsed-rail {
           display: none !important;
         }
+      }
+
+      .mobile-page-hint {
+        display: none;
+      }
+
+      .pdf-fallback {
+        position: absolute;
+        inset: 0;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 28px 20px;
+        background: #0c1117;
+        color: var(--text);
+        text-align: center;
+      }
+
+      .pdf-fallback:not(.hidden) {
+        display: flex;
+      }
+
+      .pdf-fallback strong {
+        font-size: 15px;
+      }
+
+      .pdf-fallback p {
+        margin: 0;
+        max-width: 28em;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .pdf-fallback-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 4px;
+      }
+
+      .pdf-fallback-actions a,
+      .pdf-fallback-actions button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 40px;
+        padding: 0 14px;
+        border: 1px solid var(--border);
+        border-radius: var(--btn-radius);
+        background: var(--panel-soft);
+        color: var(--text);
+        font-family: var(--btn-font);
+        font-size: var(--btn-size);
+        font-weight: var(--btn-weight);
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      .pdf-fallback-actions .pdf-open-primary {
+        border-color: transparent;
+        background: var(--brand);
+      }
+
+      .pdf-fallback-actions .pdf-open-primary:hover {
+        background: var(--brand-strong);
+        border-color: transparent;
+      }
+
+      #pdfFrame.hidden {
+        display: none;
       }
     </style>
   </head>
@@ -1415,6 +1522,7 @@
           </div>
         </div>
         <div class="statusbar" id="status">Ready. Conversion runs locally in your browser with SwiftLaTeX WebAssembly.</div>
+        <p class="mobile-page-hint" aria-hidden="true">Scroll down for the PDF preview</p>
       </section>
 
       <section class="preview" aria-label="PDF preview">
@@ -1423,9 +1531,23 @@
             <strong>PDF preview</strong>
             <span id="previewMeta">No PDF generated yet</span>
           </div>
+          <div class="topbar-actions preview-actions hidden" id="previewActions">
+            <a class="toolbar-button" id="openPdf" href="#" target="_blank" rel="noopener noreferrer">Open</a>
+            <a class="toolbar-button" id="downloadPdf" href="#" download="undertwig-preview.pdf">Download</a>
+          </div>
         </div>
         <div class="viewer">
-          <iframe id="pdfFrame" title="Compiled PDF preview"></iframe>
+          <iframe id="pdfFrame" class="hidden" title="Compiled PDF preview"></iframe>
+          <div class="pdf-fallback hidden" id="pdfFallback">
+            <strong>PDF ready</strong>
+            <p>
+              This browser can't show PDFs inside the page. Open it in your device PDF viewer, or download the file.
+            </p>
+            <div class="pdf-fallback-actions">
+              <a class="pdf-open-primary" id="openPdfFallback" href="#" target="_blank" rel="noopener noreferrer">Open PDF</a>
+              <a id="downloadPdfFallback" href="#" download="undertwig-preview.pdf">Download PDF</a>
+            </div>
+          </div>
           <div class="empty-preview" id="emptyPreview">
             <div>
               <strong>Compile to preview</strong>
@@ -1880,13 +2002,80 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       const folderInput = document.getElementById("folderInput");
       const projectFolderInput = document.getElementById("projectFolderInput");
       const pdfFrame = document.getElementById("pdfFrame");
+      const pdfFallback = document.getElementById("pdfFallback");
       const emptyPreview = document.getElementById("emptyPreview");
       const previewMeta = document.getElementById("previewMeta");
+      const previewActions = document.getElementById("previewActions");
+      const openPdfLink = document.getElementById("openPdf");
+      const downloadPdfLink = document.getElementById("downloadPdf");
+      const openPdfFallback = document.getElementById("openPdfFallback");
+      const downloadPdfFallback = document.getElementById("downloadPdfFallback");
+      const previewSection = document.querySelector(".preview");
       const logPanel = document.getElementById("logPanel");
       const compileLog = document.getElementById("compileLog");
       const toggleLogButton = document.getElementById("toggleLog");
       const copyLogButton = document.getElementById("copyLog");
       let copyLogResetTimer = null;
+      const PDF_PREVIEW_NAME = "undertwig-preview.pdf";
+
+      function browserBlocksInlinePdf() {
+        const ua = navigator.userAgent || "";
+        const iOS =
+          /iPad|iPhone|iPod/.test(ua) ||
+          (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+        const android = /Android/i.test(ua);
+        return iOS || android;
+      }
+
+      function bindPdfActionLinks(url) {
+        [openPdfLink, openPdfFallback].forEach((link) => {
+          if (!link) return;
+          link.href = url || "#";
+          link.toggleAttribute("aria-disabled", !url);
+        });
+        [downloadPdfLink, downloadPdfFallback].forEach((link) => {
+          if (!link) return;
+          link.href = url || "#";
+          link.setAttribute("download", PDF_PREVIEW_NAME);
+          link.toggleAttribute("aria-disabled", !url);
+        });
+      }
+
+      function showGeneratedPdf(pdfData) {
+        if (pdfUrl) {
+          URL.revokeObjectURL(pdfUrl);
+          pdfUrl = null;
+        }
+
+        const file = new File([pdfData], PDF_PREVIEW_NAME, { type: "application/pdf" });
+        pdfUrl = URL.createObjectURL(file);
+        bindPdfActionLinks(pdfUrl);
+
+        emptyPreview.classList.add("hidden");
+        if (previewActions) {
+          previewActions.classList.remove("hidden");
+        }
+        previewMeta.textContent = "Generated " + new Date().toLocaleTimeString();
+
+        const useFallback = browserBlocksInlinePdf();
+        if (useFallback) {
+          pdfFrame.classList.add("hidden");
+          pdfFrame.removeAttribute("src");
+          if (pdfFallback) {
+            pdfFallback.classList.remove("hidden");
+          }
+        } else {
+          if (pdfFallback) {
+            pdfFallback.classList.add("hidden");
+          }
+          pdfFrame.classList.remove("hidden");
+          pdfFrame.src = pdfUrl;
+        }
+
+        if (window.matchMedia("(max-width: 920px)").matches && previewSection) {
+          previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
 
       function setLogCollapsed(collapsed) {
         logPanel.classList.toggle("is-collapsed", Boolean(collapsed));
@@ -2763,6 +2952,29 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       projectFolderInput.addEventListener("change", () => handleImportNewProject(projectFolderInput.files));
       convertButton.addEventListener("click", compileProject);
       bibliographyButton.addEventListener("click", runProjectBibliography);
+
+      function handleOpenPdfClick(event) {
+        if (!pdfUrl) {
+          event.preventDefault();
+          return;
+        }
+        // iOS/Android often refuse blob: + target=_blank from an iframe-less link unless we force it.
+        if (browserBlocksInlinePdf()) {
+          event.preventDefault();
+          const opened = window.open(pdfUrl, "_blank");
+          if (!opened) {
+            // Popup blocked: navigate this tab to the PDF (system viewer / chooser).
+            window.location.href = pdfUrl;
+          }
+        }
+      }
+
+      if (openPdfLink) {
+        openPdfLink.addEventListener("click", handleOpenPdfClick);
+      }
+      if (openPdfFallback) {
+        openPdfFallback.addEventListener("click", handleOpenPdfClick);
+      }
 
       latexEngineButton.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -5051,11 +5263,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
 
-          if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-          pdfUrl = URL.createObjectURL(new Blob([result.pdf], { type: "application/pdf" }));
-          pdfFrame.src = pdfUrl;
-          emptyPreview.classList.add("hidden");
-          previewMeta.textContent = `Generated ${new Date().toLocaleTimeString()}`;
+          showGeneratedPdf(result.pdf);
           setStatus("PDF generated locally with " + (result.label || engineLabel) + ".");
         } catch (error) {
           if (error && error.name === "AbortError") {
