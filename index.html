@@ -4011,7 +4011,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           if (localOk) {
             setStatus("Saved in this browser.");
           } else {
-            setStatusStorageFull();
+            setStatusStorageFull({ force: true });
           }
         } catch (error) {
           const message = (error && error.message) || "Could not save the project.";
@@ -5754,12 +5754,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return cloudInitPromise;
       }
 
+      let storageFullStatusAt = 0;
+      const STORAGE_FULL_STATUS_COOLDOWN_MS = 60 * 1000;
+
       function persistProject(options) {
         const immediateCloud = Boolean(options && options.immediateCloud);
         let localSaved = true;
 
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          storageFullStatusAt = 0;
         } catch (error) {
           localSaved = false;
           if (!UndertwigAuth.isLoggedIn()) {
@@ -5771,7 +5775,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (UndertwigCloud.isAvailable() && (cloudStatusMode === "connected" || UndertwigCloud.hasAccessToken())) {
           scheduleCloudSave(immediateCloud);
           if (!localSaved) {
-            setStatus("Browser storage is full. Saving to Google Cloud storage…");
+            setStatus(
+              "This browser has hit its storage limit. Saving to Google Drive instead…"
+            );
           }
           return true;
         }
@@ -5820,8 +5826,47 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         cloudSaveTimer = setTimeout(run, 1200);
       }
 
-      function setStatusStorageFull() {
-        setStatus("The folder may be too large for browser storage.", true, { offerCloudLogin: true });
+      function setStatusStorageFull(options) {
+        const force = Boolean(options && options.force);
+        const now = Date.now();
+        // Autosave can hit quota on every keystroke — show the warning at most once a minute.
+        if (!force && storageFullStatusAt && now - storageFullStatusAt < STORAGE_FULL_STATUS_COOLDOWN_MS) {
+          return;
+        }
+        storageFullStatusAt = now;
+
+        status.classList.add("error");
+        status.textContent = "";
+        status.appendChild(
+          document.createTextNode(
+            "This browser has hit its storage limit, so further edits may not be saved here. "
+          )
+        );
+
+        const zipLink = document.createElement("a");
+        zipLink.href = "#";
+        zipLink.textContent = "Download ZIP";
+        zipLink.addEventListener("click", function (event) {
+          event.preventDefault();
+          downloadProjectZip();
+        });
+        status.appendChild(zipLink);
+        status.appendChild(document.createTextNode(" to keep a copy"));
+
+        if (!UndertwigAuth.isLoggedIn()) {
+          status.appendChild(document.createTextNode(", or "));
+          const loginLink = document.createElement("a");
+          loginLink.href = cloudLoginUrl();
+          loginLink.textContent = "log in";
+          status.appendChild(loginLink);
+          status.appendChild(
+            document.createTextNode(" to keep working with Google Drive (free).")
+          );
+        } else {
+          status.appendChild(
+            document.createTextNode(", or free space and try Save again.")
+          );
+        }
       }
 
       function imageMimeFromPath(path) {
@@ -7113,7 +7158,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
         } catch (error) {
-          setStatusStorageFull();
+          setStatusStorageFull({ force: true });
           return;
         }
 
