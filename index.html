@@ -6403,6 +6403,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
 
+          // Keep the PDF visible — especially on mobile, an open log steals the preview pane.
+          setLogCollapsed(true);
           const written = writeProjectPdf(prefix, result.pdf);
           renderTree();
           showGeneratedPdf(result.pdf, {
