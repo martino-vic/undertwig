@@ -95,10 +95,19 @@
         display: grid;
         grid-template-columns: 286px minmax(360px, 1fr) minmax(360px, 1fr);
         height: 100vh;
+        transition: grid-template-columns 220ms ease;
       }
 
       .app.explorer-collapsed {
         grid-template-columns: 48px minmax(360px, 1fr) minmax(360px, 1fr);
+      }
+
+      .app.preview-collapsed {
+        grid-template-columns: 286px minmax(0, 1fr) 48px;
+      }
+
+      .app.explorer-collapsed.preview-collapsed {
+        grid-template-columns: 48px minmax(0, 1fr) 48px;
       }
 
       .sidebar {
@@ -456,6 +465,53 @@
 
       .app.explorer-collapsed .collapsed-rail {
         display: flex;
+      }
+
+      .preview-collapsed-rail {
+        display: none;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 0;
+        writing-mode: vertical-rl;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .preview-collapsed-rail:hover {
+        color: var(--text);
+      }
+
+      .app.preview-collapsed .preview-title,
+      .app.preview-collapsed .preview-actions,
+      .app.preview-collapsed .preview .viewer,
+      .app.preview-collapsed .preview .log {
+        display: none !important;
+      }
+
+      .app.preview-collapsed .preview > .topbar {
+        justify-content: center;
+        gap: 0;
+        padding: 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .app.preview-collapsed .preview-collapsed-rail {
+        display: flex;
+        flex: 1;
+        justify-content: flex-start;
+      }
+
+      .app.preview-collapsed .workspace {
+        border-right: 1px solid var(--border);
+      }
+
+      .preview .collapse-button {
+        margin-right: 4px;
       }
 
       .workspace,
@@ -1226,8 +1282,8 @@
           border: 0;
         }
 
-        .collapsed-rail,
-        .collapse-button {
+        .sidebar .collapsed-rail,
+        .sidebar .collapse-button {
           display: none !important;
         }
 
@@ -1420,6 +1476,23 @@
           border-bottom: 0;
         }
 
+        .preview .collapse-button {
+          display: grid;
+        }
+
+        .app.preview-collapsed .preview {
+          flex: 0 0 auto;
+          border-top: 1px solid var(--border);
+        }
+
+        .app.preview-collapsed .preview > .topbar {
+          min-height: 44px;
+        }
+
+        .app.preview-collapsed .preview-collapsed-rail {
+          display: none;
+        }
+
         .preview .viewer {
           flex: 0 0 auto;
           height: min(70vh, 640px);
@@ -1475,6 +1548,11 @@
           max-height: 100dvh;
           min-height: 0;
           overflow: hidden;
+        }
+
+        .app.preview-collapsed,
+        .app.explorer-collapsed.preview-collapsed {
+          grid-template-columns: minmax(0, 1fr) 48px;
         }
 
         .sidebar,
@@ -1627,8 +1705,8 @@
         .cloud-status,
         .legal-links,
         .mobile-page-hint,
-        .collapsed-rail,
-        .collapse-button {
+        .sidebar .collapsed-rail,
+        .sidebar .collapse-button {
           display: none !important;
         }
 
@@ -1644,7 +1722,24 @@
           height: auto;
           overflow: hidden;
           scroll-margin-top: 0;
-          border-left: 0;
+          border-left: 1px solid var(--border);
+        }
+
+        .preview .collapse-button {
+          display: grid !important;
+        }
+
+        .app.preview-collapsed .preview-collapsed-rail {
+          display: flex !important;
+        }
+
+        .app.preview-collapsed .preview > .topbar {
+          flex: 0 0 48px;
+          height: 48px;
+          min-height: 48px;
+          max-height: 48px;
+          padding: 0;
+          border-bottom: 1px solid var(--border);
         }
 
         .preview > .topbar {
@@ -1968,6 +2063,7 @@
 
       <section class="preview" aria-label="PDF preview">
         <div class="topbar">
+          <button class="collapse-button" id="collapsePreview" type="button" aria-label="Collapse PDF preview" title="Collapse PDF preview">&gt;</button>
           <div class="preview-title">
             <strong>PDF preview</strong>
             <span id="previewMeta">No PDF generated yet</span>
@@ -1977,6 +2073,7 @@
             <a class="toolbar-button" id="downloadPdf" href="#" download="undertwig-preview.pdf">Download</a>
           </div>
         </div>
+        <div class="preview-collapsed-rail" aria-hidden="true">PDF</div>
         <div class="viewer">
           <iframe id="pdfFrame" class="hidden" title="Compiled PDF preview"></iframe>
           <div class="pdfjs-viewer hidden" id="pdfJsViewer" aria-label="PDF preview pages">
@@ -2718,6 +2815,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       function showGeneratedPdf(pdfData, options) {
         options = options || {};
+        if (
+          window.UndertwigPreviewCollapse &&
+          UndertwigPreviewCollapse.isCollapsed &&
+          UndertwigPreviewCollapse.isCollapsed()
+        ) {
+          UndertwigPreviewCollapse.setCollapsed(false);
+        }
         if (pdfUrl) {
           URL.revokeObjectURL(pdfUrl);
           pdfUrl = null;
@@ -3711,7 +3815,78 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       document.getElementById("collapseExplorer").addEventListener("click", () => {
         app.classList.toggle("explorer-collapsed");
         document.getElementById("collapseExplorer").textContent = app.classList.contains("explorer-collapsed") ? ">" : "<";
+        window.setTimeout(function () {
+          if (window.UndertwigEditor && UndertwigEditor.layout) {
+            UndertwigEditor.layout();
+          }
+        }, 230);
       });
+
+      (function setupPreviewCollapse() {
+        const PREVIEW_COLLAPSED_KEY = "undertwig-preview-collapsed";
+        const collapsePreviewButton = document.getElementById("collapsePreview");
+        const previewRail = document.querySelector(".preview-collapsed-rail");
+        if (!collapsePreviewButton || !app) {
+          return;
+        }
+
+        function syncPreviewCollapseUi(collapsed) {
+          app.classList.toggle("preview-collapsed", collapsed);
+          collapsePreviewButton.textContent = collapsed ? "<" : ">";
+          collapsePreviewButton.setAttribute(
+            "aria-label",
+            collapsed ? "Expand PDF preview" : "Collapse PDF preview"
+          );
+          collapsePreviewButton.title = collapsed
+            ? "Expand PDF preview"
+            : "Collapse PDF preview";
+          if (previewRail) {
+            previewRail.setAttribute("aria-hidden", collapsed ? "false" : "true");
+          }
+          window.setTimeout(function () {
+            if (window.UndertwigEditor && UndertwigEditor.layout) {
+              UndertwigEditor.layout();
+            }
+          }, 230);
+        }
+
+        function setPreviewCollapsed(collapsed, persist) {
+          syncPreviewCollapseUi(!!collapsed);
+          if (persist !== false) {
+            try {
+              localStorage.setItem(PREVIEW_COLLAPSED_KEY, collapsed ? "1" : "0");
+            } catch (_error) {
+              // Ignore quota / private mode.
+            }
+          }
+        }
+
+        window.UndertwigPreviewCollapse = {
+          setCollapsed: setPreviewCollapsed,
+          isCollapsed: function () {
+            return app.classList.contains("preview-collapsed");
+          },
+        };
+
+        collapsePreviewButton.addEventListener("click", () => {
+          setPreviewCollapsed(!app.classList.contains("preview-collapsed"));
+        });
+
+        if (previewRail) {
+          previewRail.addEventListener("click", () => {
+            setPreviewCollapsed(false);
+          });
+          previewRail.style.cursor = "pointer";
+        }
+
+        try {
+          if (localStorage.getItem(PREVIEW_COLLAPSED_KEY) === "1") {
+            setPreviewCollapsed(true, false);
+          }
+        } catch (_error) {
+          // Ignore storage read failures.
+        }
+      })();
 
       document.getElementById("newProject").addEventListener("click", createProject);
       document.getElementById("importProject").addEventListener("click", () => {
