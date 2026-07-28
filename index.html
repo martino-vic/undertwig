@@ -5928,7 +5928,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             (UndertwigCloud.isCollaborator && UndertwigCloud.isCollaborator()));
         const role = UndertwigCloud.getProjectRole && UndertwigCloud.getProjectRole();
         const currentSuffix =
-          !currentName
+          !currentName || !UndertwigAuth.isLoggedIn()
             ? ""
             : sharedCurrent || role === "writer" || role === "reader"
               ? " (invitee)"
