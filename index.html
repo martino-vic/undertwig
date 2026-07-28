@@ -596,10 +596,25 @@
         align-items: center;
         gap: 6px;
         flex: 0 0 auto;
+        /* Desktop: Convert stays last (after bib / engine tools) */
+        order: 30;
       }
 
       .topbar-actions-right {
         display: contents;
+      }
+
+      /* Desktop order inside .topbar-actions (wrappers use display: contents) */
+      .topbar-actions .bib-wrap {
+        order: 10;
+      }
+
+      .topbar-actions .bib-button {
+        order: 11;
+      }
+
+      .topbar-actions .engine-wrap {
+        order: 12;
       }
 
       .toolbar-button {
@@ -1877,9 +1892,8 @@
       }
 
       /*
-        Tablet landscape: desktop 3-column kicks in above 920px, but the workspace
-        column is too narrow for Collaborate / Login / Save / … — give the toolbar
-        a full-width fixed row and a dedicated scrolling actions lane.
+        Tablet landscape: keep a full-width toolbar (workspace column is too narrow),
+        but use the classic desktop button order — Convert last.
       */
       @media (orientation: landscape) and (min-width: 921px) and (max-width: 1180px) {
         .app,
@@ -1921,11 +1935,12 @@
         .workspace .topbar {
           grid-column: 1 / -1;
           grid-row: 1;
-          display: grid;
-          /* File name | left actions | Convert | engine actions */
-          grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr);
+          display: flex;
+          flex-direction: row;
+          flex-wrap: nowrap;
           align-items: center;
-          column-gap: 8px;
+          justify-content: space-between;
+          gap: 12px;
           height: 52px;
           min-height: 52px;
           max-height: 52px;
@@ -1935,113 +1950,75 @@
         }
 
         .workspace .file-title {
-          grid-column: 1;
-          grid-row: 1;
-          z-index: 1;
+          flex: 0 1 12rem;
           min-width: 0;
-          max-width: none;
-          width: auto;
+          max-width: 14rem;
           overflow: hidden;
-          padding: 0 4px 0 0;
-          box-sizing: border-box;
         }
 
         .workspace .file-title span {
           display: none;
         }
 
+        /* Same classic desktop order: … Save, Bib, Update Bib, Engine, Convert */
         .workspace .topbar-actions {
-          grid-column: 1 / -1;
-          grid-row: 1;
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr);
-          align-items: center;
-          column-gap: 8px;
-          flex: unset;
-          min-width: 0;
-          max-width: none;
-          overflow: visible;
-          pointer-events: none;
-        }
-
-        .workspace .topbar-actions > * {
-          pointer-events: auto;
-        }
-
-        .workspace .topbar-actions-left {
           display: flex;
-          grid-column: 2;
+          flex: 1 1 auto;
           flex-wrap: nowrap;
           align-items: center;
           justify-content: flex-end;
           gap: 8px;
-          width: auto;
           min-width: 0;
-          overflow: visible;
-          padding: 0;
-          z-index: 2;
-        }
-
-        .workspace .topbar-actions-left > * {
-          flex: 0 0 auto;
-        }
-
-        .workspace .topbar-convert-cluster {
-          grid-column: 3;
-          justify-self: center;
-          z-index: 2;
-        }
-
-        .workspace .topbar-actions-right {
-          display: flex;
-          grid-column: 4;
-          flex-wrap: nowrap;
-          align-items: center;
-          justify-content: flex-start;
-          gap: 8px;
-          min-width: 0;
-          max-width: 100%;
+          max-width: none;
           overflow-x: auto;
           overflow-y: hidden;
-          padding-right: 0;
           -webkit-overflow-scrolling: touch;
           scrollbar-width: none;
         }
 
-        .workspace .topbar-actions-right::-webkit-scrollbar {
+        .workspace .topbar-actions::-webkit-scrollbar {
           display: none;
         }
 
-        .workspace .topbar-actions-right > * {
-          flex: 0 0 auto;
+        .workspace .topbar-actions-left,
+        .workspace .topbar-actions-right {
+          display: contents;
         }
 
-        .workspace .convert-button {
-          order: unset;
-          flex: 0 0 auto;
-          min-height: 38px;
-          min-width: 7.25rem;
-          padding: 0 18px;
-          font-size: 14px;
-          font-weight: 700;
+        .workspace .topbar-convert-cluster {
+          order: 30;
         }
 
-        .workspace .bib-button {
-          min-height: 36px;
-          padding: 0 10px;
-          font-size: 13px;
+        .workspace .topbar-actions .bib-wrap {
+          order: 10;
         }
 
-        .workspace #collaborate svg {
-          display: none;
+        .workspace .topbar-actions .bib-button {
+          order: 11;
+        }
+
+        .workspace .topbar-actions .engine-wrap {
+          order: 12;
         }
 
         .workspace .toolbar-button,
         .workspace .engine-button,
-        .workspace .save-button {
+        .workspace .save-button,
+        .workspace .bib-button,
+        .workspace .convert-button {
           min-height: 36px;
           padding: 0 10px;
           font-size: 13px;
+        }
+
+        .workspace .convert-button {
+          min-width: 6.75rem;
+          padding: 0 14px;
+          font-weight: 700;
+        }
+
+        .workspace #collaborate svg {
+          display: none;
         }
 
         .workspace .editor-wrap {
