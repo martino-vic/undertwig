@@ -2706,7 +2706,7 @@
                   <input id="inviteEmail" name="email" type="email" autocomplete="email" placeholder="colleague@example.com" required>
                   <button type="submit" id="inviteSubmit">Send invite</button>
                   <button type="button" class="invite-copy-link" id="copyInviteLink">Copy invitation link</button>
-                  <button type="button" class="invite-cancel hidden" id="inviteCancel" hidden>Cancel upload</button>
+                  <button type="button" class="invite-cancel hidden" id="inviteCancel" hidden>Cancel</button>
                   <p class="invite-status" id="inviteStatus" aria-live="polite"></p>
                 </form>
                 <p class="hover-box-note" id="collaborateNote">Undertwig is free.</p>
@@ -2981,7 +2981,7 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260729b"></script>
-    <script src="cloud-storage.js?v=20260729c"></script>
+    <script src="cloud-storage.js?v=20260729d"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -3770,6 +3770,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       const copyInviteLinkButton = document.getElementById("copyInviteLink");
       const inviteCancelButton = document.getElementById("inviteCancel");
       let inviteAbortController = null;
+      let backgroundInviteUploadController = null;
       const loginButton = document.getElementById("loginButton");
       const accountWrap = document.getElementById("accountWrap");
       const accountButton = document.getElementById("accountButton");
@@ -4203,6 +4204,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       function closeHoverBoxes() {
+        // Only cancel the short invite UI wait — background Drive sync keeps going.
         if (inviteAbortController) {
           try {
             inviteAbortController.abort();
@@ -4448,6 +4450,63 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
       }
 
+      function flushActiveEditorToState() {
+        const active = state.files[state.activeFile];
+        if (active && !active.binary) {
+          active.content = UndertwigEditor.getValue();
+        }
+      }
+
+      function startBackgroundInviteUpload(projectName) {
+        if (backgroundInviteUploadController) {
+          try {
+            backgroundInviteUploadController.abort();
+          } catch (_error) {
+            // Ignore.
+          }
+        }
+        const controller = new AbortController();
+        backgroundInviteUploadController = controller;
+        flushActiveEditorToState();
+        setStatus(
+          "Invite ready. Syncing “" + projectName + "” to Google Drive in the background…"
+        );
+        UndertwigCloud.saveProject(state, {
+          projectName: projectName,
+          signal: controller.signal,
+          onProgress: function (message) {
+            if (controller.signal.aborted) {
+              return;
+            }
+            setStatus(
+              (message || "Syncing to Google Drive…") + " (invite already shared)"
+            );
+          },
+        })
+          .then(function () {
+            if (backgroundInviteUploadController !== controller || controller.signal.aborted) {
+              return;
+            }
+            backgroundInviteUploadController = null;
+            renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+            setStatus("Synced “" + projectName + "” to Google Drive.");
+          })
+          .catch(function (error) {
+            if (backgroundInviteUploadController === controller) {
+              backgroundInviteUploadController = null;
+            }
+            if (error && error.name === "AbortError") {
+              return;
+            }
+            setStatus(
+              "Background Drive sync failed: " +
+                ((error && error.message) || "unknown error") +
+                ". Click Save to retry.",
+              true
+            );
+          });
+      }
+
       async function prepareInviteLink(signal) {
         const projectName = getActiveProjectName();
         if (!projectName) {
@@ -4465,24 +4524,17 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           throw new Error("Allow Google Drive access, then click Copy invitation link again.");
         }
 
-        const active = state.files[state.activeFile];
-        if (active && !active.binary) {
-          active.content = UndertwigEditor.getValue();
-        }
-
-        setInviteStatus("Uploading “" + projectName + "” to Google Drive / Undertwig…");
-        await UndertwigCloud.saveProject(state, {
-          projectName: projectName,
-          signal: signal,
-          onProgress: function (message) {
-            if (signal && signal.aborted) {
-              return;
-            }
-            setInviteStatus(message || "Uploading to Google Drive…");
-          },
-        });
+        flushActiveEditorToState();
+        setInviteStatus("Preparing invitation link…");
+        await UndertwigCloud.connect();
         if (signal && signal.aborted) {
-          const cancelled = new Error("Upload cancelled.");
+          const cancelled = new Error("Cancelled.");
+          cancelled.name = "AbortError";
+          throw cancelled;
+        }
+        const folderId = await UndertwigCloud.ensureProjectFolder(projectName);
+        if (signal && signal.aborted) {
+          const cancelled = new Error("Cancelled.");
           cancelled.name = "AbortError";
           throw cancelled;
         }
@@ -4490,10 +4542,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           UndertwigCloud.setActiveProjectByName(projectName);
         }
         const inviteUrl = buildInviteProjectUrl();
-        if (!UndertwigCloud.getProjectFileId || !UndertwigCloud.getProjectFileId()) {
+        if (!folderId || !UndertwigCloud.getProjectFileId || !UndertwigCloud.getProjectFileId()) {
           throw new Error("Could not resolve the Google Drive folder for this project.");
         }
-        renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+        renderCloudStatus("connected", folderId);
+        startBackgroundInviteUpload(projectName);
         return { projectName: projectName, inviteUrl: inviteUrl };
       }
 
@@ -4630,7 +4683,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           if (!inviteAbortController) {
             return;
           }
-          setInviteStatus("Cancelling upload…");
+          setInviteStatus("Cancelling…");
           try {
             inviteAbortController.abort();
           } catch (_error) {
@@ -4652,11 +4705,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         try {
           const prepared = await prepareInviteLink(controller.signal);
           await copyTextToClipboard(prepared.inviteUrl);
-          setInviteStatus("Invitation link copied.", "success");
-          setStatus("Copied invitation link for “" + prepared.projectName + "”.");
+          setInviteStatus(
+            "Invitation link copied. Project files are syncing to Drive in the background.",
+            "success"
+          );
         } catch (error) {
           if (error && error.name === "AbortError") {
-            setInviteStatus("Upload cancelled.");
+            setInviteStatus("Cancelled.");
           } else {
             setInviteStatus(
               (error && error.message) || "Could not copy the invitation link.",
@@ -4700,46 +4755,33 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           setInviteStatus("Allow Google permission if a popup appears…");
           await UndertwigInvite.connectForCollaboration();
           if (controller.signal.aborted) {
-            throw Object.assign(new Error("Upload cancelled."), { name: "AbortError" });
+            throw Object.assign(new Error("Cancelled."), { name: "AbortError" });
           }
 
-          const active = state.files[state.activeFile];
-          if (active && !active.binary) {
-            active.content = UndertwigEditor.getValue();
-          }
-
-          setInviteStatus("Uploading “" + projectName + "” to Google Drive / Undertwig…");
-          await UndertwigCloud.saveProject(state, {
-            projectName: projectName,
-            signal: controller.signal,
-            onProgress: function (message) {
-              if (controller.signal.aborted) {
-                return;
-              }
-              setInviteStatus(message || "Uploading to Google Drive…");
-            },
-          });
-          if (controller.signal.aborted) {
-            throw Object.assign(new Error("Upload cancelled."), { name: "AbortError" });
-          }
+          flushActiveEditorToState();
           setInviteStatus("Sharing “" + projectName + "” with " + email + "…");
           await UndertwigCloud.shareProjectWithEmail(email, "writer", projectName);
           if (controller.signal.aborted) {
-            throw Object.assign(new Error("Upload cancelled."), { name: "AbortError" });
+            throw Object.assign(new Error("Cancelled."), { name: "AbortError" });
+          }
+          if (UndertwigCloud.setActiveProjectByName) {
+            UndertwigCloud.setActiveProjectByName(projectName);
           }
           const inviteUrl = buildInviteProjectUrl();
           setInviteStatus("Sending invitation email…");
           await UndertwigInvite.sendCollaborationInvite(email, inviteUrl);
+          startBackgroundInviteUpload(projectName);
           setInviteStatus(
-            "Invitation sent to " + email + ". They can edit your “" + projectName + "” folder in your Drive.",
+            "Invitation sent to " +
+              email +
+              ". Project files are syncing to Drive in the background.",
             "success"
           );
           inviteEmail.value = "";
-          setStatus("Shared “" + projectName + "” and invited " + email + ".");
           renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
         } catch (error) {
           if (error && error.name === "AbortError") {
-            setInviteStatus("Upload cancelled.");
+            setInviteStatus("Cancelled.");
           } else {
             setInviteStatus(
               (error && error.message) || "Could not send the invitation.",

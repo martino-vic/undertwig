@@ -2302,6 +2302,7 @@
     syncFromDrive,
     pullProjectFromDrive,
     shareProjectWithEmail,
+    ensureProjectFolder,
     refreshProjectMeta,
     probeConnection,
     previewSaveDeletions,
