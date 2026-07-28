@@ -158,8 +158,7 @@
         padding: 0;
       }
 
-      /* File title lives in the workspace topbar except phone landscape */
-      .sidebar-head > .file-title {
+      .topbar-brand {
         display: none;
       }
 
@@ -1837,8 +1836,8 @@
           top: auto !important;
           z-index: 5;
           display: grid !important;
-          /* Stable toolbar: left actions | Convert | right actions (independent of tree width) */
-          grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+          /* Brand (above files) | left actions | Convert | right actions */
+          grid-template-columns: minmax(132px, 28vw) minmax(0, 1fr) auto minmax(0, 1fr);
           align-items: center;
           column-gap: 6px;
           height: 48px;
@@ -1853,6 +1852,41 @@
           gap: 6px;
         }
 
+        .app.explorer-collapsed .workspace .topbar,
+        .app.explorer-collapsed .workspace .topbar-actions {
+          grid-template-columns: 48px minmax(0, 1fr) auto minmax(0, 1fr);
+        }
+
+        .workspace .topbar-brand {
+          display: flex;
+          grid-column: 1;
+          grid-row: 1;
+          align-items: center;
+          min-width: 0;
+          overflow: hidden;
+          padding-right: 4px;
+          z-index: 1;
+        }
+
+        .workspace .topbar-brand strong {
+          overflow: hidden;
+          font-size: 14px;
+          font-weight: 700;
+          letter-spacing: 0.01em;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .app.explorer-collapsed .workspace .topbar-brand {
+          justify-content: center;
+          padding: 0;
+        }
+
+        .app.explorer-collapsed .workspace .topbar-brand strong {
+          font-size: 11px;
+          letter-spacing: -0.03em;
+        }
+
         .workspace .file-title {
           display: none;
         }
@@ -1865,7 +1899,7 @@
           grid-column: 1 / -1;
           grid-row: 1;
           display: grid !important;
-          grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+          grid-template-columns: minmax(132px, 28vw) minmax(0, 1fr) auto minmax(0, 1fr);
           align-items: center;
           column-gap: 6px;
           flex: unset;
@@ -1884,7 +1918,7 @@
 
         .workspace .topbar-actions-left {
           display: flex;
-          grid-column: 1;
+          grid-column: 2;
           flex-wrap: nowrap;
           align-items: center;
           justify-content: flex-end;
@@ -1903,7 +1937,7 @@
 
         .workspace .topbar-convert-cluster {
           display: inline-flex;
-          grid-column: 2;
+          grid-column: 3;
           order: 0 !important;
           flex: 0 0 auto;
           justify-self: center;
@@ -1912,7 +1946,7 @@
 
         .workspace .topbar-actions-right {
           display: flex;
-          grid-column: 3;
+          grid-column: 4;
           flex-wrap: nowrap;
           align-items: center;
           justify-content: flex-start;
@@ -2481,6 +2515,9 @@
 
       <section class="workspace" aria-label="LaTeX source editor">
         <div class="topbar">
+          <div class="topbar-brand" aria-label="Undertwig">
+            <strong>Undertwig</strong>
+          </div>
           <div class="file-title">
             <strong id="activeFileName">main.tex</strong>
             <span id="activeFileMeta">Write LaTeX, then convert locally</span>
@@ -4357,7 +4394,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
           if (fileTitle.parentElement !== workspaceTopbar) {
-            workspaceTopbar.insertBefore(fileTitle, workspaceTopbar.firstChild);
+            const actions = workspaceTopbar.querySelector(".topbar-actions");
+            workspaceTopbar.insertBefore(fileTitle, actions || null);
           }
         }
 
