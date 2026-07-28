@@ -2990,7 +2990,7 @@
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
-    <script src="latex-engines.js?v=20260728an"></script>
+    <script src="latex-engines.js?v=20260729a"></script>
     <script src="latex-editor.js?v=20260728ax"></script>
     <script>
 
@@ -7349,10 +7349,35 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         convertButton.textContent = ABORT_BUTTON_LABEL;
         convertButton.title = "Cancel bibliography update";
         startConvertSpinner();
-        setStatus("Running " + toolLabel + "…");
-        compileLog.textContent = "Running " + toolLabel + "…\n";
+        const bibStartedAt = Date.now();
+        let lastBibMessage =
+          "Updating bibliography with " +
+          toolLabel +
+          "… First run may download the engine.";
+        let lastBibStatus = "";
+        let bibProgressTimer = null;
+        function paintBibStatus() {
+          if (abortController.signal.aborted) {
+            return;
+          }
+          const elapsedSec = Math.floor((Date.now() - bibStartedAt) / 1000);
+          const statusLine =
+            elapsedSec >= 3
+              ? lastBibMessage + " (" + elapsedSec + "s)"
+              : lastBibMessage;
+          if (statusLine !== lastBibStatus) {
+            lastBibStatus = statusLine;
+            setStatus(statusLine);
+          }
+        }
+        setStatus(lastBibMessage);
+        compileLog.textContent =
+          "Updating bibliography with " +
+          toolLabel +
+          "…\nFirst run may download the BibTeX/Biber engine (can take about a minute).\n";
         logPanel.classList.remove("hidden");
         setLogCollapsed(false);
+        bibProgressTimer = setInterval(paintBibStatus, 1000);
 
         try {
           const result = await UndertwigEngines.runBibliography(projectFiles, {
@@ -7361,13 +7386,18 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               if (abortController.signal.aborted) {
                 return;
               }
-              const line = message || "Running " + toolLabel + "…";
-              setStatus(line);
-              // Keep the compiler log visible and informative while BusyTeX prints.
+              const line = String(message || "").trim() || "Running " + toolLabel + "…";
+              lastBibMessage = line;
+              paintBibStatus();
+              // Keep the compiler log visible; skip duplicate consecutive lines.
               const existing = compileLog.textContent || "";
-              const next = existing.endsWith("\n") ? existing + line : existing + "\n" + line;
-              compileLog.textContent = next.slice(-8000);
-              compileLog.scrollTop = compileLog.scrollHeight;
+              if (!existing.endsWith(line) && !existing.endsWith(line + "\n")) {
+                const next = existing.endsWith("\n")
+                  ? existing + line
+                  : existing + "\n" + line;
+                compileLog.textContent = next.slice(-8000);
+                compileLog.scrollTop = compileLog.scrollHeight;
+              }
             },
           });
 
@@ -7420,6 +7450,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           setLogCollapsed(false);
           setStatus(`Update bibliography failed: ${message}`, true);
         } finally {
+          if (bibProgressTimer) {
+            clearInterval(bibProgressTimer);
+            bibProgressTimer = null;
+          }
           if (conversionAbortController === abortController) {
             conversionAbortController = null;
           }

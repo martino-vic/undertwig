@@ -1074,13 +1074,14 @@
     throwIfAborted(signal);
 
     if (auxHasBibtexHooks(projectFiles)) {
+      notify("Using existing main.aux citation data.");
       return Promise.resolve({ files: projectFiles, wroteAux: false });
     }
 
     notify(
       findMainAux(projectFiles)
-        ? "Refreshing main.aux with pdfLaTeX before BibTeX…"
-        : "Creating main.aux with pdfLaTeX before BibTeX…"
+        ? "Refreshing main.aux with pdfLaTeX (needed before BibTeX)…"
+        : "Creating main.aux with pdfLaTeX (needed before BibTeX)…"
     );
     return compileWithPdfLaTeX(projectFiles, {
       onProgress: notify,
@@ -1280,23 +1281,80 @@
   }
 
   function runBibliography(projectFiles, options) {
-    const notify = options && options.onProgress ? options.onProgress : function () {};
+    const rawNotify = options && options.onProgress ? options.onProgress : function () {};
     const signal = options && options.signal;
     const tool = selectedBibTool;
     const toolLabel = getSelectedBibToolLabel();
+    const totalStages = tool === BIBER ? 4 : 3;
+    let stageIndex = 0;
+    let stageTitle = "";
+
+    const notify = function (message) {
+      rawNotify(String(message || ""));
+    };
+
+    const beginStage = function (index, title, detail) {
+      stageIndex = index;
+      stageTitle = String(title || "");
+      const head =
+        "Bibliography (" + index + "/" + totalStages + "): " + stageTitle;
+      const extra = detail ? " — " + detail : "";
+      notify(head + extra);
+    };
+
+    const stageDetail = function (detail) {
+      const text = String(detail || "").replace(/\s+/g, " ").trim();
+      if (!text) {
+        return;
+      }
+      if (stageIndex && stageTitle) {
+        notify(
+          "Bibliography (" +
+            stageIndex +
+            "/" +
+            totalStages +
+            "): " +
+            stageTitle +
+            " — " +
+            text
+        );
+        return;
+      }
+      notify(text);
+    };
 
     const loadWorker = function () {
       throwIfAborted(signal);
+      if (luaReady && luaWorker) {
+        beginStage(
+          tool === BIBER ? 1 : 2,
+          "Loading " + toolLabel + " engine",
+          "Using cached engine"
+        );
+        return Promise.resolve();
+      }
+      beginStage(
+        tool === BIBER ? 1 : 2,
+        "Loading " + toolLabel + " engine",
+        "Downloading assets (first time can take about a minute)"
+      );
       return abortable(
         ensureLuaWorker(function (message) {
           if (signal && signal.aborted) {
             return;
           }
-          const text = String(message || "");
-          if (/Preparing|Downloading|complete/i.test(text)) {
-            notify("Downloading LuaLaTeX assets… " + text);
-          } else {
-            notify(text);
+          const text = String(message || "").replace(/\s+/g, " ").trim();
+          if (!text) {
+            return;
+          }
+          // Keep status on the stage; surface useful download crumbs only.
+          if (
+            /Preparing|Downloading|Fetching|complete|texlive|wasm|package/i.test(
+              text
+            ) ||
+            text.length < 100
+          ) {
+            stageDetail(text);
           }
         }),
         signal,
@@ -1316,13 +1374,14 @@
 
     if (tool !== BIBER) {
       // BibTeX: create aux with pdfLaTeX if needed, then bibtex8 only (no Lua pass).
-      const run = ensureBibtexAux(projectFiles, notify, signal).then(function (auxResult) {
+      beginStage(1, "Preparing citation data", "Checking main.aux");
+      const run = ensureBibtexAux(projectFiles, stageDetail, signal).then(function (auxResult) {
         throwIfAborted(signal);
         return loadWorker().then(function () {
           throwIfAborted(signal);
-          notify("Running " + toolLabel + "…");
+          beginStage(3, "Running " + toolLabel);
           const files = projectFilesToBusyTex(auxResult.files);
-          return postBibToolToWorker(files, tool, notify, signal).then(function (data) {
+          return postBibToolToWorker(files, tool, stageDetail, signal).then(function (data) {
             throwIfAborted(signal);
             const outputs = Object.assign({}, data.outputs || {});
             // Surface freshly created aux so the app can persist it.
@@ -1355,17 +1414,18 @@
     const run = loadWorker()
       .then(function () {
         throwIfAborted(signal);
-        return ensureLuaTexJa(notify);
+        beginStage(2, "Preparing LuaLaTeX extras");
+        return ensureLuaTexJa(stageDetail);
       })
       .then(function () {
         throwIfAborted(signal);
-        return ensureLuaLibertinus(notify);
+        return ensureLuaLibertinus(stageDetail);
       })
       .then(function () {
         throwIfAborted(signal);
         const files = mergeLuaEngineFiles(projectFiles);
-        notify("Preparing Biber control file (.bcf)…");
-        return postBibToolToWorker(files, BIBER, notify, signal).then(function (prep) {
+        beginStage(3, "Preparing Biber control file", "Building main.bcf");
+        return postBibToolToWorker(files, BIBER, stageDetail, signal).then(function (prep) {
           throwIfAborted(signal);
           const preparedFiles = mergePreparedOutputs(projectFiles, prep && prep.outputs);
           const hasBcf = Object.keys(preparedFiles).some(function (path) {
@@ -1382,7 +1442,8 @@
             };
           }
 
-          return runTypewardBiber(preparedFiles, notify, signal).then(function (result) {
+          beginStage(4, "Running Biber");
+          return runTypewardBiber(preparedFiles, stageDetail, signal).then(function (result) {
             throwIfAborted(signal);
             const outputs = upgradeBiberOutputs(
               Object.assign({}, (prep && prep.outputs) || {}, result.outputs || {})
