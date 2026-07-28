@@ -2966,24 +2966,6 @@
       })();
     </script>
 
-    <div class="modal-overlay hidden" id="driveDeleteDialog" hidden aria-hidden="true" inert aria-labelledby="driveDeleteTitle" aria-describedby="driveDeleteMessage">
-      <div class="modal-card">
-        <h2 id="driveDeleteTitle">Remove files from Google Drive?</h2>
-        <p id="driveDeleteMessage">
-          Saving will permanently remove these items from Google Drive because they were deleted locally. Do you want to continue?
-        </p>
-        <ul id="driveDeleteList"></ul>
-        <label class="modal-check">
-          <input type="checkbox" id="driveDeleteDontShow">
-          <span>Don't show this message again</span>
-        </label>
-        <div class="modal-actions">
-          <button type="button" id="driveDeleteCancel">No</button>
-          <button type="button" class="modal-confirm" id="driveDeleteConfirm">Yes</button>
-        </div>
-      </div>
-    </div>
-
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260728q"></script>
     <script src="cloud-storage.js?v=20260728ax"></script>
@@ -4032,13 +4014,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       const DRIVE_DELETE_SKIP_KEY = "undertwig-skip-drive-delete-warning-v1";
-      const driveDeleteDialog = document.getElementById("driveDeleteDialog");
-      const driveDeleteList = document.getElementById("driveDeleteList");
-      const driveDeleteMessage = document.getElementById("driveDeleteMessage");
-      const driveDeleteDontShow = document.getElementById("driveDeleteDontShow");
-      const driveDeleteCancel = document.getElementById("driveDeleteCancel");
-      const driveDeleteConfirm = document.getElementById("driveDeleteConfirm");
+      // Mounted only when a Drive delete confirmation is needed (keeps it out of the a11y tree otherwise).
+      let driveDeleteDialog = null;
+      let driveDeleteList = null;
+      let driveDeleteMessage = null;
+      let driveDeleteDontShow = null;
+      let driveDeleteCancel = null;
+      let driveDeleteConfirm = null;
       let driveDeleteDialogResolver = null;
+      let driveDeleteEscapeBound = false;
 
       function readSkipDriveDeleteWarning() {
         try {
@@ -4060,19 +4044,103 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
       }
 
+      function ensureDriveDeleteDialog() {
+        if (driveDeleteDialog) {
+          return driveDeleteDialog;
+        }
+
+        const overlay = document.createElement("div");
+        overlay.className = "modal-overlay hidden";
+        overlay.id = "driveDeleteDialog";
+        overlay.hidden = true;
+        overlay.setAttribute("aria-hidden", "true");
+        overlay.inert = true;
+        overlay.setAttribute("aria-labelledby", "driveDeleteTitle");
+        overlay.setAttribute("aria-describedby", "driveDeleteMessage");
+        overlay.innerHTML =
+          '<div class="modal-card">' +
+          '<h2 id="driveDeleteTitle">Remove files from Google Drive?</h2>' +
+          '<p id="driveDeleteMessage">' +
+          "Saving will permanently remove these items from Google Drive because they were deleted locally. Do you want to continue?" +
+          "</p>" +
+          '<ul id="driveDeleteList"></ul>' +
+          '<label class="modal-check">' +
+          '<input type="checkbox" id="driveDeleteDontShow">' +
+          "<span>Don't show this message again</span>" +
+          "</label>" +
+          '<div class="modal-actions">' +
+          '<button type="button" id="driveDeleteCancel">No</button>' +
+          '<button type="button" class="modal-confirm" id="driveDeleteConfirm">Yes</button>' +
+          "</div>" +
+          "</div>";
+
+        driveDeleteDialog = overlay;
+        driveDeleteList = overlay.querySelector("#driveDeleteList");
+        driveDeleteMessage = overlay.querySelector("#driveDeleteMessage");
+        driveDeleteDontShow = overlay.querySelector("#driveDeleteDontShow");
+        driveDeleteCancel = overlay.querySelector("#driveDeleteCancel");
+        driveDeleteConfirm = overlay.querySelector("#driveDeleteConfirm");
+
+        driveDeleteCancel.addEventListener("click", function () {
+          closeDriveDeleteDialog(false);
+        });
+        driveDeleteConfirm.addEventListener("click", function () {
+          if (driveDeleteDontShow.checked) {
+            writeSkipDriveDeleteWarning(true);
+          }
+          closeDriveDeleteDialog(true);
+        });
+        overlay.addEventListener("click", function (event) {
+          if (event.target === overlay) {
+            closeDriveDeleteDialog(false);
+          }
+        });
+
+        if (!driveDeleteEscapeBound) {
+          driveDeleteEscapeBound = true;
+          document.addEventListener("keydown", function (event) {
+            if (
+              event.key === "Escape" &&
+              driveDeleteDialog &&
+              driveDeleteDialog.isConnected &&
+              !driveDeleteDialog.hidden
+            ) {
+              event.preventDefault();
+              closeDriveDeleteDialog(false);
+            }
+          });
+        }
+
+        return overlay;
+      }
+
       function setDriveDeleteDialogOpen(open) {
-        driveDeleteDialog.classList.toggle("hidden", !open);
-        driveDeleteDialog.hidden = !open;
         if (open) {
-          driveDeleteDialog.setAttribute("role", "alertdialog");
-          driveDeleteDialog.setAttribute("aria-modal", "true");
-          driveDeleteDialog.removeAttribute("aria-hidden");
-          driveDeleteDialog.inert = false;
-        } else {
-          driveDeleteDialog.removeAttribute("role");
-          driveDeleteDialog.removeAttribute("aria-modal");
-          driveDeleteDialog.setAttribute("aria-hidden", "true");
-          driveDeleteDialog.inert = true;
+          const dialog = ensureDriveDeleteDialog();
+          if (!dialog.isConnected) {
+            document.body.appendChild(dialog);
+          }
+          dialog.classList.remove("hidden");
+          dialog.hidden = false;
+          dialog.setAttribute("role", "alertdialog");
+          dialog.setAttribute("aria-modal", "true");
+          dialog.removeAttribute("aria-hidden");
+          dialog.inert = false;
+          return;
+        }
+
+        if (!driveDeleteDialog) {
+          return;
+        }
+        driveDeleteDialog.classList.add("hidden");
+        driveDeleteDialog.hidden = true;
+        driveDeleteDialog.removeAttribute("role");
+        driveDeleteDialog.removeAttribute("aria-modal");
+        driveDeleteDialog.setAttribute("aria-hidden", "true");
+        driveDeleteDialog.inert = true;
+        // Detach when closed so Assistive tech never sees Drive chrome on local-only visits.
+        if (driveDeleteDialog.isConnected) {
+          driveDeleteDialog.remove();
         }
       }
 
@@ -4093,6 +4161,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return Promise.resolve(true);
         }
 
+        ensureDriveDeleteDialog();
         const names = deletions.map(function (item) {
           const label = item.path || item.name || "";
           return (item.type === "folder" ? label + "/" : label) || "(unnamed)";
@@ -4115,27 +4184,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           driveDeleteDialogResolver = resolve;
         });
       }
-
-      driveDeleteCancel.addEventListener("click", () => {
-        closeDriveDeleteDialog(false);
-      });
-      driveDeleteConfirm.addEventListener("click", () => {
-        if (driveDeleteDontShow.checked) {
-          writeSkipDriveDeleteWarning(true);
-        }
-        closeDriveDeleteDialog(true);
-      });
-      driveDeleteDialog.addEventListener("click", (event) => {
-        if (event.target === driveDeleteDialog) {
-          closeDriveDeleteDialog(false);
-        }
-      });
-      document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !driveDeleteDialog.hidden) {
-          event.preventDefault();
-          closeDriveDeleteDialog(false);
-        }
-      });
 
       function closeHoverBoxes() {
         restoreHoverBoxHost(collaborateBox);
