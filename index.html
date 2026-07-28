@@ -1423,12 +1423,34 @@
         background: var(--brand-strong);
       }
 
+      .get-app-bar-dismiss {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        margin: 0;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .get-app-bar-dismiss:hover {
+        color: var(--text);
+        border-color: color-mix(in srgb, var(--border) 70%, var(--text));
+      }
+
       @media (max-width: 1180px) {
-        html:not(.mobile-gate) .get-app-bar {
+        html:not(.mobile-gate):not(.get-app-bar-dismissed) .get-app-bar {
           display: flex;
         }
 
-        html:not(.mobile-gate) .app {
+        html:not(.mobile-gate):not(.get-app-bar-dismissed) .app {
           padding-bottom: calc(52px + env(safe-area-inset-bottom));
         }
       }
@@ -2600,6 +2622,7 @@
       </div>
       <div class="get-app-bar-actions">
         <button class="get-app-bar-button" id="getAppOpenGate" type="button">Get the app</button>
+        <button class="get-app-bar-dismiss" id="getAppDismiss" type="button" aria-label="Hide for now">×</button>
       </div>
     </div>
 
@@ -2794,25 +2817,84 @@
     <script>
       (function initMobileAppGate() {
         var MOBILE_QUERY = "(max-width: 1180px)";
+        var GET_APP_BAR_DISMISS_KEY = "undertwig-get-app-bar-dismissed-until-v1";
+        var GET_APP_BAR_HIDE_MS = 30 * 60 * 1000;
         var gate = document.getElementById("mobileAppGate");
         var appRoot = document.getElementById("app");
         var continueButton = document.getElementById("mobileContinueBrowser");
         var getAppBar = document.getElementById("getAppBar");
         var getAppOpenGate = document.getElementById("getAppOpenGate");
+        var getAppDismiss = document.getElementById("getAppDismiss");
+        var revealTimer = null;
         if (!gate) return;
 
         function isMobileViewport() {
           return window.matchMedia(MOBILE_QUERY).matches;
         }
 
+        function dismissedUntil() {
+          try {
+            return Number(localStorage.getItem(GET_APP_BAR_DISMISS_KEY) || "0") || 0;
+          } catch (_) {
+            return 0;
+          }
+        }
+
+        function isBarDismissed() {
+          return dismissedUntil() > Date.now();
+        }
+
+        function clearBarDismiss() {
+          try {
+            localStorage.removeItem(GET_APP_BAR_DISMISS_KEY);
+          } catch (_) {}
+          document.documentElement.classList.remove("get-app-bar-dismissed");
+        }
+
         function syncGetAppBar() {
           if (!getAppBar) {
             return;
           }
+          var dismissed = isBarDismissed();
+          document.documentElement.classList.toggle("get-app-bar-dismissed", dismissed);
           var showBar =
-            isMobileViewport() && !document.documentElement.classList.contains("mobile-gate");
+            isMobileViewport() &&
+            !document.documentElement.classList.contains("mobile-gate") &&
+            !dismissed;
           getAppBar.hidden = !showBar;
           getAppBar.setAttribute("aria-hidden", showBar ? "false" : "true");
+        }
+
+        function scheduleBarReveal() {
+          if (revealTimer) {
+            clearTimeout(revealTimer);
+            revealTimer = null;
+          }
+          var until = dismissedUntil();
+          var remaining = until - Date.now();
+          if (remaining <= 0) {
+            if (until > 0) {
+              clearBarDismiss();
+            }
+            syncGetAppBar();
+            return;
+          }
+          document.documentElement.classList.add("get-app-bar-dismissed");
+          syncGetAppBar();
+          revealTimer = setTimeout(function () {
+            clearBarDismiss();
+            syncGetAppBar();
+          }, remaining);
+        }
+
+        function dismissGetAppBar() {
+          try {
+            localStorage.setItem(
+              GET_APP_BAR_DISMISS_KEY,
+              String(Date.now() + GET_APP_BAR_HIDE_MS)
+            );
+          } catch (_) {}
+          scheduleBarReveal();
         }
 
         function showGate() {
@@ -2838,7 +2920,7 @@
           if (appRoot) {
             appRoot.removeAttribute("inert");
           }
-          syncGetAppBar();
+          scheduleBarReveal();
         }
 
         // Every mobile load/refresh starts on the landing gate (no persisted skip).
@@ -2846,7 +2928,7 @@
           showGate();
         } else {
           gate.setAttribute("aria-hidden", "true");
-          syncGetAppBar();
+          scheduleBarReveal();
         }
 
         if (continueButton) {
@@ -2858,6 +2940,12 @@
         if (getAppOpenGate) {
           getAppOpenGate.addEventListener("click", function () {
             showGate();
+          });
+        }
+
+        if (getAppDismiss) {
+          getAppDismiss.addEventListener("click", function () {
+            dismissGetAppBar();
           });
         }
 
