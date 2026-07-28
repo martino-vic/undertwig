@@ -654,15 +654,93 @@
       });
   }
 
+  function createAbortError(message) {
+    const error = new Error(message || "Conversion aborted.");
+    error.name = "AbortError";
+    return error;
+  }
+
+  function throwIfAborted(signal) {
+    if (signal && signal.aborted) {
+      throw createAbortError();
+    }
+  }
+
+  function abortable(promise, signal, onAbort) {
+    if (!signal) {
+      return promise;
+    }
+    if (signal.aborted) {
+      if (typeof onAbort === "function") {
+        try {
+          onAbort();
+        } catch (_error) {
+          // Ignore.
+        }
+      }
+      return Promise.reject(createAbortError());
+    }
+    return new Promise(function (resolve, reject) {
+      const onAbortEvent = function () {
+        if (typeof onAbort === "function") {
+          try {
+            onAbort();
+          } catch (_error) {
+            // Ignore.
+          }
+        }
+        reject(createAbortError());
+      };
+      signal.addEventListener("abort", onAbortEvent, { once: true });
+      promise.then(
+        function (value) {
+          signal.removeEventListener("abort", onAbortEvent);
+          resolve(value);
+        },
+        function (error) {
+          signal.removeEventListener("abort", onAbortEvent);
+          reject(error);
+        }
+      );
+    });
+  }
+
+  function terminatePdfEngine(engine) {
+    if (!engine) {
+      return;
+    }
+    try {
+      if (engine.latexWorker) {
+        try {
+          engine.latexWorker.terminate();
+        } catch (_error) {
+          // Ignore.
+        }
+        engine.latexWorker = undefined;
+      }
+    } catch (_error) {
+      // Ignore.
+    }
+    if (typeof engine.closeWorker === "function") {
+      try {
+        engine.closeWorker();
+      } catch (_error) {
+        // Ignore.
+      }
+    }
+  }
+
   function compileWithPdfLaTeX(projectFiles, options) {
     const notify = options && options.onProgress ? options.onProgress : function () {};
+    const signal = options && options.signal;
     const PdfTeXEngine = global.PdfTeXEngine;
     if (typeof PdfTeXEngine !== "function") {
       return Promise.reject(new Error("pdfLaTeX engine is not loaded."));
     }
 
     let engine = null;
-    return (async function () {
+    const run = (async function () {
+      throwIfAborted(signal);
       notify("Loading pdfLaTeX (PdfTeX)…");
       if (options && options.previousEngine && options.previousEngine.closeWorker) {
         try {
@@ -672,7 +750,10 @@
         }
       }
       engine = new PdfTeXEngine();
-      await engine.loadEngine();
+      await abortable(engine.loadEngine(), signal, function () {
+        terminatePdfEngine(engine);
+      });
+      throwIfAborted(signal);
 
       const folders = new Set();
       Object.keys(projectFiles).forEach(function (path) {
@@ -702,11 +783,15 @@
       let result = null;
       let auxFiles = {};
       for (let pass = 1; pass <= 2; pass += 1) {
+        throwIfAborted(signal);
         notify("Converting with pdfLaTeX (pass " + pass + "/2)…");
         Object.keys(auxFiles).forEach(function (path) {
           engine.writeMemFSFile(path, auxFiles[path]);
         });
-        result = await engine.compileLaTeX();
+        result = await abortable(engine.compileLaTeX(), signal, function () {
+          terminatePdfEngine(engine);
+        });
+        throwIfAborted(signal);
         if (result && result.aux && typeof result.aux === "object") {
           auxFiles = result.aux;
         }
@@ -724,12 +809,21 @@
         label: LABELS.pdflatex,
       };
     })();
+
+    return abortable(run, signal, function () {
+      terminatePdfEngine(engine);
+      engine = null;
+    });
   }
 
   function compileWithLuaLaTeX(projectFiles, options) {
     const notify = options && options.onProgress ? options.onProgress : function () {};
+    const signal = options && options.signal;
 
-    return ensureLuaWorker(function (message) {
+    const run = ensureLuaWorker(function (message) {
+      if (signal && signal.aborted) {
+        return;
+      }
       const text = String(message || "");
       if (/Preparing|Downloading|complete/i.test(text)) {
         notify("Downloading LuaLaTeX assets… " + text);
@@ -738,12 +832,15 @@
       }
     })
       .then(function () {
+        throwIfAborted(signal);
         return ensureLuaTexJa(notify);
       })
       .then(function () {
+        throwIfAborted(signal);
         return ensureLuaLibertinus(notify);
       })
       .then(function () {
+        throwIfAborted(signal);
         notify("Converting with LuaLaTeX…");
         const files = mergeLuaEngineFiles(projectFiles);
         return new Promise(function (resolve, reject) {
@@ -803,6 +900,10 @@
           });
         });
       });
+
+    return abortable(run, signal, function () {
+      closeLuaWorker();
+    });
   }
 
   function compileProjectFiles(projectFiles, options) {

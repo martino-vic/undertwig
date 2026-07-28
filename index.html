@@ -1469,6 +1469,9 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       const CONVERT_SPINNER_FRAMES = ["|", "/", "-", "\\"];
       let convertSpinnerTimer = null;
       let convertSpinnerFrame = 0;
+      let conversionAbortController = null;
+      const CONVERT_BUTTON_LABEL = "Convert";
+      const ABORT_BUTTON_LABEL = "Abort";
       const syncProjectButton = document.getElementById("syncProject");
       const SYNC_BUTTON_LABEL = "Load";
       let syncSpinnerTimer = null;
@@ -4561,6 +4564,12 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
       }
 
       async function compileProject() {
+        if (conversionAbortController) {
+          conversionAbortController.abort();
+          setStatus("Aborting conversion…");
+          return;
+        }
+
         const { project, prefix, projectFiles } = collectActiveProjectFiles();
         if (!project) {
           setStatus("Set a current project before converting.", true);
@@ -4573,9 +4582,12 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
         }
 
         const engineLabel = UndertwigEngines.getSelectedEngineLabel();
-        convertButton.disabled = true;
+        const abortController = new AbortController();
+        conversionAbortController = abortController;
         bibliographyButton.disabled = true;
         convertButton.setAttribute("aria-busy", "true");
+        convertButton.textContent = ABORT_BUTTON_LABEL;
+        convertButton.title = "Abort the current conversion";
         startConvertSpinner();
         setStatus("Loading " + engineLabel + "…");
         compileLog.textContent = "";
@@ -4593,10 +4605,18 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
 
           const result = await UndertwigEngines.compileProjectFiles(projectFiles, {
             previousEngine: engine,
+            signal: abortController.signal,
             onProgress: function (message) {
+              if (abortController.signal.aborted) {
+                return;
+              }
               setStatus(message || "Converting with " + engineLabel + "…");
             },
           });
+
+          if (abortController.signal.aborted) {
+            return;
+          }
 
           if (result && result.engine) {
             engine = result.engine;
@@ -4623,11 +4643,20 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           previewMeta.textContent = `Generated ${new Date().toLocaleTimeString()}`;
           setStatus("PDF generated locally with " + (result.label || engineLabel) + ".");
         } catch (error) {
+          if (error && error.name === "AbortError") {
+            engine = null;
+            setStatus("Conversion aborted.");
+            return;
+          }
           setStatus(`Conversion failed: ${error && error.message ? error.message : error}`, true);
         } finally {
-          convertButton.disabled = false;
+          if (conversionAbortController === abortController) {
+            conversionAbortController = null;
+          }
           bibliographyButton.disabled = false;
           convertButton.removeAttribute("aria-busy");
+          convertButton.textContent = CONVERT_BUTTON_LABEL;
+          convertButton.removeAttribute("title");
           stopConvertSpinner();
         }
       }
