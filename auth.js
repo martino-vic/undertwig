@@ -522,14 +522,20 @@
     url.searchParams.set("scope", LOGIN_SCOPES);
     url.searchParams.set("nonce", nonce);
     url.searchParams.set("state", state);
-    // One Google screen: pick account and grant Drive together (no second login hop).
-    url.searchParams.set("prompt", "select_account consent");
+    // Account picker only — do not force consent every login (returning users already granted Drive).
+    // New scopes still trigger Google's consent via include_granted_scopes.
+    url.searchParams.set("prompt", "select_account");
     url.searchParams.set("include_granted_scopes", "true");
     global.location.assign(url.toString());
   }
 
-  /** Full-page Drive token grant (no popup / user-gesture requirement). */
-  function beginGoogleDriveTokenSignIn(nextPath) {
+  /**
+   * Full-page Drive token grant (no popup / user-gesture requirement).
+   * options.forceConsent: show Google's consent UI. Default false reuses granted scopes
+   * so login → editor does not bounce through a second "log in" screen.
+   */
+  function beginGoogleDriveTokenSignIn(nextPath, options) {
+    const forceConsent = Boolean(options && options.forceConsent);
     const clientId = getConfig().googleClientId;
     if (!clientId) {
       throw new Error("Google sign-in is not configured.");
@@ -554,8 +560,10 @@
     url.searchParams.set("response_type", "token");
     url.searchParams.set("scope", DRIVE_SCOPE);
     url.searchParams.set("state", state);
-    url.searchParams.set("prompt", "consent");
     url.searchParams.set("include_granted_scopes", "true");
+    if (forceConsent) {
+      url.searchParams.set("prompt", "consent");
+    }
     global.location.assign(url.toString());
   }
 
@@ -701,6 +709,21 @@
         } catch (_error) {
           // Ignore.
         }
+        let alreadyForced = false;
+        try {
+          alreadyForced = sessionStorage.getItem("undertwig-drive-force-consent") === "1";
+        } catch (_error) {
+          alreadyForced = false;
+        }
+        if (!alreadyForced) {
+          try {
+            sessionStorage.setItem("undertwig-drive-force-consent", "1");
+          } catch (_error) {
+            // Ignore.
+          }
+          beginGoogleDriveTokenSignIn(nextPath, { forceConsent: true });
+          return { session: session, nextPath: nextPath, driveHandoff: true };
+        }
         throw new Error(
           "Google did not grant Drive access. In Google Cloud Console → Data Access, add scope " +
             DRIVE_SCOPE +
@@ -708,6 +731,12 @@
         );
       }
       rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn, oauth.scope);
+      try {
+        sessionStorage.removeItem("undertwig-drive-force-consent");
+        sessionStorage.removeItem("undertwig-drive-scope-upgrade");
+      } catch (_error) {
+        // Ignore.
+      }
       return { session: session, nextPath: nextPath };
     }
 
@@ -720,7 +749,29 @@
 
     const session = await loginWithCredential(oauth.idToken);
     if (oauth.accessToken) {
-      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn, oauth.scope);
+      if (oauth.scope && !scopeIncludesDriveAccess(oauth.scope)) {
+        try {
+          sessionStorage.removeItem(DRIVE_TOKEN_STORAGE_KEY);
+        } catch (_error) {
+          // Ignore.
+        }
+      } else {
+        rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn, oauth.scope);
+      }
+    }
+
+    // Hybrid login sometimes returns an ID token without a usable Drive access token.
+    // Finish the Drive handoff quietly (no forced consent) before opening the editor.
+    if (!hasStoredDriveAccessToken()) {
+      beginGoogleDriveTokenSignIn(nextPath, { forceConsent: false });
+      return { session: session, nextPath: nextPath, driveHandoff: true };
+    }
+
+    try {
+      sessionStorage.removeItem("undertwig-drive-force-consent");
+      sessionStorage.removeItem("undertwig-drive-scope-upgrade");
+    } catch (_error) {
+      // Ignore.
     }
     return { session: session, nextPath: nextPath };
   }

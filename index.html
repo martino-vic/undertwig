@@ -2967,7 +2967,7 @@
     </script>
 
     <script src="auth-config.js?v=20260728q"></script>
-    <script src="auth.js?v=20260728q"></script>
+    <script src="auth.js?v=20260729b"></script>
     <script src="cloud-storage.js?v=20260728ax"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
@@ -3894,7 +3894,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           setStatus("Redirecting to Google to connect Drive…");
           try {
             const pending = resolveSharedProjectId();
-            UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(pending));
+            UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(pending), {
+              forceConsent: true,
+            });
           } catch (error) {
             renderCloudStatus("disconnected");
             setStatus(
@@ -3936,7 +3938,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           if (UndertwigAuth.isLoggedIn() && UndertwigCloud.isAvailable()) {
             if (!UndertwigCloud.hasAccessToken()) {
               setStatus("Redirecting to Google so this save can sync to Drive…");
-              UndertwigAuth.beginGoogleDriveTokenSignIn("/");
+              UndertwigAuth.beginGoogleDriveTokenSignIn("/", { forceConsent: true });
               return;
             }
 
@@ -4001,7 +4003,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             renderCloudStatus("disconnected");
             setStatus("Drive permission is outdated. Redirecting to Google to grant file access…", true);
             try {
-              UndertwigAuth.beginGoogleDriveTokenSignIn("/");
+              UndertwigAuth.beginGoogleDriveTokenSignIn("/", { forceConsent: true });
             } catch (_redirectError) {
               setStatus(message + " Click Retry under the file tree.", true);
             }
@@ -4395,7 +4397,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         if (!UndertwigCloud.hasAccessToken()) {
           setInviteStatus("Connecting Google Drive…");
-          UndertwigAuth.beginGoogleDriveTokenSignIn("/");
+          UndertwigAuth.beginGoogleDriveTokenSignIn("/", { forceConsent: true });
           throw new Error("Allow Google Drive access, then click Copy invitation link again.");
         }
 
@@ -5686,7 +5688,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                     if (UndertwigCloud.clearToken) {
                       UndertwigCloud.clearToken();
                     }
-                    UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(sharedProjectId));
+                    UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(sharedProjectId), {
+                      forceConsent: true,
+                    });
                     return;
                   } catch (_redirectError) {
                     setStatus(message + " Click Retry under the file tree.", true);
@@ -5703,22 +5707,42 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             if (!verify || !verify.ok) {
               const reason = verify && verify.reason;
               if (reason === "missing-scope") {
-                let alreadyTried = false;
+                // soft → silent token reuse; consent → one forced grant; then stop and ask for Retry.
+                let upgradeStep = "";
                 try {
-                  alreadyTried = sessionStorage.getItem("undertwig-drive-scope-upgrade") === "1";
+                  upgradeStep = sessionStorage.getItem("undertwig-drive-scope-upgrade") || "";
                 } catch (_error) {
-                  alreadyTried = false;
+                  upgradeStep = "";
                 }
-                if (!alreadyTried) {
+                if (upgradeStep !== "soft" && upgradeStep !== "consent") {
                   try {
-                    sessionStorage.setItem("undertwig-drive-scope-upgrade", "1");
+                    sessionStorage.setItem("undertwig-drive-scope-upgrade", "soft");
+                  } catch (_error) {
+                    // Ignore.
+                  }
+                  setStatus("Refreshing Google Drive connection…");
+                  try {
+                    const pending = resolveSharedProjectId();
+                    UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(pending), {
+                      forceConsent: false,
+                    });
+                    return;
+                  } catch (_redirectError) {
+                    // Fall through to consent attempt.
+                  }
+                }
+                if (upgradeStep === "soft") {
+                  try {
+                    sessionStorage.setItem("undertwig-drive-scope-upgrade", "consent");
                   } catch (_error) {
                     // Ignore.
                   }
                   setStatus("Google needs Drive permission. Redirecting…");
                   try {
                     const pending = resolveSharedProjectId();
-                    UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(pending));
+                    UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(pending), {
+                      forceConsent: true,
+                    });
                     return;
                   } catch (_redirectError) {
                     // Fall through to disconnected UI.
@@ -6988,7 +7012,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (!UndertwigCloud.hasAccessToken()) {
           setStatus("Connect Google Drive first, then click Load.", true);
           try {
-            UndertwigAuth.beginGoogleDriveTokenSignIn("/");
+            UndertwigAuth.beginGoogleDriveTokenSignIn("/", { forceConsent: true });
           } catch (error) {
             setStatus((error && error.message) || "Could not start Google Drive connection.", true);
           }
