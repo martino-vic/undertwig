@@ -1642,7 +1642,7 @@
         }
       }
 
-      /* Phone landscape: desktop-like split — editor | preview, Convert centered */
+      /* Phone landscape: files | editor | preview, Convert centered */
       @media (max-width: 920px) and (orientation: landscape) {
         body {
           overflow: hidden;
@@ -1653,7 +1653,7 @@
         .app,
         .app.explorer-collapsed {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          grid-template-columns: minmax(132px, 28vw) minmax(0, 1fr) minmax(0, 1fr);
           grid-template-rows: auto minmax(0, 1fr);
           height: 100dvh;
           max-height: 100dvh;
@@ -1663,18 +1663,65 @@
 
         .app.preview-collapsed,
         .app.explorer-collapsed.preview-collapsed {
-          grid-template-columns: minmax(0, 1fr) 48px;
+          grid-template-columns: minmax(132px, 28vw) minmax(0, 1fr) 48px;
         }
 
-        .sidebar,
         .workspace {
           display: contents;
           border: 0;
         }
 
-        /* One toolbar row only — brand/account bar would steal vertical space */
-        .sidebar-head {
+        /* Keep the file tree as its own column (Options + tree) */
+        .sidebar {
+          display: flex !important;
+          flex-direction: column;
+          grid-column: 1;
+          grid-row: 2;
+          min-width: 0;
+          min-height: 0;
+          overflow: hidden;
+          border-right: 1px solid var(--border);
+          background: #121b24;
+        }
+
+        .sidebar-head,
+        .sidebar .collapsed-rail,
+        .sidebar .collapse-button,
+        .cloud-status,
+        .legal-links,
+        .mobile-page-hint,
+        .workspace .statusbar {
           display: none !important;
+        }
+
+        .sidebar-actions {
+          display: flex !important;
+          flex: 0 0 auto;
+          flex-direction: column;
+          order: unset;
+          gap: 6px;
+          padding: 6px;
+          border-bottom: 1px solid var(--border);
+          background: #121b24;
+        }
+
+        .sidebar-actions > .sidebar-options-toggle {
+          display: inline-flex !important;
+          min-height: 34px;
+          font-size: 13px;
+        }
+
+        .tree {
+          display: block !important;
+          flex: 1 1 auto;
+          order: unset;
+          min-height: 0;
+          max-height: none !important;
+          height: auto;
+          overflow: auto;
+          border-bottom: 0;
+          background: #121b24;
+          -webkit-overflow-scrolling: touch;
         }
 
         .workspace .topbar {
@@ -1685,8 +1732,8 @@
           top: auto;
           z-index: 5;
           display: grid;
-          /* File name | left actions | Convert | engine actions */
-          grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr);
+          /* Tree col | editor actions | Convert | preview actions */
+          grid-template-columns: minmax(132px, 28vw) minmax(0, 1fr) auto minmax(0, 1fr);
           align-items: center;
           column-gap: 6px;
           height: 48px;
@@ -1724,7 +1771,7 @@
           grid-column: 1 / -1;
           grid-row: 1;
           display: grid;
-          grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr);
+          grid-template-columns: minmax(132px, 28vw) minmax(0, 1fr) auto minmax(0, 1fr);
           align-items: center;
           column-gap: 6px;
           flex: unset;
@@ -1827,7 +1874,7 @@
         }
 
         .workspace .editor-wrap {
-          grid-column: 1;
+          grid-column: 2;
           grid-row: 2;
           order: unset;
           display: flex;
@@ -1851,19 +1898,8 @@
           min-height: 0;
         }
 
-        .workspace .statusbar,
-        .sidebar-actions,
-        .tree,
-        .cloud-status,
-        .legal-links,
-        .mobile-page-hint,
-        .sidebar .collapsed-rail,
-        .sidebar .collapse-button {
-          display: none !important;
-        }
-
         .preview {
-          grid-column: 2;
+          grid-column: 3;
           grid-row: 2;
           order: unset;
           display: flex;
@@ -1874,7 +1910,7 @@
           height: auto;
           overflow: hidden;
           scroll-margin-top: 0;
-          border-left: 1px solid var(--border);
+          border-left: 0;
         }
 
         .preview .collapse-button {
