@@ -20,7 +20,7 @@
   );
   const BUSYTEX_TEXLIVE =
     "https://texlyre.github.io/texlyre-busytex/core/busytex";
-  const BUSYTEX_WORKER = "vendor/busytex/busytex_worker.js?v=20260728ak";
+  const BUSYTEX_WORKER = "vendor/busytex/busytex_worker.js?v=20260728al";
   // BusyTeX kpse_remote expects GET /<format_id>/<filename> (not the pdftex/ prefix).
   const TEXLIVE_REMOTE = "https://texlive2026.texlyre.org/";
   const TEXLIVE_TEX_FORMAT = 26;
@@ -1150,13 +1150,17 @@
                 }
               });
             }
+            const hasBbl = Object.keys(outputs).some(function (path) {
+              return /\.bbl$/i.test(path) && String(outputs[path] || "").trim();
+            });
             return {
-              ok: Boolean(data.ok),
+              ok: Boolean(data.ok) || hasBbl,
               tool: data.tool || tool,
               label: toolLabel,
               log: data.log || "No bibliography log returned.",
               outputs: outputs,
               exit_code: data.exit_code,
+              warnings: Boolean(data.warnings) || (hasBbl && Number(data.exit_code) === 1),
             };
           });
         });

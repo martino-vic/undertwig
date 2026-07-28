@@ -198,18 +198,19 @@
       logParts.push("", "BLG:", outputs[blgKey]);
     }
 
+    // bibtex8 often returns exit code 1 when there are only warnings, while still
+    // writing a usable .bbl. Treat a produced .bbl as success for the UI.
+    const hasBbl = Object.keys(outputs).some(function (key) {
+      return key.endsWith(".bbl") && String(outputs[key] || "").trim();
+    });
+    const exitCode = Number(result.exit_code);
     return {
-      ok:
-        result.exit_code === 0 &&
-        Boolean(
-          Object.keys(outputs).some(function (key) {
-            return key.endsWith(".bbl");
-          })
-        ),
+      ok: hasBbl && (Number.isFinite(exitCode) ? exitCode < 2 : true),
       exit_code: result.exit_code,
       tool: "bibtex",
       log: logParts.join("\n"),
       outputs: outputs,
+      warnings: hasBbl && exitCode === 1,
     };
   };
 })(self);
