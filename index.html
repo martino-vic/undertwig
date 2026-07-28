@@ -1195,47 +1195,152 @@
 
         .app,
         .app.explorer-collapsed {
-          grid-template-columns: 1fr;
-          grid-template-rows: auto auto auto;
+          display: flex;
+          flex-direction: column;
+          grid-template-columns: none;
+          grid-template-rows: none;
           height: auto;
           min-height: 100vh;
           min-height: 100dvh;
         }
 
+        /* Flatten panels so we can reorder: actions → editor → files → preview */
         .sidebar,
         .workspace {
-          border-right: 0;
+          display: contents;
+          border: 0;
+        }
+
+        .collapsed-rail,
+        .collapse-button {
+          display: none !important;
+        }
+
+        .sidebar-head {
+          order: 1;
+          position: sticky;
+          top: 0;
+          z-index: 50;
+          min-height: 48px;
+          padding: 8px 12px;
           border-bottom: 1px solid var(--border);
+          background: #121b24;
+          gap: 10px;
         }
 
-        .sidebar .tree {
-          max-height: min(28vh, 240px);
+        .sidebar-head .brand span {
+          display: none;
         }
 
-        .workspace {
-          /* Keep the editor compact so the PDF preview header peeks into view. */
+        .sidebar-head #loginButton,
+        .sidebar-head #accountWrap {
+          margin-left: auto;
           flex: 0 0 auto;
+        }
+
+        .sidebar-head #loginButton,
+        .sidebar-head .account-button {
+          min-height: 36px;
+        }
+
+        .workspace .topbar {
+          order: 2;
+          position: sticky;
+          top: 0;
+          z-index: 55;
+          flex-direction: column;
+          align-items: stretch;
+          min-height: 0;
+          gap: 8px;
+          padding: 10px 12px 12px;
+          border-bottom: 1px solid var(--border);
+          background: #16202a;
+          box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+        }
+
+        .workspace .file-title {
+          order: 2;
+          width: 100%;
+        }
+
+        .workspace .topbar-actions {
+          order: 1;
+          flex: 0 0 auto;
+          flex-wrap: wrap;
+          width: 100%;
+          justify-content: flex-start;
+          row-gap: 8px;
+        }
+
+        .workspace .convert-button {
+          order: -20;
+          flex: 1 1 100%;
+          min-height: 48px;
+          padding: 0 16px;
+          font-size: 15px;
+          font-weight: 700;
+        }
+
+        .workspace .convert-busy {
+          order: -19;
+        }
+
+        .workspace .collaborate-wrap {
+          order: -10;
+        }
+
+        .workspace .save-button {
+          order: -9;
+        }
+
+        .workspace .bib-wrap,
+        .workspace .bib-button,
+        .workspace .engine-wrap {
+          order: 0;
         }
 
         .workspace .editor-wrap {
+          order: 3;
           flex: 0 0 auto;
-          height: min(36vh, 300px);
-          min-height: 200px;
+          height: min(42vh, 360px);
+          min-height: 220px;
+          border-bottom: 1px solid var(--border);
+          background: #111820;
         }
 
-        .preview {
-          flex: 0 0 auto;
-          scroll-margin-top: 8px;
+        .workspace .statusbar {
+          order: 4;
+          border-top: 0;
+          border-bottom: 1px solid var(--border);
         }
 
-        .preview .viewer {
-          flex: 0 0 auto;
-          height: min(70vh, 640px);
-          min-height: 280px;
+        .sidebar-actions {
+          order: 5;
+          border-bottom: 1px solid var(--border);
+          background: #121b24;
+        }
+
+        .tree {
+          order: 6;
+          max-height: min(36vh, 320px);
+          border-bottom: 1px solid var(--border);
+          background: #121b24;
+        }
+
+        .cloud-status {
+          order: 7;
+          background: #121b24;
+        }
+
+        .legal-links {
+          order: 8;
+          background: #121b24;
+          border-bottom: 1px solid var(--border);
         }
 
         .mobile-page-hint {
           display: block;
+          order: 9;
           padding: 10px 16px 12px;
           border-bottom: 1px solid var(--border);
           background: #121b24;
@@ -1245,31 +1350,24 @@
           text-align: center;
         }
 
-        .topbar {
-          flex-wrap: wrap;
-          align-items: flex-start;
-          min-height: 0;
-          gap: 10px;
-          padding: 10px 12px;
+        .preview {
+          order: 10;
+          flex: 0 0 auto;
+          scroll-margin-top: 72px;
+          border-bottom: 0;
         }
 
-        .topbar-actions {
-          flex: 1 1 100%;
-          flex-wrap: wrap;
-          justify-content: flex-start;
-          row-gap: 8px;
+        .preview .viewer {
+          flex: 0 0 auto;
+          height: min(70vh, 640px);
+          min-height: 280px;
         }
 
         .toolbar-button,
         .bib-button,
         .engine-button,
-        .convert-button,
         .sidebar-actions button {
           min-height: 40px;
-        }
-
-        .collapse-button {
-          display: none;
         }
 
         .app.explorer-collapsed .sidebar-actions,
@@ -1294,10 +1392,6 @@
 
         .app.explorer-collapsed .legal-links {
           display: flex;
-        }
-
-        .collapsed-rail {
-          display: none !important;
         }
       }
 
@@ -2952,6 +3046,47 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       projectFolderInput.addEventListener("change", () => handleImportNewProject(projectFolderInput.files));
       convertButton.addEventListener("click", compileProject);
       bibliographyButton.addEventListener("click", runProjectBibliography);
+
+      (function syncMobileAuthPlacement() {
+        const mobileQuery = window.matchMedia("(max-width: 920px)");
+        const sidebarHead = document.querySelector(".sidebar-head");
+        const topbarActions = document.querySelector(".workspace .topbar-actions");
+        const saveButton = document.getElementById("saveProject");
+        const collaborateWrap = document.getElementById("collaborate")
+          ? document.getElementById("collaborate").closest(".collaborate-wrap")
+          : null;
+
+        function placeAuthControls() {
+          if (!sidebarHead || !topbarActions || !loginButton) {
+            return;
+          }
+          if (mobileQuery.matches) {
+            if (loginButton.parentElement !== sidebarHead) {
+              sidebarHead.appendChild(loginButton);
+            }
+            if (accountWrap && accountWrap.parentElement !== sidebarHead) {
+              sidebarHead.appendChild(accountWrap);
+            }
+            return;
+          }
+          // Desktop: Collaborate → Log in → Account → Save …
+          if (collaborateWrap && loginButton.parentElement !== topbarActions) {
+            topbarActions.insertBefore(loginButton, collaborateWrap.nextSibling);
+          } else if (loginButton.parentElement !== topbarActions && saveButton) {
+            topbarActions.insertBefore(loginButton, saveButton);
+          }
+          if (accountWrap && accountWrap.parentElement !== topbarActions) {
+            topbarActions.insertBefore(accountWrap, saveButton || null);
+          }
+        }
+
+        placeAuthControls();
+        if (typeof mobileQuery.addEventListener === "function") {
+          mobileQuery.addEventListener("change", placeAuthControls);
+        } else if (typeof mobileQuery.addListener === "function") {
+          mobileQuery.addListener(placeAuthControls);
+        }
+      })();
 
       function handleOpenPdfClick(event) {
         if (!pdfUrl) {
