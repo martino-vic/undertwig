@@ -579,6 +579,21 @@
         flex: 0 0 auto;
       }
 
+      .topbar-actions-left {
+        display: contents;
+      }
+
+      .topbar-convert-cluster {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+      }
+
+      .topbar-actions-right {
+        display: none;
+      }
+
       .toolbar-button {
         display: inline-flex;
         align-items: center;
@@ -1848,21 +1863,31 @@
           grid-column: 1 / -1;
           grid-row: 1;
           display: grid;
-          grid-template-columns: minmax(6rem, 11rem) minmax(0, 1fr);
+          /* Match app columns: sidebar | editor | Convert | preview */
+          grid-template-columns: 200px minmax(0, 1fr) auto minmax(0, 1fr);
           align-items: center;
-          gap: 12px;
+          column-gap: 8px;
           height: 52px;
           min-height: 52px;
           max-height: 52px;
-          padding: 0 12px;
+          padding: 0 12px 0 0;
           overflow: hidden;
           box-shadow: none;
         }
 
+        .app.explorer-collapsed .workspace .topbar,
+        .app.explorer-collapsed.preview-collapsed .workspace .topbar {
+          grid-template-columns: 48px minmax(0, 1fr) auto minmax(0, 1fr);
+        }
+
         .workspace .file-title {
-          grid-column: 1;
+          grid-column: 2;
+          grid-row: 1;
+          z-index: 2;
           min-width: 0;
+          max-width: 8rem;
           overflow: hidden;
+          padding-left: 10px;
         }
 
         .workspace .file-title span {
@@ -1870,34 +1895,68 @@
         }
 
         .workspace .topbar-actions {
-          grid-column: 2;
-          display: flex;
+          grid-column: 1 / -1;
+          grid-row: 1;
+          display: grid;
+          grid-template-columns: 200px minmax(0, 1fr) auto minmax(0, 1fr);
+          align-items: center;
+          column-gap: 8px;
           flex: unset;
+          min-width: 0;
+          max-width: none;
+          overflow: visible;
+          pointer-events: none;
+        }
+
+        .app.explorer-collapsed .workspace .topbar-actions,
+        .app.explorer-collapsed.preview-collapsed .workspace .topbar-actions {
+          grid-template-columns: 48px minmax(0, 1fr) auto minmax(0, 1fr);
+        }
+
+        .workspace .topbar-actions > * {
+          pointer-events: auto;
+        }
+
+        .workspace .topbar-actions-left {
+          display: flex;
+          grid-column: 2;
           flex-wrap: nowrap;
           align-items: center;
-          justify-content: flex-end;
+          justify-content: flex-start;
           gap: 8px;
           min-width: 0;
           max-width: 100%;
           overflow-x: auto;
           overflow-y: hidden;
+          padding-left: calc(8rem + 18px);
           -webkit-overflow-scrolling: touch;
           scrollbar-width: thin;
         }
 
-        .workspace .topbar-actions > * {
+        .workspace .topbar-actions-left > * {
           flex: 0 0 auto;
+        }
+
+        .workspace .topbar-convert-cluster {
+          grid-column: 3;
+          justify-self: center;
+          z-index: 2;
+        }
+
+        .workspace .topbar-actions-right {
+          display: block;
+          grid-column: 4;
+          min-width: 0;
         }
 
         .workspace .convert-button {
-          order: 20;
+          order: unset;
           flex: 0 0 auto;
-          min-height: 36px;
-          padding: 0 14px;
-        }
-
-        .workspace .convert-busy {
-          order: 21;
+          min-height: 38px;
+          min-width: 7.25rem;
+          padding: 0 18px;
+          font-size: 14px;
+          font-weight: 700;
         }
 
         .workspace .bib-button {
@@ -2165,6 +2224,7 @@
             <span id="activeFileMeta">Write LaTeX, then convert locally</span>
           </div>
           <div class="topbar-actions">
+            <div class="topbar-actions-left" id="topbarActionsLeft">
             <div class="collaborate-wrap">
               <button class="toolbar-button" id="collaborate" type="button" aria-haspopup="dialog" aria-expanded="false">
                 <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
@@ -2216,8 +2276,12 @@
                 <button type="button" role="option" data-engine="lualatex" aria-selected="false">LuaLaTeX</button>
               </div>
             </div>
-            <button class="convert-button" id="convert" type="button">Convert</button>
-            <span class="convert-busy hidden" id="convertBusy" aria-hidden="true" title="Converting…">|</span>
+            </div>
+            <div class="topbar-convert-cluster">
+              <button class="convert-button" id="convert" type="button">Convert</button>
+              <span class="convert-busy hidden" id="convertBusy" aria-hidden="true" title="Converting…">|</span>
+            </div>
+            <div class="topbar-actions-right" aria-hidden="true"></div>
           </div>
         </div>
         <div class="editor-wrap">
@@ -4099,14 +4163,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           "(max-width: 920px) and (orientation: landscape)"
         );
         const sidebarHead = document.querySelector(".sidebar-head");
-        const topbarActions = document.querySelector(".workspace .topbar-actions");
+        const topbarActionsLeft =
+          document.getElementById("topbarActionsLeft") ||
+          document.querySelector(".workspace .topbar-actions");
         const saveButton = document.getElementById("saveProject");
         const collaborateWrap = document.getElementById("collaborate")
           ? document.getElementById("collaborate").closest(".collaborate-wrap")
           : null;
 
         function placeAuthControls() {
-          if (!sidebarHead || !topbarActions || !loginButton) {
+          if (!sidebarHead || !topbarActionsLeft || !loginButton) {
             return;
           }
           // Portrait mobile: Account lives in the brand bar.
@@ -4120,14 +4186,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             }
             return;
           }
-          // Desktop + phone landscape: Collaborate → Log in → Account → Save …
-          if (collaborateWrap && loginButton.parentElement !== topbarActions) {
-            topbarActions.insertBefore(loginButton, collaborateWrap.nextSibling);
-          } else if (loginButton.parentElement !== topbarActions && saveButton) {
-            topbarActions.insertBefore(loginButton, saveButton);
+          // Desktop + landscape: Collaborate → Log in → Account → Save …
+          if (collaborateWrap && loginButton.parentElement !== topbarActionsLeft) {
+            topbarActionsLeft.insertBefore(loginButton, collaborateWrap.nextSibling);
+          } else if (loginButton.parentElement !== topbarActionsLeft && saveButton) {
+            topbarActionsLeft.insertBefore(loginButton, saveButton);
           }
-          if (accountWrap && accountWrap.parentElement !== topbarActions) {
-            topbarActions.insertBefore(accountWrap, saveButton || null);
+          if (accountWrap && accountWrap.parentElement !== topbarActionsLeft) {
+            topbarActionsLeft.insertBefore(accountWrap, saveButton || null);
           }
         }
 
