@@ -1246,7 +1246,7 @@
     <script src="latex-engines.js?v=20260728ak"></script>
     <script>
       const DEMO_FIGURE_PNG_BASE64 =
-        "iVBORw0KGgoAAAANSUhEUgAAAPAAAACMCAIAAADN17N/AAAD20lEQVR42u3dMU4UURjAcdjsAaigIlzBwsKSTisSL8ARKI2cAGPpEbyACZV2lhQUXIHSW1hMMpkMy26YN/PeN+/9/pUxsM6yv/38Zncdj09Oz4+kWtr4EQhoCWgJaAloAS0BLQEtAS0BLaAloCWgJaAloNVS24Vu9+L2yg9X+3u+u5/9No/n/YA/xyorezbQKCsC63lAv9T878dfj5D2d3ZzObvpVNAjyhwrXXYK6w3NKt5ITsr6ul3igKRphF4uIfkmdP80olmzj+rJQ3qTqFlaqGnGNnM9paQI6+sm5alDs6ItHj7LoaoCWm2Dtm8o8tZhQsvKIQEtAS0BLaClOtoWP4L0D1gFzGuaLYKukvLwrmHd0MpRseam7iPQbT3STNe/crT2GJ/dXEbbPZ4eH/Z/wbv3H4CmObTpg4hf++J14d4eqep2Ov78+/v+7/r16cvLW1iF7KygW14o8w/pEeWDiF/74h53d4PBWZvQlU/lNznej7uTHZw10NVqTqe8U3bPOqZpoFGeyDrmqPZZDpqT9pA3vXgCtCJqjmzaylGJ5pyUd64fQXYPE5rmeVgHmdNA01yVaaBprso00Os+C3RsQNdTnPEc53iAtmxUtXgATXNVpoFWVQFtPFc1pIGWCS3jOeqQBlomtAS02tk3Cm4dQMuEloCWgNZaF+hSazTQqqoK/03hn+tvQY/sOum7h5fnmn2IWjkkoCWgpaZ36I8/v8Y8sMlXH13vqxwmtAS0BLSAloBWct11EBd6Y2XRumPOeR1HoGVCS0BLQGvFa3T+BRpomdAS0Gpt6yiybwAtE1qGdNTxDLRMaBnSUccz0ExXpRnodRfNdITjAXrFQ9qxAW3xqHbZAJrp2jQDzXRVmo+qvIxBg6afHh86VZkvddA/keLs9CZ0VeeIOUd1QM25QU++0koFLX3fM5uOqdnKUeGcXnr9CEu5zMrR5pDOea+Ho3reaT28wbAvhG+LPLpnN5c0ZxjVw4E6eWCPnhWR39MptnK0Y7rg30hD1iOXB3HvHO3BKRfeoVswHWG/6hUO/6OTN60iq3Ac4qSwe7yrZB3wVGHo8uD/4rMuxFFAt3yaGAd3ZXljRUBLQEtAS0ALaKlR0M93990vmnr7WpnrdfXeTGiZ0FKDoG0dirlvzDChmdZCmrOuHBOeOlIGY5v0P8+QVoRlo2s743H43JyK765JO/ToaWRUaxbNKQvt8cnpefoBXdxejX7HtNaEqZx+bjYP6J2mpQxngUuBxlplKS8CmmwVcbw4aKlIPsshoCWgJaAloAW0BLQEtAS0BLSAloCWgJaAlg71HwSpsZ+X/NyHAAAAAElFTkSuQmCC";
+        "iVBORw0KGgoAAAANSUhEUgAAAUAAAADICAYAAACZBDirAAAD0klEQVR4nO3dP2oUYRjH8VWsDQQ0aRQEq6Rw0QsEIRJvYLlnUAgeQRb0DLmFwTReQNnGVFba+AcEvYAWNuI7hFlmNu/M/D6fcpgNS4xfXp6H3ZnNAAAAAAAAAAAAAAAAAAAAAAAAoJortd/AUJ0s5r//v7Y4Wfl9wYRcrf0GAGoRQCCWAAKxBBCIda32Gxiq+d6N2m9hkCyHmBInQCCWAAKxBBCIJYBArN6XIKvlYTEknx+ftRqSj/G1adKWQ5Y+0+YECMQSQCCWAAKxBBCI1fsw9/nR3WJofLC/Vdy3u7NdXPvy9Udx7e2Hn8W1Wj+vaTEyxsWNpU97flfT5gQIxBJAIJYAArEEEIjV+zD30d7NYmh8//b14r73n34V14Z+39PHt4prQ1rSWPr0/1qmzQkQiCWAQCwBBGIJIBDLIHgNTZ9yabtUaVo8tF1QNN1n6dPt5x29fGf5ghMgkEsAgVgCCMQSQCCWgewGnD57UAy/uyw8Xpx+rPLv1GXpM/T7njy8U1wb45KGbpwAgVgCCMQSQCCWAAKxDFo3oO1zUV69/lxca/r0hYF4/4b+tW21Fl9pnACBWAIIxBJAIJYAArEMWi9J09DdwgPqcgIEYgkgEEsAgVgCCMQycK+o7ddNWZbAZjgBArEEEIglgEAsAQRiGaQPTJevabIsgfU4AQKxBBCIJYBALAEEYhmQj5RlCXTnBAjEEkAglgACsQQQiGXwPXFNy5Imb86/+VsgjhMgEEsAgVgCCMQSQCCWwXcgzyKBv5wAgVgCCMQSQCCWAAKxDLSZzWa+XotMToBALAEEYgkgEEsAgVgG1azFsoQpcQIEYgkgEEsAgVgCCMQygGYjLEsYAydAIJYAArEEEIglgEAsg2Wq8uB2anICBGIJIBBLAIFYAgjEMlhmcJoe3H6wv9XqtT4xwjqcAIFYAgjEEkAglgACsQyMGYW2nxhp+iqt3Z3t4tr8+MzfPk6AQC4BBGIJIBBLAIFYBsFMSttlyXJxr9XPsyyZNidAIJYAArEEEIglgEAsA14ieRYJs5kTIBBMAIFYAgjEEkAglgEvXGC1PGy1LPGJkXFyAgRiCSAQSwCBWAIIxDK4hQv4eq1pcwIEYgkgEEsAgVgCCMQykIUe9L0sWZ1/L64tTlb+v/bMCRCIJYBALAEEYgkgEMtQFS5R07Kk6bkjbe+jGydAIJYAArEEEIglgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPzrDyQSQd6NJcBKAAAAAElFTkSuQmCC";
 
       const DEFAULT_MAIN_TEX = String.raw`\documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
@@ -1342,13 +1342,13 @@ See also the matrix example in Section~\ref{sec:results}.
 \label{sec:results}
 
 \subsection{Figures}
-Figure~\ref{fig:diagram} is a lightweight PNG stored in
+Figure~ef{fig:diagram} is a tiny pixel-art undertwig PNG stored in
 \texttt{figures/diagram.png} and included with \texttt{graphicx}:
 
 \begin{figure}[ht]
   \centering
   \includegraphics[width=0.62\textwidth]{figures/diagram.png}
-  \caption{A small sample figure shipped with the starter project.}
+  \caption\{A pixel undertwig---a lower twig---shipped with the starter project.\}
   \label{fig:diagram}
 \end{figure}
 
@@ -2565,7 +2565,43 @@ Equation~\eqref{eq:euler} was introduced in Section~\ref{sec:intro}.
           next.currentProject =
             (fromActive && roots.includes(fromActive) ? fromActive : "") || roots[0] || "";
         }
-        return upgradeSampleBibliography(next);
+        return upgradeSampleFigure(upgradeSampleBibliography(next));
+      }
+
+      /**
+       * Existing local SampleProject copies still use the old green demo figure.
+       * Swap in the pixel undertwig when that known starter PNG is present.
+       */
+      function upgradeSampleFigure(workspace) {
+        const figPath = "SampleProject/figures/diagram.png";
+        const resultsPath = "SampleProject/sections/results.tex";
+        const file = workspace.files && workspace.files[figPath];
+        if (file && file.binary) {
+          const content = String(file.content || "");
+          if (content.indexOf("iVBORw0KGgoAAAANSUhEUgAAAPAAAACMCAI") === 0) {
+            file.content = DEMO_FIGURE_PNG_BASE64;
+          }
+        }
+
+        const results = workspace.files && workspace.files[resultsPath];
+        if (
+          results &&
+          !results.binary &&
+          typeof results.content === "string" &&
+          /A small sample figure shipped with the starter project/.test(results.content)
+        ) {
+          results.content = results.content
+            .replace(
+              "Figure~\\ref{fig:diagram} is a lightweight PNG stored in",
+              "Figure~\\ref{fig:diagram} is a tiny pixel-art undertwig PNG stored in"
+            )
+            .replace(
+              "A small sample figure shipped with the starter project.",
+              "A pixel undertwig---a lower twig---shipped with the starter project."
+            );
+        }
+
+        return workspace;
       }
 
       /**
