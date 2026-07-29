@@ -202,17 +202,20 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }.fold(
             onSuccess = {
-                val message = "Saved successfully to this app"
                 _editor.update {
                     it.copy(
                         dirty = false,
-                        status = message,
+                        status = "Saved successfully",
                         error = null,
                         files = repo.listFiles(state.projectId),
                         folders = repo.listFolders(state.projectId),
                     )
                 }
-                Toast.makeText(getApplication(), message, Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    getApplication(),
+                    "Saved successfully to this app",
+                    Toast.LENGTH_SHORT,
+                ).show()
                 refreshProjects()
             },
             onFailure = { error ->
