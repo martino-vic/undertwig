@@ -4,7 +4,17 @@
   var isWorker = typeof importScripts === "function";
   if (!isWorker && typeof parent !== "undefined" && parent !== self) {
     var _origPost = function(data, transfer) {
-      parent.postMessage(data, "*", transfer);
+      // Same as UndertwigFrameWorker: never pass a non-Sequence transfer list
+      // (Samsung WebView throws "cannot be converted to a sequence").
+      try {
+        if (transfer && typeof transfer.length === "number" && transfer.length > 0) {
+          parent.postMessage(data, "*", transfer);
+        } else {
+          parent.postMessage(data, "*");
+        }
+      } catch (_err) {
+        parent.postMessage(data, "*");
+      }
     };
     self.postMessage = _origPost;
     self.close = function(){};

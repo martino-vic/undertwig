@@ -53,6 +53,7 @@ Launcher icons are generated from the same sample-project twig (`drawable` + `mi
 - Cold start no longer creates a WebView (that used to crash on Application context).
 - Convert needs network the first time for LaTeX packages (article.cls, etc.). The TeX format file is bundled in the app.
 - If the log says `I can't find the format file 'swiftlatexpdftex.fmt'`, do a clean rebuild so `assets/engine/swiftlatexpdftex.fmt` is packaged.
+- If Convert fails with `postMessage` / `cannot be converted to a sequence` on a physical phone (common on Samsung WebView), sync/rebuild — the iframe bridge must omit an empty transfer list.
 
 ## License note
 

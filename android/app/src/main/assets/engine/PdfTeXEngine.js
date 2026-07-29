@@ -98,7 +98,18 @@ UndertwigFrameWorker.prototype.postMessage = function (data, transfer) {
   if (!win) {
     return;
   }
-  win.postMessage(data, "*", transfer);
+  // Android (esp. Samsung) WebView: passing undefined/non-Sequence as the
+  // transfer list throws "cannot be converted to a sequence". Omit it unless
+  // we have a real Transferable list; fall back to structured clone on error.
+  try {
+    if (transfer && typeof transfer.length === "number" && transfer.length > 0) {
+      win.postMessage(data, "*", transfer);
+    } else {
+      win.postMessage(data, "*");
+    }
+  } catch (_err) {
+    win.postMessage(data, "*");
+  }
 };
 UndertwigFrameWorker.prototype.terminate = function () {
   window.removeEventListener("message", this._onWinMessage);
