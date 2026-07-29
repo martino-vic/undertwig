@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.undertwig.app.data.BibToolId
 import com.undertwig.app.data.EnginePrefs
 import com.undertwig.app.data.LatexEngineId
+import com.undertwig.app.data.ProjectDownloadInfo
 import com.undertwig.app.data.ProjectFile
 import com.undertwig.app.data.ProjectRepository
 import com.undertwig.app.data.ProjectSummary
@@ -201,7 +202,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }.fold(
             onSuccess = {
-                val message = "Saved successfully · $where"
+                val message = "Saved successfully to this app"
                 _editor.update {
                     it.copy(
                         dirty = false,
@@ -225,6 +226,44 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 Toast.makeText(getApplication(), "Save failed: $detail", Toast.LENGTH_LONG).show()
             },
         )
+    }
+
+    fun projectDownloadInfo(): ProjectDownloadInfo? {
+        val id = _editor.value.projectId
+        if (id.isEmpty()) return null
+        // Persist unsaved edits so the zip matches what you see.
+        val state = _editor.value
+        if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
+            runCatching {
+                repo.writeFile(state.projectId, state.activePath, state.editorText)
+                _editor.update { it.copy(dirty = false) }
+            }
+        }
+        return runCatching { repo.projectDownloadInfo(id) }.getOrNull()
+    }
+
+    fun exportProjectZip(): Result<File> {
+        val id = _editor.value.projectId
+        if (id.isEmpty()) {
+            return Result.failure(IllegalStateException("Open a project first."))
+        }
+        val state = _editor.value
+        if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
+            runCatching {
+                repo.writeFile(state.projectId, state.activePath, state.editorText)
+                _editor.update { it.copy(dirty = false) }
+            }
+        }
+        return runCatching {
+            val zip = repo.zipProject(id)
+            _editor.update {
+                it.copy(
+                    status = "Project zip ready",
+                    error = null,
+                )
+            }
+            zip
+        }
     }
 
     fun addFile(path: String) {

@@ -56,6 +56,8 @@ fun UndertwigApp(
                 },
                 onSelectLatexEngine = viewModel::setLatexEngine,
                 onSelectBibTool = viewModel::setBibTool,
+                onPrepareDownload = viewModel::projectDownloadInfo,
+                onExportZip = viewModel::exportProjectZip,
                 onAddFile = viewModel::addFile,
                 onAddFolder = viewModel::addFolder,
                 onDeletePath = viewModel::deletePath,

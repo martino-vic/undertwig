@@ -3,8 +3,12 @@ package com.undertwig.app.data
 import android.content.Context
 import android.util.Base64
 import org.json.JSONObject
+import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.util.UUID
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 data class ProjectSummary(
     val id: String,
@@ -17,6 +21,38 @@ data class ProjectFile(
     val content: String,
     val binary: Boolean = false,
 )
+
+data class ProjectDownloadInfo(
+    val projectId: String,
+    val projectName: String,
+    val fileCount: Int,
+    val totalBytes: Long,
+) {
+    val zipFileName: String
+        get() = sanitizeFileName(projectName) + ".zip"
+
+    val readableSize: String
+        get() = formatByteSize(totalBytes)
+
+    companion object {
+        fun sanitizeFileName(name: String): String {
+            val cleaned = name.trim()
+                .replace(Regex("[\\\\/:*?\"<>|]"), "-")
+                .replace(Regex("\\s+"), " ")
+                .trim('.', ' ')
+            return cleaned.ifEmpty { "project" }
+        }
+
+        fun formatByteSize(bytes: Long): String {
+            if (bytes < 1024L) return "$bytes B"
+            val kb = bytes / 1024.0
+            if (kb < 1024.0) return String.format("%.1f KB", kb)
+            val mb = kb / 1024.0
+            if (mb < 1024.0) return String.format("%.1f MB", mb)
+            return String.format("%.2f GB", mb / 1024.0)
+        }
+    }
+}
 
 class ProjectRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -287,6 +323,46 @@ class ProjectRepository(context: Context) {
         return runCatching {
             resolve(projectId, relativePath).takeIf { it.isFile && it.length() > 0L }
         }.getOrNull()
+    }
+
+    fun projectDownloadInfo(projectId: String): ProjectDownloadInfo {
+        val dir = projectDir(projectId)
+        val files = exportableFiles(dir)
+        val total = files.sumOf { it.length() }
+        return ProjectDownloadInfo(
+            projectId = projectId,
+            projectName = projectName(projectId),
+            fileCount = files.size,
+            totalBytes = total,
+        )
+    }
+
+    /** Zip project files (excluding app metadata) into a cache file for download. */
+    fun zipProject(projectId: String): File {
+        val dir = projectDir(projectId)
+        val info = projectDownloadInfo(projectId)
+        require(info.fileCount > 0) { "This project has no files to download." }
+        val outDir = File(appContext.cacheDir, "exports").also { it.mkdirs() }
+        val out = File(outDir, info.zipFileName)
+        if (out.exists()) {
+            out.delete()
+        }
+        ZipOutputStream(BufferedOutputStream(FileOutputStream(out))).use { zip ->
+            exportableFiles(dir).forEach { file ->
+                val relative = file.relativeTo(dir).path.replace(File.separatorChar, '/')
+                zip.putNextEntry(ZipEntry(relative))
+                file.inputStream().use { input -> input.copyTo(zip) }
+                zip.closeEntry()
+            }
+        }
+        return out
+    }
+
+    private fun exportableFiles(projectDir: File): List<File> {
+        return projectDir.walkTopDown()
+            .filter { it.isFile && it.name != META_FILE }
+            .sortedBy { it.relativeTo(projectDir).path }
+            .toList()
     }
 
     private fun copyAssetTree(assetDir: String, destDir: File) {

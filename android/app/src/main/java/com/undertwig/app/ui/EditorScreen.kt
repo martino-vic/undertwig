@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
@@ -52,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -59,8 +61,17 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import com.undertwig.app.data.BibToolId
 import com.undertwig.app.data.LatexEngineId
+import com.undertwig.app.data.ProjectDownloadInfo
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,21 +87,76 @@ fun EditorScreen(
     onOpenPdf: () -> Unit,
     onSelectLatexEngine: (LatexEngineId) -> Unit,
     onSelectBibTool: (BibToolId) -> Unit,
+    onPrepareDownload: () -> ProjectDownloadInfo?,
+    onExportZip: () -> Result<File>,
     onAddFile: (String) -> Unit,
     onAddFolder: (String) -> Unit,
     onDeletePath: (path: String, isFolder: Boolean) -> Unit,
     onRenamePath: (from: String, to: String, isFolder: Boolean) -> Unit,
 ) {
+    val context = LocalContext.current
     var showAdd by remember { mutableStateOf(false) }
     var addIsFolder by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("notes.tex") }
     var showLog by remember { mutableStateOf(false) }
     var showEnginePicker by remember { mutableStateOf(false) }
     var showBibPicker by remember { mutableStateOf(false) }
+    var downloadInfo by remember { mutableStateOf<ProjectDownloadInfo?>(null) }
     var actionTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
     var renameTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
     var renameValue by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
+
+    fun runProjectDownload() {
+        val export = onExportZip()
+        export.fold(
+            onSuccess = { zip ->
+                val ok = downloadToDownloads(
+                    context = context,
+                    source = zip,
+                    mimeType = "application/zip",
+                    displayName = zip.name,
+                    failureLabel = "Could not download project zip.",
+                )
+                if (ok) {
+                    downloadInfo = null
+                }
+            },
+            onFailure = { error ->
+                Toast.makeText(
+                    context,
+                    error.message ?: "Could not create project zip.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            },
+        )
+    }
+
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            runProjectDownload()
+        } else {
+            Toast.makeText(context, "Storage permission is required to download.", Toast.LENGTH_SHORT)
+                .show()
+        }
+    }
+
+    fun confirmProjectDownload() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runProjectDownload()
+            return
+        }
+        val permission = Manifest.permission.WRITE_EXTERNAL_STORAGE
+        val granted = ContextCompat.checkSelfPermission(context, permission) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            runProjectDownload()
+        } else {
+            storagePermissionLauncher.launch(permission)
+        }
+    }
     var browserDir by remember(state.projectId) {
         mutableStateOf(parentDirOf(state.activePath))
     }
@@ -131,6 +197,22 @@ fun EditorScreen(
                     }
                     IconButton(onClick = onSave) {
                         Icon(Icons.Default.Save, contentDescription = "Save")
+                    }
+                    IconButton(
+                        onClick = {
+                            val info = onPrepareDownload()
+                            if (info == null) {
+                                Toast.makeText(
+                                    context,
+                                    "Open a project to download.",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            } else {
+                                downloadInfo = info
+                            }
+                        },
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = "Download project")
                     }
                     if (state.pdfPath != null) {
                         IconButton(onClick = onOpenPdf) {
@@ -467,6 +549,32 @@ fun EditorScreen(
             selected = state.bibTool,
             onSelect = onSelectBibTool,
             onDismiss = { showBibPicker = false },
+        )
+    }
+
+    downloadInfo?.let { info ->
+        AlertDialog(
+            onDismissRequest = { downloadInfo = null },
+            title = { Text("Download project") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Save “${info.projectName}” as a zip on this phone.")
+                    Text("File: ${info.zipFileName}")
+                    Text("Files: ${info.fileCount}")
+                    Text("Size: ${info.readableSize}")
+                    Text(
+                        "The zip goes to your Downloads folder.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmProjectDownload() }) { Text("Download") }
+            },
+            dismissButton = {
+                TextButton(onClick = { downloadInfo = null }) { Text("Cancel") }
+            },
         )
     }
 }
