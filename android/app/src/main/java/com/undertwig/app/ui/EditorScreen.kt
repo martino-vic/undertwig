@@ -40,6 +40,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -352,12 +354,14 @@ fun EditorScreen(
     }
 
     if (showLog) {
+        val clipboard = LocalClipboardManager.current
+        val logText = state.lastLog.ifBlank { "No log yet." }
         AlertDialog(
             onDismissRequest = { showLog = false },
             title = { Text("Compiler log") },
             text = {
                 Text(
-                    state.lastLog.ifBlank { "No log yet." },
+                    logText,
                     fontFamily = FontFamily.Monospace,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -365,6 +369,13 @@ fun EditorScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showLog = false }) { Text("Close") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(logText))
+                    },
+                ) { Text("Copy") }
             },
         )
     }
