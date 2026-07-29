@@ -58,6 +58,7 @@ fun UndertwigApp(
                     pdfFile = file,
                     title = "${editor.projectName}.pdf",
                     onBack = { navController.popBackStack() },
+                    contentRevision = editor.pdfRevision,
                 )
             } else {
                 navController.popBackStack()

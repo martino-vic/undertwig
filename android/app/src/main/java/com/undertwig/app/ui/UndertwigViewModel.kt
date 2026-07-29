@@ -30,6 +30,8 @@ data class EditorUiState(
     val converting: Boolean = false,
     val lastLog: String = "",
     val pdfPath: String? = null,
+    /** Increments on each successful Convert so PdfScreen reloads overwritten main.pdf. */
+    val pdfRevision: Long = 0L,
     val error: String? = null,
 )
 
@@ -304,6 +306,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                                 status = "PDF ready.",
                                 lastLog = compile.log,
                                 pdfPath = pdf.absolutePath,
+                                pdfRevision = it.pdfRevision + 1,
                                 error = null,
                             )
                         }
@@ -405,8 +408,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun pdfFile(): File? {
-        val path = _editor.value.pdfPath ?: return null
-        return File(path).takeIf { it.exists() }
+        val id = _editor.value.projectId
+        if (id.isEmpty()) return null
+        return repo.pdfFile(id)
     }
 
     private fun editorDisplayText(file: ProjectFile): String {

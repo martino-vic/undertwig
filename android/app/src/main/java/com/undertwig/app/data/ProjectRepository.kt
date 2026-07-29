@@ -40,6 +40,8 @@ class ProjectRepository(context: Context) {
 
     /**
      * Ensure default starters exist (Sample Project, then DummyHippo).
+     * Also refreshes packaged starter sources when [STARTER_ASSET_VERSION] advances
+     * so app updates (e.g. DummyHippo figures) replace the on-disk copy.
      * @return project id to auto-open when this was a first-empty install; otherwise null
      */
     fun ensureDefaultProjects(): String? {
@@ -56,6 +58,8 @@ class ProjectRepository(context: Context) {
         if (listProjects().none { it.name == DUMMY_HIPPO_NAME }) {
             createDummyHippoProject()
         }
+        refreshStarterAssetsIfNeeded(SAMPLE_PROJECT_NAME, "sample")
+        refreshStarterAssetsIfNeeded(DUMMY_HIPPO_NAME, "dummyhippo")
         return openId
     }
 
@@ -63,7 +67,7 @@ class ProjectRepository(context: Context) {
         val id = UUID.randomUUID().toString()
         val dir = File(root, id).also { it.mkdirs() }
         copyAssetTree("sample", dir)
-        writeMeta(dir, SAMPLE_PROJECT_NAME)
+        writeMeta(dir, SAMPLE_PROJECT_NAME, STARTER_ASSET_VERSION)
         return ProjectSummary(
             id = id,
             name = SAMPLE_PROJECT_NAME,
@@ -75,12 +79,30 @@ class ProjectRepository(context: Context) {
         val id = UUID.randomUUID().toString()
         val dir = File(root, id).also { it.mkdirs() }
         copyAssetTree("dummyhippo", dir)
-        writeMeta(dir, DUMMY_HIPPO_NAME)
+        writeMeta(dir, DUMMY_HIPPO_NAME, STARTER_ASSET_VERSION)
         return ProjectSummary(
             id = id,
             name = DUMMY_HIPPO_NAME,
             updatedAt = System.currentTimeMillis(),
         )
+    }
+
+    /**
+     * Re-copy bundled starter files when the APK asset pack is newer than the
+     * on-disk project. Drops stale main.pdf so PDF preview cannot show an old convert.
+     */
+    private fun refreshStarterAssetsIfNeeded(projectName: String, assetDir: String) {
+        val project = listProjects().find { it.name == projectName } ?: return
+        val dir = projectDir(project.id)
+        val meta = readMeta(dir) ?: return
+        val version = meta.optInt("assetVersion", 0)
+        if (version >= STARTER_ASSET_VERSION) return
+
+        copyAssetTree(assetDir, dir)
+        File(dir, "main.pdf").delete()
+        meta.put("assetVersion", STARTER_ASSET_VERSION)
+        meta.put("updatedAt", System.currentTimeMillis())
+        File(dir, META_FILE).writeText(meta.toString())
     }
 
     fun createProject(name: String): ProjectSummary {
@@ -237,9 +259,21 @@ class ProjectRepository(context: Context) {
     }
 
     fun savePdf(projectId: String, bytes: ByteArray): File {
-        val out = File(projectDir(projectId), "main.pdf")
-        out.writeBytes(bytes)
-        touch(projectDir(projectId))
+        val dir = projectDir(projectId)
+        val out = File(dir, "main.pdf")
+        val tmp = File(dir, "main.pdf.tmp")
+        // Atomic replace so PdfRenderer / FDs never reopen a half-written or
+        // same-inode stale mapping of the previous convert.
+        tmp.writeBytes(bytes)
+        if (out.exists() && !out.delete()) {
+            out.writeBytes(bytes)
+            tmp.delete()
+        } else if (!tmp.renameTo(out)) {
+            tmp.copyTo(out, overwrite = true)
+            tmp.delete()
+        }
+        out.setLastModified(System.currentTimeMillis())
+        touch(dir)
         return out
     }
 
@@ -310,10 +344,13 @@ class ProjectRepository(context: Context) {
         File(dir, META_FILE).writeText(meta.toString())
     }
 
-    private fun writeMeta(dir: File, name: String) {
+    private fun writeMeta(dir: File, name: String, assetVersion: Int? = null) {
         val meta = JSONObject()
             .put("name", name)
             .put("updatedAt", System.currentTimeMillis())
+        if (assetVersion != null) {
+            meta.put("assetVersion", assetVersion)
+        }
         File(dir, META_FILE).writeText(meta.toString())
     }
 
@@ -325,6 +362,8 @@ class ProjectRepository(context: Context) {
 
     companion object {
         private const val META_FILE = "project.json"
+        /** Bump when bundled sample/dummyhippo assets change and existing installs should re-seed. */
+        private const val STARTER_ASSET_VERSION = 2
         const val SAMPLE_PROJECT_NAME = "Sample Project"
         const val DUMMY_HIPPO_NAME = "DummyHippo"
 

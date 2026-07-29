@@ -39,10 +39,15 @@ fun PdfScreen(
     pdfFile: File,
     title: String,
     onBack: () -> Unit,
+    /** Bumps when Convert overwrites main.pdf so preview reloads even if the path is unchanged. */
+    contentRevision: Long = 0L,
 ) {
-    var pages by remember(pdfFile.absolutePath) { mutableStateOf<List<Bitmap>>(emptyList()) }
+    // Path alone is not enough: Convert always writes the same main.pdf path.
+    val contentKey =
+        "${pdfFile.absolutePath}|${pdfFile.lastModified()}|${pdfFile.length()}|$contentRevision"
+    var pages by remember(contentKey) { mutableStateOf<List<Bitmap>>(emptyList()) }
 
-    DisposableEffect(pdfFile.absolutePath) {
+    DisposableEffect(contentKey) {
         val rendered = mutableListOf<Bitmap>()
         val pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
         val renderer = PdfRenderer(pfd)
