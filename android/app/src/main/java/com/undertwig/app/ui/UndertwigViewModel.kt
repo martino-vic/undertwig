@@ -9,10 +9,12 @@ import com.undertwig.app.data.ProjectSummary
 import com.undertwig.app.engine.LatexEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.coroutines.coroutineContext
@@ -50,6 +52,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private val repo = ProjectRepository(application)
     private val engine = LatexEngine()
     private var busyJob: Job? = null
+    private var statusTickerJob: Job? = null
+    @Volatile private var latestBusyStatus: String? = null
+    @Volatile private var busyStatusStartedAtMs: Long = 0L
 
     private val _home = MutableStateFlow(HomeUiState())
     val home: StateFlow<HomeUiState> = _home.asStateFlow()
@@ -383,10 +388,11 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
                     repo.writeFile(state.projectId, state.activePath, state.editorText)
                 }
+                startThrottledStatus("Bibliography: starting…")
                 _editor.update {
                     it.copy(
                         busy = EditorBusy.Bibliography,
-                        status = "Updating bibliography…",
+                        status = "Bibliography: starting…",
                         error = null,
                         dirty = false,
                     )
@@ -395,7 +401,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     file.content to file.binary
                 }
                 val bib = engine.runBibliography(files) { message ->
-                    _editor.update { ui -> ui.copy(status = message) }
+                    noteBusyStatus(tidyBibStatus(message))
                 }
                 bib.outputs.forEach { (path, content) ->
                     if (path.isNotBlank() && !ProjectRepository.isBinaryPath(path)) {
@@ -411,6 +417,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 } else {
                     _editor.value.editorText
                 }
+                stopThrottledStatus()
                 _editor.update {
                     it.copy(
                         busy = EditorBusy.Idle,
@@ -428,6 +435,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 }
             } catch (_: CancellationException) {
+                stopThrottledStatus()
                 _editor.update {
                     it.copy(
                         busy = EditorBusy.Idle,
@@ -436,6 +444,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 }
             } catch (error: Exception) {
+                stopThrottledStatus()
                 _editor.update {
                     it.copy(
                         busy = EditorBusy.Idle,
@@ -445,6 +454,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 }
             } finally {
+                stopThrottledStatus()
                 if (busyJob === coroutineContext[Job]) {
                     busyJob = null
                 }
@@ -455,10 +465,85 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun cancelBusy() {
         if (_editor.value.busy == EditorBusy.Idle) return
+        stopThrottledStatus()
         _editor.update { it.copy(status = "Cancelling…") }
         engine.cancelCurrentWork()
         busyJob?.cancel()
         busyJob = null
+    }
+
+    /**
+     * Keep one short status line during long Bib runs: collapse noisy worker
+     * messages into a phase label, paint phase changes immediately, and refresh
+     * the same line about every 10s with an elapsed timer so it stays readable.
+     */
+    private fun startThrottledStatus(initial: String) {
+        stopThrottledStatus()
+        latestBusyStatus = initial
+        busyStatusStartedAtMs = System.currentTimeMillis()
+        statusTickerJob = viewModelScope.launch {
+            while (isActive) {
+                delay(STATUS_TICK_MS)
+                val message = latestBusyStatus ?: continue
+                if (_editor.value.busy == EditorBusy.Idle) break
+                _editor.update { ui -> ui.copy(status = withElapsed(message)) }
+            }
+        }
+    }
+
+    private fun noteBusyStatus(message: String) {
+        val cleaned = message.replace(Regex("\\s+"), " ").trim()
+        if (cleaned.isEmpty()) return
+        val previous = latestBusyStatus
+        latestBusyStatus = cleaned
+        // New phase → show immediately; same label waits for the 10s tick.
+        if (previous != cleaned && _editor.value.busy != EditorBusy.Idle) {
+            _editor.update { ui -> ui.copy(status = withElapsed(cleaned)) }
+        }
+    }
+
+    private fun stopThrottledStatus() {
+        statusTickerJob?.cancel()
+        statusTickerJob = null
+        latestBusyStatus = null
+        busyStatusStartedAtMs = 0L
+    }
+
+    private fun withElapsed(message: String): String {
+        val started = busyStatusStartedAtMs
+        if (started <= 0L) return message
+        val elapsedSec = ((System.currentTimeMillis() - started) / 1000L).toInt()
+        return if (elapsedSec >= 10) "$message (${elapsedSec}s)" else message
+    }
+
+    private fun tidyBibStatus(raw: String): String {
+        val text = raw.replace(Regex("\\s+"), " ").trim()
+        return when {
+            text.contains("Preparing citation", ignoreCase = true) ->
+                "Bibliography: preparing citation data…"
+            text.contains("Creating main.aux", ignoreCase = true) ->
+                "Bibliography: creating main.aux…"
+            text.contains("Downloading", ignoreCase = true) ||
+                text.contains("Fetching", ignoreCase = true) ->
+                "Bibliography: downloading engine…"
+            text.contains("Loading BibTeX", ignoreCase = true) ||
+                text.contains("(2/3)") ->
+                "Bibliography: loading BibTeX engine…"
+            text.contains("Running BibTeX", ignoreCase = true) ||
+                text.contains("(3/3)") ->
+                "Bibliography: running BibTeX…"
+            text.contains("(1/3)") ->
+                "Bibliography: preparing citation data…"
+            else -> {
+                val short = text.take(STATUS_MAX_CHARS)
+                if (text.length > STATUS_MAX_CHARS) "$short…" else short
+            }
+        }
+    }
+
+    companion object {
+        private const val STATUS_TICK_MS = 10_000L
+        private const val STATUS_MAX_CHARS = 72
     }
 
     fun pdfFile(): File? {
