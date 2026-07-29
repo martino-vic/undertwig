@@ -33,9 +33,10 @@ This is **not** a Chrome Custom Tab / TWA wrapper of the website.
 
 ## Store assets
 
-Play Console **512×512** app icon (pixel undertwig on dark background):
+Play Console uploads (pixel undertwig branding):
 
-`android/branding/play_store_icon_512.png`
+- **App icon 512×512:** `android/branding/play_store_icon_512.png`
+- **Feature graphic 1024×500:** `android/branding/play_feature_graphic_1024x500.png`
 
 Launcher icons are generated from the same sample-project twig (`drawable` + `mipmap-*`).
 
