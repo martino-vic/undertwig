@@ -158,36 +158,56 @@ fun EditorScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                val compactPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
                 Button(
                     onClick = onConvert,
                     enabled = !state.converting,
+                    contentPadding = compactPadding,
                     modifier = Modifier.weight(1f),
                 ) {
                     if (state.converting) {
                         CircularProgressIndicator(
                             modifier = Modifier
-                                .height(18.dp)
-                                .width(18.dp),
+                                .height(16.dp)
+                                .width(16.dp),
                             strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Converting…")
+                        Spacer(modifier.width(6.dp))
+                        Text("…", maxLines = 1)
                     } else {
-                        Text("Convert")
+                        Text("Convert", maxLines = 1)
                     }
+                }
+                Button(
+                    onClick = onBibliography,
+                    enabled = !state.converting,
+                    contentPadding = compactPadding,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
+                ) {
+                    Text("Bib", maxLines = 1)
                 }
                 OutlinedButton(
                     onClick = { showLog = true },
                     enabled = state.lastLog.isNotBlank(),
+                    contentPadding = compactPadding,
                 ) {
-                    Text("Log")
+                    Text("Log", maxLines = 1)
                 }
                 if (state.pdfPath != null) {
-                    OutlinedButton(onClick = onOpenPdf) { Text("PDF") }
+                    OutlinedButton(
+                        onClick = onOpenPdf,
+                        contentPadding = compactPadding,
+                    ) {
+                        Text("PDF", maxLines = 1)
+                    }
                 }
             }
 
