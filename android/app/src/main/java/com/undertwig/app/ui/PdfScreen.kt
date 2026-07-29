@@ -1,9 +1,15 @@
 package com.undertwig.app.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.graphics.pdf.PdfRenderer
+import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -14,6 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,7 +38,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,6 +52,33 @@ fun PdfScreen(
     /** Bumps when Convert overwrites main.pdf so preview reloads even if the path is unchanged. */
     contentRevision: Long = 0L,
 ) {
+    val context = LocalContext.current
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            downloadPdf(context, pdfFile)
+        } else {
+            Toast.makeText(context, "Storage permission is required to download.", Toast.LENGTH_SHORT)
+                .show()
+        }
+    }
+
+    fun onDownloadClick() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            downloadPdf(context, pdfFile)
+            return
+        }
+        val permission = Manifest.permission.WRITE_EXTERNAL_STORAGE
+        val granted = ContextCompat.checkSelfPermission(context, permission) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            downloadPdf(context, pdfFile)
+        } else {
+            storagePermissionLauncher.launch(permission)
+        }
+    }
+
     // Path alone is not enough: Convert always writes the same main.pdf path.
     val contentKey =
         "${pdfFile.absolutePath}|${pdfFile.lastModified()}|${pdfFile.length()}|$contentRevision"
@@ -76,10 +113,18 @@ fun PdfScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(title) },
+                title = { Text(title, maxLines = 1) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { onDownloadClick() }) {
+                        Icon(Icons.Default.Download, contentDescription = "Download")
+                    }
+                    IconButton(onClick = { sharePdf(context, pdfFile) }) {
+                        Icon(Icons.Default.Share, contentDescription = "Share")
                     }
                 },
             )

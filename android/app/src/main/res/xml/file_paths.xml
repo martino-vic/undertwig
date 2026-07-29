@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <files-path name="pdfs" path="pdfs/" />
+    <!-- Project trees live under filesDir/projects/ (includes convert output and figure PDFs). -->
+    <files-path name="projects" path="projects/" />
 </paths>
