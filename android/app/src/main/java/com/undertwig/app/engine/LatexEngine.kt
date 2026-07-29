@@ -69,8 +69,14 @@ class LatexEngine {
             val view = WebView(themed)
             view.settings.javaScriptEnabled = true
             view.settings.domStorageEnabled = true
-            view.settings.cacheMode = WebSettings.LOAD_DEFAULT
+            // Engine assets are versioned in APK; never serve a stale cached Worker script.
+            view.settings.cacheMode = WebSettings.LOAD_NO_CACHE
             view.settings.allowFileAccess = false
+            try {
+                view.clearCache(true)
+            } catch (error: Throwable) {
+                Log.w(TAG, "clearCache failed", error)
+            }
             view.addJavascriptInterface(NativeBridge(), "UndertwigNative")
             view.webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(
@@ -95,7 +101,10 @@ class LatexEngine {
             }
             webView = view
             engineReady = false
-            view.loadUrl("https://appassets.androidplatform.net/assets/engine/runner.html")
+            // Cache-bust query so WebView cannot reuse an older runner/Worker bundle.
+            view.loadUrl(
+                "https://appassets.androidplatform.net/assets/engine/runner.html?v=$ENGINE_ASSET_VERSION",
+            )
         } catch (error: Throwable) {
             webView = null
             Log.e(TAG, "Failed to create WebView", error)
@@ -242,5 +251,7 @@ class LatexEngine {
 
     companion object {
         private const val TAG = "UndertwigEngine"
+        /** Bump whenever bundled engine JS/Wasm/fmt changes. */
+        private const val ENGINE_ASSET_VERSION = "8"
     }
 }

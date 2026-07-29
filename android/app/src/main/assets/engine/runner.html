@@ -6,7 +6,7 @@
   <title>Undertwig Engine</title>
 </head>
 <body>
-  <script src="./PdfTeXEngine.js"></script>
+  <script src="./PdfTeXEngine.js?v=8"></script>
   <script>
     (function () {
       "use strict";
@@ -42,8 +42,9 @@
 
       async function ensureFormat(engine) {
         post("progress", { message: "Loading TeX format…" });
+        // Fetch in the page (AssetLoader-backed), then transfer into the Worker.
+        // Real Workers accept transferable ArrayBuffers; the old iframe path did not.
         var fmtUrl = new URL("./swiftlatexpdftex.fmt", window.location.href).href;
-        // Parent-frame fetch + same-origin install into the iframe (no postMessage).
         var response = await fetch(fmtUrl);
         if (!response.ok) {
           throw new Error(
@@ -64,6 +65,9 @@
             post("progress", { message: "Loading pdfLaTeX…" });
             if (typeof PdfTeXEngine !== "function") {
               throw new Error("PdfTeXEngine is not available.");
+            }
+            if (typeof Worker !== "function") {
+              throw new Error("Web Workers are not available in this WebView.");
             }
             var engine = new PdfTeXEngine();
             await engine.loadEngine();
@@ -104,7 +108,6 @@
               post("progress", {
                 message: "Converting with pdfLaTeX (pass " + pass + "/2)…",
               });
-              // Let the progress bridge flush before the blocking Wasm compile.
               await new Promise(function (r) {
                 setTimeout(r, 50);
               });

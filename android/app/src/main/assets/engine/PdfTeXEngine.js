@@ -14,6 +14,7 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
+/* Undertwig Android: real Web Worker path (same as mobile Chrome / undertwig.com). */
 var exports = {};
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -60,7 +61,7 @@ var EngineStatus;
     EngineStatus[EngineStatus["Busy"] = 3] = "Busy";
     EngineStatus[EngineStatus["Error"] = 4] = "Error";
 })(EngineStatus = exports.EngineStatus || (exports.EngineStatus = {}));
-var ENGINE_PATH = './swiftlatexpdftex.js';
+var ENGINE_PATH = './swiftlatexpdftex.js?v=8';
 var CompileResult = /** @class */ (function () {
     function CompileResult() {
         this.pdf = undefined;
@@ -71,47 +72,6 @@ var CompileResult = /** @class */ (function () {
     return CompileResult;
 }());
 exports.CompileResult = CompileResult;
-
-/* Undertwig Android: iframe "worker" so TeXlyre sync XHR works in WebView. */
-function UndertwigFrameWorker(frameUrl) {
-  var selfWorker = this;
-  this.onmessage = null;
-  this.onerror = null;
-  this._ready = false;
-  this._iframe = document.createElement("iframe");
-  this._iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
-  this._iframe.style.cssText = "position:absolute;left:-9999px;width:1px;height:1px;border:0;opacity:0;";
-  this._onWinMessage = function (ev) {
-    if (!selfWorker._iframe || ev.source !== selfWorker._iframe.contentWindow) {
-      return;
-    }
-    if (typeof selfWorker.onmessage === "function") {
-      selfWorker.onmessage({ data: ev.data });
-    }
-  };
-  window.addEventListener("message", this._onWinMessage);
-  document.body.appendChild(this._iframe);
-  this._iframe.src = frameUrl;
-}
-UndertwigFrameWorker.prototype.postMessage = function (data, transfer) {
-  var win = this._iframe && this._iframe.contentWindow;
-  if (!win) {
-    return;
-  }
-  // Never pass a transfer list on Android WebView.
-  win.postMessage(data, "*");
-};
-UndertwigFrameWorker.prototype.contentWindow = function () {
-  return this._iframe && this._iframe.contentWindow;
-};
-UndertwigFrameWorker.prototype.terminate = function () {
-  window.removeEventListener("message", this._onWinMessage);
-  if (this._iframe && this._iframe.parentNode) {
-    this._iframe.parentNode.removeChild(this._iframe);
-  }
-  this._iframe = null;
-};
-
 var PdfTeXEngine = /** @class */ (function () {
     function PdfTeXEngine() {
         this.latexWorker = undefined;
@@ -128,7 +88,8 @@ var PdfTeXEngine = /** @class */ (function () {
                         }
                         this.latexWorkerStatus = EngineStatus.Init;
                         return [4 /*yield*/, new Promise(function (resolve, reject) {
-                                _this.latexWorker = new UndertwigFrameWorker(new URL('worker_frame.html', window.location.href).href);
+                                var workerUrl = new URL(ENGINE_PATH, window.location.href).href;
+                                _this.latexWorker = new Worker(workerUrl);
                                 _this.latexWorker.onmessage = function (ev) {
                                     var data = ev['data'];
                                     var cmd = data['result'];
@@ -138,8 +99,12 @@ var PdfTeXEngine = /** @class */ (function () {
                                     }
                                     else {
                                         _this.latexWorkerStatus = EngineStatus.Error;
-                                        reject();
+                                        reject(new Error('PdfTeX worker failed to initialize'));
                                     }
+                                };
+                                _this.latexWorker.onerror = function (err) {
+                                    _this.latexWorkerStatus = EngineStatus.Error;
+                                    reject(err && err.message ? err : new Error('PdfTeX worker error'));
                                 };
                             })];
                     case 1:
@@ -162,53 +127,48 @@ var PdfTeXEngine = /** @class */ (function () {
         }
     };
     PdfTeXEngine.prototype.compileLaTeX = function () {
-        var _this = this;
-        this.checkEngineStatus();
-        var start_compile_time = performance.now();
-        // Direct same-origin call — postMessage results hang on some Android WebViews.
-        return new Promise(function (resolve, reject) {
-            setTimeout(function () {
-                var win = _this.latexWorker && _this.latexWorker.contentWindow && _this.latexWorker.contentWindow();
-                if (!win || typeof win.__undertwigCompileLatex !== 'function') {
-                    reject(new Error('compile API missing in engine iframe'));
-                    return;
+        return __awaiter(this, void 0, void 0, function () {
+            var start_compile_time, res;
+            var _this = this;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0:
+                        this.checkEngineStatus();
+                        this.latexWorkerStatus = EngineStatus.Busy;
+                        start_compile_time = performance.now();
+                        return [4 /*yield*/, new Promise(function (resolve, _) {
+                                _this.latexWorker.onmessage = function (ev) {
+                                    var data = ev['data'];
+                                    var cmd = data['cmd'];
+                                    if (cmd !== "compile")
+                                        return;
+                                    var result = data['result'];
+                                    var log = data['log'];
+                                    var status = data['status'];
+                                    _this.latexWorkerStatus = EngineStatus.Ready;
+                                    console.log('Engine compilation finish ' + (performance.now() - start_compile_time));
+                                    var nice_report = new CompileResult();
+                                    nice_report.status = status;
+                                    nice_report.log = log;
+                                    nice_report.aux = data['aux'] || {};
+                                    if (result === 'ok') {
+                                        var pdf = new Uint8Array(data['pdf']);
+                                        nice_report.pdf = pdf;
+                                    }
+                                    resolve(nice_report);
+                                };
+                                _this.latexWorker.postMessage({ 'cmd': 'compilelatex' });
+                                console.log('Engine compilation start');
+                            })];
+                    case 1:
+                        res = _a.sent();
+                        this.latexWorker.onmessage = function (_) {
+                        };
+                        return [2 /*return*/, res];
                 }
-                _this.latexWorkerStatus = EngineStatus.Busy;
-                var data;
-                try {
-                    data = win.__undertwigCompileLatex();
-                }
-                catch (err) {
-                    _this.latexWorkerStatus = EngineStatus.Ready;
-                    reject(err);
-                    return;
-                }
-                _this.latexWorkerStatus = EngineStatus.Ready;
-                console.log('Engine compilation finish ' + (performance.now() - start_compile_time));
-                var nice_report = new CompileResult();
-                nice_report.status = data && data.status;
-                nice_report.log = (data && data.log) || '';
-                nice_report.aux = (data && data.aux) || {};
-                if (data && data.result === 'ok') {
-                    var pdfSource = null;
-                    if (data.pdfViaParent && window.__undertwigPdfPayload) {
-                        pdfSource = window.__undertwigPdfPayload;
-                        window.__undertwigPdfPayload = null;
-                    }
-                    else if (data.pdf) {
-                        pdfSource = data.pdf;
-                    }
-                    if (pdfSource) {
-                        nice_report.pdf = pdfSource instanceof Uint8Array
-                            ? pdfSource.slice(0)
-                            : new Uint8Array(pdfSource);
-                    }
-                }
-                resolve(nice_report);
-            }, 0);
+            });
         });
     };
-    /* Internal Use */
     PdfTeXEngine.prototype.compileFormat = function () {
         return __awaiter(this, void 0, void 0, function () {
             var _this = this;
@@ -225,10 +185,9 @@ var PdfTeXEngine = /** @class */ (function () {
                                         return;
                                     var result = data['result'];
                                     var log = data['log'];
-                                    // const status: number = data['status'] as number;
                                     _this.latexWorkerStatus = EngineStatus.Ready;
                                     if (result === 'ok') {
-                                        var formatArray = data['pdf']; /* PDF for result */
+                                        var formatArray = data['pdf'];
                                         var formatBlob = new Blob([formatArray], { type: 'application/octet-stream' });
                                         var formatURL_1 = URL.createObjectURL(formatBlob);
                                         setTimeout(function () { URL.revokeObjectURL(formatURL_1); }, 30000);
@@ -250,34 +209,41 @@ var PdfTeXEngine = /** @class */ (function () {
             });
         });
     };
-
     /**
-     * Preload a TeX format/file into the engine FS.
-     * Fetches in the parent frame (async + WebViewAssetLoader), then installs
-     * via a same-origin direct call into the iframe — no postMessage of the
-     * ~10MB buffer (that fails on many Android WebViews).
+     * Install a TeX format into the worker FS.
+     * Prefer a same-origin URL so the worker loads the ~10MB .fmt itself
+     * (avoids cloning large buffers through postMessage).
      */
     PdfTeXEngine.prototype.preloadTexFile = function (name, dataOrUrl) {
         var _this = this;
         this.checkEngineStatus();
-        return Promise.resolve()
-            .then(function () {
-            var win = _this.latexWorker && _this.latexWorker.contentWindow && _this.latexWorker.contentWindow();
-            if (!win) {
-                throw new Error('preloadtex: engine iframe missing');
+        return new Promise(function (resolve, reject) {
+            if (_this.latexWorker === undefined) {
+                reject(new Error('preloadtex: worker missing'));
+                return;
             }
-            if (typeof win.__undertwigInstallFmtFromParent !== 'function') {
-                throw new Error('preloadtex: installer not ready in engine iframe');
-            }
+            _this.latexWorkerStatus = EngineStatus.Busy;
+            _this.latexWorker.onmessage = function (ev) {
+                var data = ev['data'];
+                if (!data || data['cmd'] !== 'preloadtex') {
+                    return;
+                }
+                _this.latexWorkerStatus = EngineStatus.Ready;
+                _this.latexWorker.onmessage = function (_) { };
+                if (data['result'] === 'ok') {
+                    resolve();
+                }
+                else {
+                    reject(new Error(data['log'] || 'preloadtex failed'));
+                }
+            };
             if (typeof dataOrUrl === 'string') {
-                return fetch(dataOrUrl).then(function (response) {
-                    if (!response.ok) {
-                        throw new Error('preloadtex: fetch failed (' + response.status + ')');
-                    }
-                    return response.arrayBuffer();
-                }).then(function (buffer) {
-                    return { win: win, bytes: new Uint8Array(buffer) };
+                _this.latexWorker.postMessage({
+                    cmd: 'preloadtex',
+                    name: name,
+                    url: dataOrUrl,
                 });
+                return;
             }
             var bytes;
             if (dataOrUrl instanceof ArrayBuffer) {
@@ -289,73 +255,35 @@ var PdfTeXEngine = /** @class */ (function () {
                     : new Uint8Array(dataOrUrl.buffer, dataOrUrl.byteOffset || 0, dataOrUrl.byteLength);
             }
             else {
-                throw new Error('preloadTexFile: expected URL or binary data');
-            }
-            return { win: win, bytes: bytes };
-        })
-            .then(function (payload) {
-            if (!payload.bytes || !payload.bytes.byteLength) {
-                throw new Error('preloadtex: empty format payload');
-            }
-            // Park bytes on the parent window; iframe reads parent.__undertwigFmtPayload
-            // (avoids structured-clone of ~10MB through postMessage / call args).
-            window.__undertwigFmtPayload = payload.bytes;
-            _this.latexWorkerStatus = EngineStatus.Busy;
-            var result;
-            try {
-                result = payload.win.__undertwigInstallFmtFromParent(name);
-            }
-            finally {
-                window.__undertwigFmtPayload = null;
                 _this.latexWorkerStatus = EngineStatus.Ready;
+                reject(new Error('preloadTexFile: expected URL or binary data'));
+                return;
             }
-            if (!result || !result.ok) {
-                throw new Error((result && result.log) || 'preloadtex failed');
-            }
+            var copy = bytes.slice();
+            _this.latexWorker.postMessage(
+                { cmd: 'preloadtex', name: name, data: copy.buffer },
+                [copy.buffer]
+            );
         });
-    };
-    PdfTeXEngine.prototype._workerWindow = function () {
-        return this.latexWorker && this.latexWorker.contentWindow && this.latexWorker.contentWindow();
     };
     PdfTeXEngine.prototype.setEngineMainFile = function (filename) {
         this.checkEngineStatus();
-        var win = this._workerWindow();
-        if (win && typeof win.__undertwigSetMainFile === 'function') {
-            win.__undertwigSetMainFile(filename);
-            return;
-        }
         if (this.latexWorker !== undefined) {
             this.latexWorker.postMessage({ 'cmd': 'setmainfile', 'url': filename });
         }
     };
     PdfTeXEngine.prototype.writeMemFSFile = function (filename, srccode) {
         this.checkEngineStatus();
-        var win = this._workerWindow();
-        if (win && typeof win.__undertwigWriteFile === 'function') {
-            var result = win.__undertwigWriteFile(filename, srccode);
-            if (result && result.ok === false) {
-                throw new Error(result.log || 'writefile failed');
-            }
-            return;
-        }
         if (this.latexWorker !== undefined) {
             this.latexWorker.postMessage({ 'cmd': 'writefile', 'url': filename, 'src': srccode });
         }
     };
     PdfTeXEngine.prototype.makeMemFSFolder = function (folder) {
         this.checkEngineStatus();
-        if (folder === '' || folder === '/') {
-            return;
-        }
-        var win = this._workerWindow();
-        if (win && typeof win.__undertwigMkdir === 'function') {
-            var result = win.__undertwigMkdir(folder);
-            if (result && result.ok === false) {
-                throw new Error(result.log || 'mkdir failed');
-            }
-            return;
-        }
         if (this.latexWorker !== undefined) {
+            if (folder === '' || folder === '/') {
+                return;
+            }
             this.latexWorker.postMessage({ 'cmd': 'mkdir', 'url': folder });
         }
     };
@@ -373,7 +301,14 @@ var PdfTeXEngine = /** @class */ (function () {
     };
     PdfTeXEngine.prototype.closeWorker = function () {
         if (this.latexWorker !== undefined) {
-            this.latexWorker.postMessage({ 'cmd': 'grace' });
+            try {
+                this.latexWorker.postMessage({ 'cmd': 'grace' });
+            }
+            catch (_e) { }
+            try {
+                this.latexWorker.terminate();
+            }
+            catch (_e2) { }
             this.latexWorker = undefined;
         }
     };
