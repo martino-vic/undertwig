@@ -51,7 +51,8 @@ fun ProjectFileTree(
     modifier: Modifier = Modifier,
 ) {
     val treeFiles = remember(files) {
-        files.filter { !it.lowercase().endsWith(".pdf") }
+        // Hide convert output only; keep figure PDFs visible in the browser.
+        files.filter { it != "main.pdf" && !it.endsWith("/main.pdf") }
     }
 
     LaunchedEffect(treeFiles, folders, currentDir) {

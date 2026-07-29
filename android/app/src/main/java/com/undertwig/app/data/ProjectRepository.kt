@@ -231,10 +231,8 @@ class ProjectRepository(context: Context) {
 
     fun filesForCompile(projectId: String): Map<String, ProjectFile> {
         return listFiles(projectId)
-            .filter { path ->
-                val lower = path.lowercase()
-                !lower.endsWith(".pdf")
-            }
+            // Skip only the convert output, not figure PDFs like figures/hippo-figure.pdf.
+            .filter { path -> path != "main.pdf" && !path.endsWith("/main.pdf") }
             .associateWith { path -> readFile(projectId, path) }
     }
 
