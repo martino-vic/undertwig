@@ -84,8 +84,12 @@ fun EditorScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(state.projectName)
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            state.projectName,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                         Text(
                             state.status,
                             style = MaterialTheme.typography.bodySmall,
