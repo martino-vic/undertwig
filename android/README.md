@@ -31,6 +31,14 @@ This is **not** a Chrome Custom Tab / TWA wrapper of the website.
 
 `com.undertwig.app` · version `0.1.0`
 
+## Store assets
+
+Play Console **512×512** app icon (pixel undertwig on dark background):
+
+`android/branding/play_store_icon_512.png`
+
+Launcher icons are generated from the same sample-project twig (`drawable` + `mipmap-*`).
+
 ## Troubleshooting crashes
 
 - Prefer an emulator image **with Google Play** (includes Android System WebView).
