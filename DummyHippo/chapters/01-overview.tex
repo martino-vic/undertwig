@@ -28,21 +28,20 @@ Wasm TeX Live mirror and on how faithfully the engine reproduces layout.}
 
 \begin{figure}[ht]
   \centering
-  \includegraphics[width=0.72\linewidth]{hippo-grid.png}
-  \caption{Raster stress figure: a light mesh on a soft grid (no mascot).}
+  \includegraphics[width=0.72\linewidth]{stress-grid.png}
+  \caption{Raster stress figure: a light mesh on a soft grid.}
   \label{fig:hippo-grid}
 \end{figure}
 
 \begin{figure}[ht]
   \centering
-  \includegraphics[width=0.45\linewidth]{hippo.jpg}\hfill
-  \includegraphics[width=0.45\linewidth]{hippo-figure.pdf}
+  \includegraphics[width=0.45\linewidth]{spectra.jpg}\hfill
+  \includegraphics[width=0.45\linewidth]{pipeline.pdf}
   \caption{Two different pdfLaTeX-native formats side by side: a JPEG bar chart
-  (\texttt{hippo.jpg}) and a vector PDF pipeline diagram
-  (\texttt{hippo-figure.pdf}). Sibling assets
-  (\texttt{.jpeg}, \texttt{.webp}, \texttt{.bmp}, \texttt{.tif}/\texttt{.tiff},
-  \texttt{.ico}, \texttt{.svg}) also live under \texttt{figures/} so Undertwig
-  mounts them during Convert even when this engine cannot draw them.}
+  (\texttt{spectra.jpg}) and a vector PDF diagram (\texttt{pipeline.pdf}).
+  Matching siblings under \texttt{figures/}
+  (\texttt{spectra.jpeg}, \texttt{.webp}, \texttt{.bmp}, \texttt{.tif}/\texttt{.tiff},
+  \texttt{.ico}) are mounted during Convert for format coverage.}
   \label{fig:hippo-formats}
 \end{figure}
 

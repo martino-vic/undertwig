@@ -15,9 +15,9 @@ Deliberately heavy multi-file LaTeX project for manual Undertwig Convert checks.
 - Shared preamble macros in `inc/`
 - TikZ + PGFPlots figures under `figures/tikz/` (`.tikz` sources open as text in Undertwig)
 - Image assets under `figures/` for format coverage:
-  - mascot (end only): `hippo.png` — light four-legged pixel hippo
-  - early figures (not the mascot): `hippo-grid.png` (mesh), `hippo.jpg` (bar chart), `hippo-figure.pdf` (vector pipeline)
-  - import/preview/mount siblings: `hippo.jpeg`, `hippo.webp`, `hippo.bmp`, `hippo.tif` / `hippo.tiff`, `hippo.ico`, `hippo.svg`
+  - mascot (end only): `hippo.png` / `hippo.svg` — slate-grey pixel hippo
+  - early figures: `stress-grid.png` (mesh), `spectra.jpg` (bar chart), `pipeline.pdf` (vector diagram)
+  - import/preview/mount siblings of the chart: `spectra.jpeg`, `.webp`, `.bmp`, `.tif` / `.tiff`, `.ico`
 - BibTeX database at `bib/references.bib`
 - Theorems, tcolorbox callouts, dense math, and wide tables
 
