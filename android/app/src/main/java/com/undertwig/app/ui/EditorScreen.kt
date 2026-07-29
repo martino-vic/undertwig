@@ -1,8 +1,5 @@
 package com.undertwig.app.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -101,29 +99,13 @@ fun EditorScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                state.files.forEach { path ->
-                    val selected = path == state.activePath
-                    Text(
-                        text = path.substringAfterLast('/'),
-                        modifier = Modifier
-                            .background(
-                                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                else MaterialTheme.colorScheme.surface,
-                            )
-                            .clickable { onSelectFile(path) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                }
+            key(state.projectId) {
+                ProjectFileTree(
+                    files = state.files,
+                    activePath = state.activePath,
+                    onSelectFile = onSelectFile,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
             }
 
             BasicTextField(
