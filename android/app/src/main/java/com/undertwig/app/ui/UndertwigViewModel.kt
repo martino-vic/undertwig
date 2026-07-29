@@ -22,6 +22,7 @@ data class EditorUiState(
     val projectId: String = "",
     val projectName: String = "",
     val files: List<String> = emptyList(),
+    val folders: List<String> = emptyList(),
     val activePath: String = "main.tex",
     val editorText: String = "",
     val dirty: Boolean = false,
@@ -86,6 +87,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             projectId = id,
             projectName = repo.projectName(id),
             files = repo.listFiles(id),
+            folders = repo.listFolders(id),
             activePath = active,
             editorText = editorDisplayText(file),
             dirty = false,
@@ -106,6 +108,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 editorText = editorDisplayText(file),
                 dirty = false,
                 files = repo.listFiles(state.projectId),
+                folders = repo.listFolders(state.projectId),
                 status = "Editing $path",
             )
         }
@@ -125,6 +128,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 dirty = false,
                 status = "Saved ${state.activePath}",
                 files = repo.listFiles(state.projectId),
+                folders = repo.listFolders(state.projectId),
             )
         }
         refreshProjects()
@@ -134,8 +138,38 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         val state = _editor.value
         val clean = path.trim().trimStart('/')
         if (clean.isEmpty()) return
-        repo.createFile(state.projectId, clean, "")
+        runCatching {
+            repo.createFile(state.projectId, clean, "")
+        }.onFailure { error ->
+            _editor.update {
+                it.copy(error = error.message ?: "Could not create file.", status = "Create failed.")
+            }
+            return
+        }
         selectFile(clean)
+    }
+
+    fun addFolder(path: String) {
+        val state = _editor.value
+        val clean = path.trim().trimStart('/')
+        if (clean.isEmpty() || state.projectId.isEmpty()) return
+        runCatching {
+            repo.createFolder(state.projectId, clean)
+        }.onFailure { error ->
+            _editor.update {
+                it.copy(error = error.message ?: "Could not create folder.", status = "Create failed.")
+            }
+            return
+        }
+        _editor.update {
+            it.copy(
+                files = repo.listFiles(state.projectId),
+                folders = repo.listFolders(state.projectId),
+                status = "Created folder $clean",
+                error = null,
+            )
+        }
+        refreshProjects()
     }
 
     fun deletePath(path: String, isFolder: Boolean) {
@@ -230,6 +264,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         _editor.update {
             it.copy(
                 files = files,
+                folders = repo.listFolders(state.projectId),
                 activePath = active,
                 editorText = editorDisplayText(file),
                 dirty = false,

@@ -21,6 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -55,16 +56,21 @@ fun EditorScreen(
     onConvert: () -> Unit,
     onOpenPdf: () -> Unit,
     onAddFile: (String) -> Unit,
+    onAddFolder: (String) -> Unit,
     onDeletePath: (path: String, isFolder: Boolean) -> Unit,
     onRenamePath: (from: String, to: String, isFolder: Boolean) -> Unit,
 ) {
     var showAdd by remember { mutableStateOf(false) }
-    var newFile by remember { mutableStateOf("notes.tex") }
+    var addIsFolder by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("notes.tex") }
     var showLog by remember { mutableStateOf(false) }
     var actionTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
     var renameTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
     var renameValue by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
+    var browserDir by remember(state.projectId) {
+        mutableStateOf(parentDirOf(state.activePath))
+    }
 
     Scaffold(
         topBar = {
@@ -85,8 +91,14 @@ fun EditorScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showAdd = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add file")
+                    IconButton(
+                        onClick = {
+                            addIsFolder = false
+                            newName = "notes.tex"
+                            showAdd = true
+                        },
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Add file or folder")
                     }
                     IconButton(onClick = onSave) {
                         Icon(Icons.Default.Save, contentDescription = "Save")
@@ -108,8 +120,14 @@ fun EditorScreen(
             key(state.projectId) {
                 ProjectFileTree(
                     files = state.files,
+                    folders = state.folders,
                     activePath = state.activePath,
-                    onSelectFile = onSelectFile,
+                    currentDir = browserDir,
+                    onCurrentDirChange = { browserDir = it },
+                    onSelectFile = { path ->
+                        browserDir = parentDirOf(path)
+                        onSelectFile(path)
+                    },
                     onLongPressTarget = { actionTarget = it },
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 )
@@ -179,21 +197,64 @@ fun EditorScreen(
     }
 
     if (showAdd) {
+        val locationLabel = if (browserDir.isEmpty()) "project root" else "$browserDir/"
         AlertDialog(
             onDismissRequest = { showAdd = false },
-            title = { Text("New file") },
+            title = { Text("New file or folder") },
             text = {
-                OutlinedTextField(
-                    value = newFile,
-                    onValueChange = { newFile = it },
-                    singleLine = true,
-                    label = { Text("Path") },
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Creating in $locationLabel",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = !addIsFolder,
+                            onClick = {
+                                if (addIsFolder) {
+                                    addIsFolder = false
+                                    if (newName == "new-folder" || !newName.contains('.')) {
+                                        newName = "notes.tex"
+                                    }
+                                }
+                            },
+                            label = { Text("File") },
+                        )
+                        FilterChip(
+                            selected = addIsFolder,
+                            onClick = {
+                                if (!addIsFolder) {
+                                    addIsFolder = true
+                                    if (newName == "notes.tex" || newName.contains('.')) {
+                                        newName = "new-folder"
+                                    }
+                                }
+                            },
+                            label = { Text("Folder") },
+                        )
+                    }
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        singleLine = true,
+                        label = { Text(if (addIsFolder) "Folder name" else "File name") },
+                    )
+                }
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        onAddFile(newFile)
+                        val name = newName.trim().trimStart('/').trimEnd('/')
+                        if (name.isNotEmpty()) {
+                            val path = if (browserDir.isEmpty()) name else "$browserDir/$name"
+                            if (addIsFolder) {
+                                onAddFolder(path)
+                            } else {
+                                onAddFile(path)
+                                browserDir = parentDirOf(path)
+                            }
+                        }
                         showAdd = false
                     },
                 ) { Text("Add") }
@@ -308,3 +369,4 @@ fun EditorScreen(
         )
     }
 }
+

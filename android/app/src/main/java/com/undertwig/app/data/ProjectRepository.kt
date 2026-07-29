@@ -93,6 +93,28 @@ class ProjectRepository(context: Context) {
             .toList()
     }
 
+    /** Relative folder paths (including empty folders), excluding the project root. */
+    fun listFolders(projectId: String): List<String> {
+        val dir = projectDir(projectId)
+        return dir.walkTopDown()
+            .filter { it.isDirectory && it != dir }
+            .map { it.relativeTo(dir).path.replace(File.separatorChar, '/') }
+            .filter { it.isNotEmpty() && !it.contains("..") }
+            .sorted()
+            .toList()
+    }
+
+    fun createFolder(projectId: String, relativePath: String) {
+        val clean = normalizePath(relativePath)
+        require(clean.isNotEmpty()) { "Invalid folder path" }
+        require(!clean.contains("..")) { "Invalid folder path" }
+        val dir = projectDir(projectId)
+        val target = File(dir, clean)
+        require(!target.isFile) { "A file already exists at “$clean”" }
+        check(target.exists() || target.mkdirs()) { "Could not create folder" }
+        touch(dir)
+    }
+
     fun readFile(projectId: String, relativePath: String): ProjectFile {
         val file = resolve(projectId, relativePath)
         require(file.exists()) { "Missing file: $relativePath" }
@@ -111,7 +133,11 @@ class ProjectRepository(context: Context) {
     }
 
     fun createFile(projectId: String, relativePath: String, content: String = "") {
-        writeFile(projectId, relativePath, content)
+        val clean = normalizePath(relativePath)
+        require(clean.isNotEmpty()) { "Invalid file path" }
+        val target = File(projectDir(projectId), clean)
+        require(!target.isDirectory) { "A folder already exists at “$clean”" }
+        writeFile(projectId, clean, content)
     }
 
     fun deleteFile(projectId: String, relativePath: String) {

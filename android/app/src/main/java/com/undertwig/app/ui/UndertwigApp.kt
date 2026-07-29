@@ -45,6 +45,7 @@ fun UndertwigApp(
                     }
                 },
                 onAddFile = viewModel::addFile,
+                onAddFolder = viewModel::addFolder,
                 onDeletePath = viewModel::deletePath,
                 onRenamePath = viewModel::renamePath,
             )

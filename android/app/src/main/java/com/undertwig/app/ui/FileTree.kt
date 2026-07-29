@@ -14,16 +14,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+
+/** Parent directory of a relative path, or "" for project root. */
+fun parentDirOf(path: String): String {
+    val clean = path.trim('/').replace('\\', '/')
+    val slash = clean.lastIndexOf('/')
+    return if (slash <= 0) "" else clean.substring(0, slash)
+}
 
 data class FileBrowserTarget(
     val path: String,
@@ -38,7 +42,10 @@ data class FileBrowserTarget(
 @Composable
 fun ProjectFileTree(
     files: List<String>,
+    folders: List<String>,
     activePath: String,
+    currentDir: String,
+    onCurrentDirChange: (String) -> Unit,
     onSelectFile: (String) -> Unit,
     onLongPressTarget: (FileBrowserTarget) -> Unit,
     modifier: Modifier = Modifier,
@@ -47,21 +54,21 @@ fun ProjectFileTree(
         files.filter { !it.lowercase().endsWith(".pdf") }
     }
 
-    var currentDir by remember { mutableStateOf(parentDir(activePath)) }
-
-    LaunchedEffect(activePath) {
-        currentDir = parentDir(activePath)
-    }
-
-    LaunchedEffect(treeFiles) {
-        if (currentDir.isNotEmpty() && !dirExists(treeFiles, currentDir)) {
-            currentDir = parentDir(activePath).takeIf { dirExists(treeFiles, it) || it.isEmpty() }
-                ?: ""
+    LaunchedEffect(treeFiles, folders, currentDir) {
+        if (currentDir.isNotEmpty() &&
+            !dirExists(treeFiles, folders, currentDir)
+        ) {
+            val fallback = parentDirOf(activePath).takeIf {
+                it.isEmpty() || dirExists(treeFiles, folders, it)
+            } ?: ""
+            if (fallback != currentDir) {
+                onCurrentDirChange(fallback)
+            }
         }
     }
 
-    val entries = remember(treeFiles, currentDir) {
-        entriesInDir(treeFiles, currentDir)
+    val entries = remember(treeFiles, folders, currentDir) {
+        entriesInDir(treeFiles, folders, currentDir)
     }
 
     Row(
@@ -76,7 +83,7 @@ fun ProjectFileTree(
                 label = "← ${currentDir.substringAfterLast('/')}",
                 selected = false,
                 emphasis = true,
-                onClick = { currentDir = parentDir(currentDir) },
+                onClick = { onCurrentDirChange(parentDirOf(currentDir)) },
                 onLongClick = {
                     onLongPressTarget(FileBrowserTarget(path = currentDir, isFolder = true))
                 },
@@ -91,7 +98,7 @@ fun ProjectFileTree(
                         selected = false,
                         emphasis = true,
                         muted = true,
-                        onClick = { currentDir = entry.path },
+                        onClick = { onCurrentDirChange(entry.path) },
                         onLongClick = {
                             onLongPressTarget(FileBrowserTarget(path = entry.path, isFolder = true))
                         },
@@ -160,21 +167,20 @@ private sealed class DirEntry {
     data class File(val path: String, val name: String) : DirEntry()
 }
 
-private fun parentDir(path: String): String {
-    val clean = path.trim('/').replace('\\', '/')
-    val slash = clean.lastIndexOf('/')
-    return if (slash <= 0) "" else clean.substring(0, slash)
-}
-
-private fun dirExists(files: List<String>, dir: String): Boolean {
+private fun dirExists(files: List<String>, folders: List<String>, dir: String): Boolean {
     if (dir.isEmpty()) return true
+    if (dir in folders) return true
     val prefix = "$dir/"
-    return files.any { it.startsWith(prefix) }
+    return files.any { it.startsWith(prefix) } || folders.any { it.startsWith(prefix) || it == dir }
 }
 
-private fun entriesInDir(files: List<String>, dir: String): List<DirEntry> {
+private fun entriesInDir(
+    files: List<String>,
+    folders: List<String>,
+    dir: String,
+): List<DirEntry> {
     val prefix = if (dir.isEmpty()) "" else "$dir/"
-    val folders = linkedSetOf<String>()
+    val childFolders = linkedSetOf<String>()
     val fileEntries = mutableListOf<DirEntry.File>()
 
     for (path in files) {
@@ -183,7 +189,7 @@ private fun entriesInDir(files: List<String>, dir: String): List<DirEntry> {
             if (slash < 0) {
                 fileEntries += DirEntry.File(path = path, name = path)
             } else {
-                folders += path.substring(0, slash)
+                childFolders += path.substring(0, slash)
             }
         } else {
             if (!path.startsWith(prefix)) continue
@@ -193,12 +199,30 @@ private fun entriesInDir(files: List<String>, dir: String): List<DirEntry> {
             if (slash < 0) {
                 fileEntries += DirEntry.File(path = path, name = rest)
             } else {
-                folders += rest.substring(0, slash)
+                childFolders += rest.substring(0, slash)
             }
         }
     }
 
-    val folderEntries = folders.sorted().map { name ->
+    for (folder in folders) {
+        if (dir.isEmpty()) {
+            val slash = folder.indexOf('/')
+            if (slash < 0) {
+                childFolders += folder
+            } else {
+                childFolders += folder.substring(0, slash)
+            }
+        } else if (folder == dir) {
+            // current folder itself — ignore
+        } else if (folder.startsWith(prefix)) {
+            val rest = folder.substring(prefix.length)
+            if (rest.isEmpty()) continue
+            val slash = rest.indexOf('/')
+            childFolders += if (slash < 0) rest else rest.substring(0, slash)
+        }
+    }
+
+    val folderEntries = childFolders.sorted().map { name ->
         val path = if (dir.isEmpty()) name else "$dir/$name"
         DirEntry.Folder(path = path, name = name)
     }
