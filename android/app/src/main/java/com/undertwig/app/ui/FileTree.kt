@@ -1,22 +1,14 @@
 package com.undertwig.app.ui
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -28,19 +20,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-private data class TreeEntry(
-    val key: String,
-    val name: String,
-    val depth: Int,
-    val isFolder: Boolean,
-    val filePath: String? = null,
-)
-
+/**
+ * One-row project browser: same vertical footprint as the old flat chips,
+ * with folder depth via drill-down (tap a folder, use ← to go up).
+ */
 @Composable
 fun ProjectFileTree(
     files: List<String>,
@@ -49,196 +36,151 @@ fun ProjectFileTree(
     modifier: Modifier = Modifier,
 ) {
     val treeFiles = remember(files) {
-        files.filter { path ->
-            val lower = path.lowercase()
-            !lower.endsWith(".pdf")
-        }
+        files.filter { !it.lowercase().endsWith(".pdf") }
     }
-    val allFolders = remember(treeFiles) { folderPaths(treeFiles) }
-    var expanded by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var seeded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(treeFiles) {
-        // First paint for this project: open folders so hierarchy is visible immediately.
-        if (!seeded && treeFiles.isNotEmpty()) {
-            expanded = allFolders
-            seeded = true
-        }
-    }
+    var currentDir by remember { mutableStateOf(parentDir(activePath)) }
 
     LaunchedEffect(activePath) {
-        val ancestors = ancestorFolders(activePath)
-        if (ancestors.isNotEmpty()) {
-            expanded = expanded + ancestors
+        currentDir = parentDir(activePath)
+    }
+
+    LaunchedEffect(treeFiles) {
+        if (currentDir.isNotEmpty() && !dirExists(treeFiles, currentDir)) {
+            currentDir = parentDir(activePath).takeIf { dirExists(treeFiles, it) || it.isEmpty() }
+                ?: ""
         }
     }
 
-    val rows = remember(treeFiles, expanded) {
-        flattenTree(treeFiles, expanded)
+    val entries = remember(treeFiles, currentDir) {
+        entriesInDir(treeFiles, currentDir)
     }
 
-    val panel = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-
-    LazyColumn(
+    Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(max = 220.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(panel)
-            .padding(vertical = 4.dp),
-        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        items(rows, key = { it.key }) { entry ->
-            FileTreeRow(
-                entry = entry,
-                selected = entry.filePath != null && entry.filePath == activePath,
-                expanded = entry.isFolder && entry.key in expanded,
-                onClick = {
-                    if (entry.isFolder) {
-                        expanded = if (entry.key in expanded) {
-                            expanded - entry.key
-                        } else {
-                            expanded + entry.key
-                        }
-                    } else if (entry.filePath != null) {
-                        onSelectFile(entry.filePath)
-                    }
-                },
+        if (currentDir.isNotEmpty()) {
+            NavChip(
+                label = "← ${currentDir.substringAfterLast('/')}",
+                selected = false,
+                emphasis = true,
+                onClick = { currentDir = parentDir(currentDir) },
             )
+        }
+
+        entries.forEach { entry ->
+            when (entry) {
+                is DirEntry.Folder -> {
+                    NavChip(
+                        label = "${entry.name}/",
+                        selected = false,
+                        emphasis = true,
+                        muted = true,
+                        onClick = {
+                            currentDir = entry.path
+                        },
+                    )
+                }
+                is DirEntry.File -> {
+                    NavChip(
+                        label = entry.name,
+                        selected = entry.path == activePath,
+                        emphasis = false,
+                        onClick = { onSelectFile(entry.path) },
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun FileTreeRow(
-    entry: TreeEntry,
+private fun NavChip(
+    label: String,
     selected: Boolean,
-    expanded: Boolean,
+    emphasis: Boolean,
+    muted: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(durationMillis = 160),
-        label = "folderChevron",
-    )
-    val selectedBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-    val nameColor = when {
+    val bg = when {
+        selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+        else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.65f)
+    }
+    val fg = when {
         selected -> MaterialTheme.colorScheme.primary
-        entry.isFolder -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+        muted -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
         else -> MaterialTheme.colorScheme.onSurface
     }
 
-    Row(
+    Text(
+        text = label,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        color = fg,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = when {
+            selected -> FontWeight.SemiBold
+            emphasis -> FontWeight.Medium
+            else -> FontWeight.Normal
+        },
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = (entry.depth * 14).dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) selectedBg else MaterialTheme.colorScheme.surface.copy(alpha = 0f))
+            .background(bg)
             .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (entry.isFolder) {
-            Icon(
-                imageVector = Icons.Filled.KeyboardArrowRight,
-                contentDescription = if (expanded) "Collapse" else "Expand",
-                modifier = Modifier
-                    .size(18.dp)
-                    .rotate(rotation),
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            )
-        } else {
-            Box(modifier = Modifier.size(18.dp))
-        }
-        Text(
-            text = entry.name,
-            color = nameColor,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = when {
-                selected -> FontWeight.SemiBold
-                entry.isFolder -> FontWeight.Medium
-                else -> FontWeight.Normal
-            },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .padding(start = 4.dp)
-                .weight(1f),
-        )
-    }
-}
-
-private fun folderPaths(files: List<String>): Set<String> {
-    val folders = linkedSetOf<String>()
-    for (path in files) {
-        val parts = path.split('/').filter { it.isNotEmpty() }
-        if (parts.size < 2) continue
-        var current = ""
-        for (i in 0 until parts.lastIndex) {
-            current = if (current.isEmpty()) parts[i] else "$current/${parts[i]}"
-            folders += current
-        }
-    }
-    return folders
-}
-
-private fun ancestorFolders(filePath: String): Set<String> {
-    val parts = filePath.split('/').filter { it.isNotEmpty() }
-    if (parts.size < 2) return emptySet()
-    val out = linkedSetOf<String>()
-    var current = ""
-    for (i in 0 until parts.lastIndex) {
-        current = if (current.isEmpty()) parts[i] else "$current/${parts[i]}"
-        out += current
-    }
-    return out
-}
-
-private fun flattenTree(files: List<String>, expanded: Set<String>): List<TreeEntry> {
-    data class Dir(
-        val childrenDirs: MutableMap<String, Dir> = linkedMapOf(),
-        val files: MutableList<String> = mutableListOf(),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     )
+}
 
-    val root = Dir()
-    for (path in files.sorted()) {
-        val parts = path.split('/').filter { it.isNotEmpty() }
-        if (parts.isEmpty()) continue
-        var node = root
-        for (i in 0 until parts.lastIndex) {
-            node = node.childrenDirs.getOrPut(parts[i]) { Dir() }
-        }
-        node.files += parts.last()
-    }
+private sealed class DirEntry {
+    data class Folder(val path: String, val name: String) : DirEntry()
+    data class File(val path: String, val name: String) : DirEntry()
+}
 
-    val rows = mutableListOf<TreeEntry>()
+private fun parentDir(path: String): String {
+    val clean = path.trim('/').replace('\\', '/')
+    val slash = clean.lastIndexOf('/')
+    return if (slash <= 0) "" else clean.substring(0, slash)
+}
 
-    fun walk(dir: Dir, prefix: String, depth: Int) {
-        val dirNames = dir.childrenDirs.keys.sorted()
-        for (name in dirNames) {
-            val folderPath = if (prefix.isEmpty()) name else "$prefix/$name"
-            rows += TreeEntry(
-                key = folderPath,
-                name = name,
-                depth = depth,
-                isFolder = true,
-            )
-            if (folderPath in expanded) {
-                walk(dir.childrenDirs.getValue(name), folderPath, depth + 1)
+private fun dirExists(files: List<String>, dir: String): Boolean {
+    if (dir.isEmpty()) return true
+    val prefix = "$dir/"
+    return files.any { it.startsWith(prefix) }
+}
+
+private fun entriesInDir(files: List<String>, dir: String): List<DirEntry> {
+    val prefix = if (dir.isEmpty()) "" else "$dir/"
+    val folders = linkedSetOf<String>()
+    val fileEntries = mutableListOf<DirEntry.File>()
+
+    for (path in files) {
+        if (dir.isEmpty()) {
+            val slash = path.indexOf('/')
+            if (slash < 0) {
+                fileEntries += DirEntry.File(path = path, name = path)
+            } else {
+                folders += path.substring(0, slash)
+            }
+        } else {
+            if (!path.startsWith(prefix)) continue
+            val rest = path.substring(prefix.length)
+            if (rest.isEmpty()) continue
+            val slash = rest.indexOf('/')
+            if (slash < 0) {
+                fileEntries += DirEntry.File(path = path, name = rest)
+            } else {
+                folders += rest.substring(0, slash)
             }
         }
-        for (name in dir.files.sorted()) {
-            val filePath = if (prefix.isEmpty()) name else "$prefix/$name"
-            rows += TreeEntry(
-                key = "file:$filePath",
-                name = name,
-                depth = depth,
-                isFolder = false,
-                filePath = filePath,
-            )
-        }
     }
 
-    walk(root, prefix = "", depth = 0)
-    return rows
+    val folderEntries = folders.sorted().map { name ->
+        val path = if (dir.isEmpty()) name else "$dir/$name"
+        DirEntry.Folder(path = path, name = name)
+    }
+    return folderEntries + fileEntries.sortedBy { it.name }
 }
