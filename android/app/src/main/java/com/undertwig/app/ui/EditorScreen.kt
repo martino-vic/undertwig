@@ -3,6 +3,7 @@ package com.undertwig.app.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -58,6 +59,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -244,6 +246,14 @@ fun EditorScreen(
                 )
             }
 
+            val darkEditor = isSystemInDarkTheme()
+            val texHighlight = remember(state.activePath, darkEditor) {
+                if (isHighlightableTexPath(state.activePath)) {
+                    TexVisualTransformation(darkEditor)
+                } else {
+                    VisualTransformation.None
+                }
+            }
             BasicTextField(
                 value = state.editorText,
                 onValueChange = onEditorChange,
@@ -259,6 +269,7 @@ fun EditorScreen(
                     lineHeight = 20.sp,
                 ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                visualTransformation = texHighlight,
             )
 
             Row(
