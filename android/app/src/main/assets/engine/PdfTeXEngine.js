@@ -111,6 +111,9 @@ UndertwigFrameWorker.prototype.postMessage = function (data, transfer) {
     win.postMessage(data, "*");
   }
 };
+UndertwigFrameWorker.prototype.contentWindow = function () {
+  return this._iframe && this._iframe.contentWindow;
+};
 UndertwigFrameWorker.prototype.terminate = function () {
   window.removeEventListener("message", this._onWinMessage);
   if (this._iframe && this._iframe.parentNode) {
@@ -255,73 +258,66 @@ var PdfTeXEngine = /** @class */ (function () {
     };
 
     /**
-     * Preload a TeX file into the engine FS.
-     * Prefer passing a same-origin URL string so the iframe can fetch it itself
-     * (Android WebView often fails to postMessage ~10MB ArrayBuffers).
-     * ArrayBuffer / Uint8Array still accepted as a fallback (no transfer list).
+     * Preload a TeX format/file into the engine FS.
+     * Fetches in the parent frame (async + WebViewAssetLoader), then installs
+     * via a same-origin direct call into the iframe — no postMessage of the
+     * ~10MB buffer (that fails on many Android WebViews).
      */
     PdfTeXEngine.prototype.preloadTexFile = function (name, dataOrUrl) {
-        return __awaiter(this, void 0, void 0, function () {
-            var _this = this;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
-                    case 0:
-                        this.checkEngineStatus();
-                        this.latexWorkerStatus = EngineStatus.Busy;
-                        return [4 /*yield*/, new Promise(function (resolve, reject) {
-                                var settled = false;
-                                var timer = setTimeout(function () {
-                                    if (settled)
-                                        return;
-                                    settled = true;
-                                    _this.latexWorkerStatus = EngineStatus.Ready;
-                                    reject(new Error('preloadtex timed out'));
-                                }, 120000);
-                                _this.latexWorker.onmessage = function (ev) {
-                                    var msg = ev['data'] || {};
-                                    if (msg['cmd'] !== 'preloadtex')
-                                        return;
-                                    if (settled)
-                                        return;
-                                    settled = true;
-                                    clearTimeout(timer);
-                                    _this.latexWorkerStatus = EngineStatus.Ready;
-                                    if (msg['result'] === 'ok') {
-                                        resolve();
-                                    }
-                                    else {
-                                        reject(new Error(msg['log'] || 'preloadtex failed'));
-                                    }
-                                };
-                                var msg = { 'cmd': 'preloadtex', 'name': name };
-                                if (typeof dataOrUrl === 'string' && dataOrUrl.indexOf('base64:') === 0) {
-                                    msg['dataBase64'] = dataOrUrl.slice('base64:'.length);
-                                }
-                                else if (typeof dataOrUrl === 'string') {
-                                    msg['url'] = dataOrUrl;
-                                }
-                                else if (dataOrUrl && dataOrUrl.byteLength !== undefined) {
-                                    // Structured clone only — do not transfer (Samsung WebView).
-                                    msg['data'] = dataOrUrl instanceof ArrayBuffer
-                                        ? dataOrUrl.slice(0)
-                                        : dataOrUrl.slice
-                                            ? dataOrUrl.slice(0)
-                                            : dataOrUrl;
-                                }
-                                else {
-                                    clearTimeout(timer);
-                                    reject(new Error('preloadTexFile: expected URL or binary data'));
-                                    return;
-                                }
-                                _this.latexWorker.postMessage(msg);
-                            })];
-                    case 1:
-                        _a.sent();
-                        this.latexWorker.onmessage = function (_) {
-                        };
-                        return [2 /*return*/];
-                }
-            });
+        var _this = this;
+        this.checkEngineStatus();
+        return Promise.resolve()
+            .then(function () {
+            var win = _this.latexWorker && _this.latexWorker.contentWindow && _this.latexWorker.contentWindow();
+            if (!win) {
+                throw new Error('preloadtex: engine iframe missing');
+            }
+            if (typeof win.__undertwigInstallFmtFromParent !== 'function') {
+                throw new Error('preloadtex: installer not ready in engine iframe');
+            }
+            if (typeof dataOrUrl === 'string') {
+                return fetch(dataOrUrl).then(function (response) {
+                    if (!response.ok) {
+                        throw new Error('preloadtex: fetch failed (' + response.status + ')');
+                    }
+                    return response.arrayBuffer();
+                }).then(function (buffer) {
+                    return { win: win, bytes: new Uint8Array(buffer) };
+                });
+            }
+            var bytes;
+            if (dataOrUrl instanceof ArrayBuffer) {
+                bytes = new Uint8Array(dataOrUrl);
+            }
+            else if (dataOrUrl && dataOrUrl.byteLength !== undefined) {
+                bytes = dataOrUrl instanceof Uint8Array
+                    ? dataOrUrl
+                    : new Uint8Array(dataOrUrl.buffer, dataOrUrl.byteOffset || 0, dataOrUrl.byteLength);
+            }
+            else {
+                throw new Error('preloadTexFile: expected URL or binary data');
+            }
+            return { win: win, bytes: bytes };
+        })
+            .then(function (payload) {
+            if (!payload.bytes || !payload.bytes.byteLength) {
+                throw new Error('preloadtex: empty format payload');
+            }
+            // Park bytes on the parent window; iframe reads parent.__undertwigFmtPayload
+            // (avoids structured-clone of ~10MB through postMessage / call args).
+            window.__undertwigFmtPayload = payload.bytes;
+            _this.latexWorkerStatus = EngineStatus.Busy;
+            var result;
+            try {
+                result = payload.win.__undertwigInstallFmtFromParent(name);
+            }
+            finally {
+                window.__undertwigFmtPayload = null;
+                _this.latexWorkerStatus = EngineStatus.Ready;
+            }
+            if (!result || !result.ok) {
+                throw new Error((result && result.log) || 'preloadtex failed');
+            }
         });
     };
     PdfTeXEngine.prototype.setEngineMainFile = function (filename) {
