@@ -1,9 +1,11 @@
 package com.undertwig.app.ui
 
 import android.graphics.Bitmap
+import android.graphics.Color as AndroidColor
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -50,6 +53,9 @@ fun PdfScreen(
                 page.height * 2,
                 Bitmap.Config.ARGB_8888,
             )
+            // PdfRenderer draws ink on a transparent bitmap; without a white fill,
+            // pages look like a dark veil over the theme background.
+            bitmap.eraseColor(AndroidColor.WHITE)
             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             page.close()
             rendered += bitmap
@@ -78,6 +84,7 @@ fun PdfScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .background(Color(0xFFE8E4DE))
                 .verticalScroll(rememberScrollState()),
         ) {
             if (pages.isEmpty()) {
