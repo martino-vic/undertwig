@@ -138,6 +138,109 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         selectFile(clean)
     }
 
+    fun deletePath(path: String, isFolder: Boolean) {
+        val state = _editor.value
+        if (state.projectId.isEmpty()) return
+        val clean = path.trim().trimStart('/')
+        if (clean.isEmpty()) return
+        runCatching {
+            if (state.dirty &&
+                !ProjectRepository.isBinaryPath(state.activePath) &&
+                !isAffectedByDelete(state.activePath, clean, isFolder)
+            ) {
+                repo.writeFile(state.projectId, state.activePath, state.editorText)
+            }
+            repo.deletePath(state.projectId, clean, isFolder)
+        }.onFailure { error ->
+            _editor.update {
+                it.copy(error = error.message ?: "Delete failed.", status = "Delete failed.")
+            }
+            return
+        }
+        reloadAfterPathChange(
+            preferredPath = null,
+            status = if (isFolder) "Deleted folder $clean" else "Deleted $clean",
+        )
+    }
+
+    fun renamePath(fromPath: String, toPath: String, isFolder: Boolean) {
+        val state = _editor.value
+        if (state.projectId.isEmpty()) return
+        val from = fromPath.trim().trimStart('/')
+        val to = toPath.trim().trimStart('/')
+        if (from.isEmpty() || to.isEmpty()) return
+        runCatching {
+            if (state.dirty &&
+                !ProjectRepository.isBinaryPath(state.activePath) &&
+                !isAffectedByDelete(state.activePath, from, isFolder)
+            ) {
+                repo.writeFile(state.projectId, state.activePath, state.editorText)
+            } else if (state.dirty &&
+                !isFolder &&
+                state.activePath == from &&
+                !ProjectRepository.isBinaryPath(from)
+            ) {
+                // Save into the new name after rename; write old content first if still present.
+                repo.writeFile(state.projectId, from, state.editorText)
+            }
+            repo.renamePath(state.projectId, from, to, isFolder)
+        }.onFailure { error ->
+            _editor.update {
+                it.copy(error = error.message ?: "Rename failed.", status = "Rename failed.")
+            }
+            return
+        }
+        val nextActive = when {
+            !isFolder && state.activePath == from -> to
+            isFolder && (state.activePath == from || state.activePath.startsWith("$from/")) -> {
+                to + state.activePath.removePrefix(from)
+            }
+            else -> state.activePath
+        }
+        reloadAfterPathChange(
+            preferredPath = nextActive,
+            status = if (isFolder) "Renamed folder to $to" else "Renamed to $to",
+        )
+    }
+
+    private fun isAffectedByDelete(activePath: String, target: String, isFolder: Boolean): Boolean {
+        return if (isFolder) {
+            activePath == target || activePath.startsWith("$target/")
+        } else {
+            activePath == target
+        }
+    }
+
+    private fun reloadAfterPathChange(preferredPath: String?, status: String) {
+        val state = _editor.value
+        var files = repo.listFiles(state.projectId)
+        var active = when {
+            preferredPath != null && preferredPath in files -> preferredPath
+            state.activePath in files -> state.activePath
+            "main.tex" in files -> "main.tex"
+            files.isNotEmpty() -> files.first()
+            else -> "main.tex"
+        }
+        if (active !in files) {
+            repo.createFile(state.projectId, "main.tex", "")
+            files = repo.listFiles(state.projectId)
+            active = "main.tex"
+        }
+        val file = repo.readFile(state.projectId, active)
+        _editor.update {
+            it.copy(
+                files = files,
+                activePath = active,
+                editorText = editorDisplayText(file),
+                dirty = false,
+                status = status,
+                pdfPath = repo.pdfFile(state.projectId)?.absolutePath,
+                error = null,
+            )
+        }
+        refreshProjects()
+    }
+
     fun convert() {
         val state = _editor.value
         if (state.converting) return

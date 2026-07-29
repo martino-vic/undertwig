@@ -55,10 +55,16 @@ fun EditorScreen(
     onConvert: () -> Unit,
     onOpenPdf: () -> Unit,
     onAddFile: (String) -> Unit,
+    onDeletePath: (path: String, isFolder: Boolean) -> Unit,
+    onRenamePath: (from: String, to: String, isFolder: Boolean) -> Unit,
 ) {
     var showAdd by remember { mutableStateOf(false) }
     var newFile by remember { mutableStateOf("notes.tex") }
     var showLog by remember { mutableStateOf(false) }
+    var actionTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
+    var renameTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
+    var renameValue by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
 
     Scaffold(
         topBar = {
@@ -104,6 +110,7 @@ fun EditorScreen(
                     files = state.files,
                     activePath = state.activePath,
                     onSelectFile = onSelectFile,
+                    onLongPressTarget = { actionTarget = it },
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
@@ -193,6 +200,92 @@ fun EditorScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showAdd = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    actionTarget?.let { target ->
+        val label = if (target.isFolder) "${target.path}/" else target.path
+        AlertDialog(
+            onDismissRequest = { actionTarget = null },
+            title = { Text(label) },
+            text = { Text("Delete or rename this ${if (target.isFolder) "folder" else "file"}?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        actionTarget = null
+                        renameTarget = target
+                        renameValue = target.path
+                    },
+                ) { Text("Rename") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            actionTarget = null
+                            deleteTarget = target
+                        },
+                    ) { Text("Delete") }
+                    TextButton(onClick = { actionTarget = null }) { Text("Cancel") }
+                }
+            },
+        )
+    }
+
+    renameTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text(if (target.isFolder) "Rename folder" else "Rename file") },
+            text = {
+                OutlinedTextField(
+                    value = renameValue,
+                    onValueChange = { renameValue = it },
+                    singleLine = true,
+                    label = { Text("Path") },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val next = renameValue.trim().trimStart('/')
+                        if (next.isNotEmpty() && next != target.path) {
+                            onRenamePath(target.path, next, target.isFolder)
+                        }
+                        renameTarget = null
+                    },
+                ) { Text("Rename") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameTarget = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    deleteTarget?.let { target ->
+        val label = if (target.isFolder) "${target.path}/" else target.path
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete?") },
+            text = {
+                Text(
+                    if (target.isFolder) {
+                        "Delete folder “$label” and everything inside it?"
+                    } else {
+                        "Delete “$label”?"
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeletePath(target.path, target.isFolder)
+                        deleteTarget = null
+                    },
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
             },
         )
     }

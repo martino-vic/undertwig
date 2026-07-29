@@ -1,7 +1,8 @@
 package com.undertwig.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -24,15 +25,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
+data class FileBrowserTarget(
+    val path: String,
+    val isFolder: Boolean,
+)
+
 /**
  * One-row project browser: same vertical footprint as the old flat chips,
  * with folder depth via drill-down (tap a folder, use ← to go up).
+ * Long-press a file or folder for rename/delete.
  */
 @Composable
 fun ProjectFileTree(
     files: List<String>,
     activePath: String,
     onSelectFile: (String) -> Unit,
+    onLongPressTarget: (FileBrowserTarget) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val treeFiles = remember(files) {
@@ -69,6 +77,9 @@ fun ProjectFileTree(
                 selected = false,
                 emphasis = true,
                 onClick = { currentDir = parentDir(currentDir) },
+                onLongClick = {
+                    onLongPressTarget(FileBrowserTarget(path = currentDir, isFolder = true))
+                },
             )
         }
 
@@ -80,8 +91,9 @@ fun ProjectFileTree(
                         selected = false,
                         emphasis = true,
                         muted = true,
-                        onClick = {
-                            currentDir = entry.path
+                        onClick = { currentDir = entry.path },
+                        onLongClick = {
+                            onLongPressTarget(FileBrowserTarget(path = entry.path, isFolder = true))
                         },
                     )
                 }
@@ -91,6 +103,9 @@ fun ProjectFileTree(
                         selected = entry.path == activePath,
                         emphasis = false,
                         onClick = { onSelectFile(entry.path) },
+                        onLongClick = {
+                            onLongPressTarget(FileBrowserTarget(path = entry.path, isFolder = false))
+                        },
                     )
                 }
             }
@@ -98,6 +113,7 @@ fun ProjectFileTree(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NavChip(
     label: String,
@@ -105,6 +121,7 @@ private fun NavChip(
     emphasis: Boolean,
     muted: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val bg = when {
         selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
@@ -130,7 +147,10 @@ private fun NavChip(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
             .background(bg)
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
             .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }

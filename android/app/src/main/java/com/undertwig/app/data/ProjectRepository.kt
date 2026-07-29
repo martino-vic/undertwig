@@ -115,8 +115,68 @@ class ProjectRepository(context: Context) {
     }
 
     fun deleteFile(projectId: String, relativePath: String) {
-        resolve(projectId, relativePath).delete()
-        touch(projectDir(projectId))
+        deletePath(projectId, relativePath, isFolder = false)
+    }
+
+    fun deletePath(projectId: String, relativePath: String, isFolder: Boolean) {
+        val clean = normalizePath(relativePath)
+        require(clean.isNotEmpty()) { "Invalid path" }
+        val dir = projectDir(projectId)
+        val target = File(dir, clean)
+        if (isFolder) {
+            if (target.isDirectory) {
+                target.deleteRecursively()
+            } else {
+                val prefix = "$clean/"
+                listFiles(projectId)
+                    .filter { it.startsWith(prefix) }
+                    .forEach { File(dir, it).delete() }
+                // Remove emptied parent dirs under the folder path.
+                target.deleteRecursively()
+            }
+        } else {
+            target.delete()
+        }
+        touch(dir)
+    }
+
+    fun renamePath(projectId: String, fromPath: String, toPath: String, isFolder: Boolean) {
+        val from = normalizePath(fromPath)
+        val to = normalizePath(toPath)
+        require(from.isNotEmpty() && to.isNotEmpty()) { "Invalid path" }
+        require(from != to) { "Name unchanged" }
+        require(!to.contains("..") && !from.contains("..")) { "Invalid path" }
+
+        val dir = projectDir(projectId)
+        val src = File(dir, from)
+        val dst = File(dir, to)
+        require(!dst.exists()) { "“$to” already exists" }
+
+        if (isFolder) {
+            if (src.isDirectory) {
+                dst.parentFile?.mkdirs()
+                check(src.renameTo(dst)) { "Could not rename folder" }
+            } else {
+                val prefix = "$from/"
+                val matches = listFiles(projectId).filter { it.startsWith(prefix) }
+                require(matches.isNotEmpty()) { "Folder not found" }
+                matches.forEach { old ->
+                    val next = to + old.removePrefix(from)
+                    val oldFile = File(dir, old)
+                    val newFile = File(dir, next)
+                    require(!newFile.exists()) { "“$next” already exists" }
+                    newFile.parentFile?.mkdirs()
+                    check(oldFile.renameTo(newFile) || copyAndDelete(oldFile, newFile)) {
+                        "Could not rename $old"
+                    }
+                }
+            }
+        } else {
+            require(src.isFile) { "File not found" }
+            dst.parentFile?.mkdirs()
+            check(src.renameTo(dst) || copyAndDelete(src, dst)) { "Could not rename file" }
+        }
+        touch(dir)
     }
 
     fun projectName(projectId: String): String {
@@ -174,17 +234,30 @@ class ProjectRepository(context: Context) {
     private fun projectDir(id: String): File = File(root, id).also { require(it.exists()) { "Unknown project" } }
 
     private fun resolve(projectId: String, relativePath: String): File {
-        val clean = relativePath.trim('/').replace('\\', '/')
+        val clean = normalizePath(relativePath)
+        require(clean.isNotEmpty()) { "Invalid path" }
         require(!clean.contains("..")) { "Invalid path" }
         return File(projectDir(projectId), clean)
     }
 
     private fun writeTextFile(dir: File, relativePath: String, content: String) {
-        val clean = relativePath.trim('/').replace('\\', '/')
+        val clean = normalizePath(relativePath)
+        require(clean.isNotEmpty()) { "Invalid path" }
         require(!clean.contains("..")) { "Invalid path" }
         val file = File(dir, clean)
         file.parentFile?.mkdirs()
         file.writeText(content)
+    }
+
+    private fun copyAndDelete(src: File, dst: File): Boolean {
+        return runCatching {
+            src.copyTo(dst, overwrite = false)
+            src.delete()
+        }.isSuccess
+    }
+
+    private fun normalizePath(relativePath: String): String {
+        return relativePath.trim().trim('/').replace('\\', '/')
     }
 
     private fun touch(dir: File) {

@@ -45,6 +45,8 @@ fun UndertwigApp(
                     }
                 },
                 onAddFile = viewModel::addFile,
+                onDeletePath = viewModel::deletePath,
+                onRenamePath = viewModel::renamePath,
             )
         }
         composable("pdf") {
