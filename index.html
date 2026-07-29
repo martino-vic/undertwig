@@ -192,7 +192,11 @@
       .sidebar-options-panel button.is-syncing {
         font-variant-numeric: tabular-nums;
         letter-spacing: 0.02em;
-        cursor: wait;
+        cursor: pointer;
+      }
+
+      .save-button[aria-busy="true"] {
+        cursor: pointer;
       }
 
       /* Phone + tablet: tuck file-tree actions behind Options */
@@ -2981,7 +2985,7 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260729e"></script>
-    <script src="cloud-storage.js?v=20260729e"></script>
+    <script src="cloud-storage.js?v=20260729i"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -3330,9 +3334,61 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       const ABORT_BUTTON_LABEL = "Cancel";
       const syncProjectButton = document.getElementById("syncProject");
       const SYNC_BUTTON_LABEL = "Load";
+      const SYNC_BUTTON_TITLE =
+        "Load the current project from Google Drive into the file tree";
       let syncSpinnerTimer = null;
       let syncSpinnerFrame = 0;
       let syncInFlight = false;
+      let syncAbortController = null;
+      let saveAbortController = null;
+      let saveButtonDefaultHtml = null;
+
+      function rememberSaveButtonHtml() {
+        const saveButton = document.getElementById("saveProject");
+        if (saveButton && saveButtonDefaultHtml == null) {
+          saveButtonDefaultHtml = saveButton.innerHTML;
+        }
+      }
+
+      function restoreSaveButtonTitle() {
+        const saveButton = document.getElementById("saveProject");
+        if (!saveButton || saveButton.getAttribute("aria-busy") === "true") {
+          return;
+        }
+        if (UndertwigAuth.isLoggedIn()) {
+          const shared =
+            UndertwigCloud.isCurrentProjectShared &&
+            UndertwigCloud.isCurrentProjectShared(getActiveProjectName());
+          saveButton.title = shared
+            ? "Save locally and sync to the owner's shared Google Drive folder"
+            : "Save locally and sync to Google Drive";
+        } else {
+          saveButton.title = "Save in this browser";
+        }
+      }
+
+      function setSaveButtonBusy(busy) {
+        const saveButton = document.getElementById("saveProject");
+        if (!saveButton) {
+          return;
+        }
+        rememberSaveButtonHtml();
+        if (busy) {
+          saveButton.setAttribute("aria-busy", "true");
+          saveButton.disabled = false;
+          saveButton.textContent = ABORT_BUTTON_LABEL;
+          saveButton.title = "Cancel the current save";
+        } else {
+          saveButton.removeAttribute("aria-busy");
+          saveButton.disabled = false;
+          if (saveButtonDefaultHtml != null) {
+            saveButton.innerHTML = saveButtonDefaultHtml;
+          } else {
+            saveButton.textContent = "Save";
+          }
+          restoreSaveButtonTitle();
+        }
+      }
 
       function startConvertSpinner() {
         convertBusy.classList.remove("hidden");
@@ -3358,17 +3414,20 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       function startSyncSpinner() {
         syncInFlight = true;
-        syncProjectButton.disabled = true;
+        syncProjectButton.disabled = false;
         syncProjectButton.classList.add("is-syncing");
+        syncProjectButton.setAttribute("aria-busy", "true");
         syncSpinnerFrame = 0;
-        syncProjectButton.textContent = SYNC_BUTTON_LABEL + " " + CONVERT_SPINNER_FRAMES[0];
+        syncProjectButton.textContent =
+          ABORT_BUTTON_LABEL + " " + CONVERT_SPINNER_FRAMES[0];
+        syncProjectButton.title = "Cancel loading from Google Drive";
         if (syncSpinnerTimer) {
           clearInterval(syncSpinnerTimer);
         }
         syncSpinnerTimer = setInterval(() => {
           syncSpinnerFrame = (syncSpinnerFrame + 1) % CONVERT_SPINNER_FRAMES.length;
           syncProjectButton.textContent =
-            SYNC_BUTTON_LABEL + " " + CONVERT_SPINNER_FRAMES[syncSpinnerFrame];
+            ABORT_BUTTON_LABEL + " " + CONVERT_SPINNER_FRAMES[syncSpinnerFrame];
         }, 100);
       }
 
@@ -3380,7 +3439,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         syncInFlight = false;
         syncProjectButton.disabled = false;
         syncProjectButton.classList.remove("is-syncing");
+        syncProjectButton.removeAttribute("aria-busy");
         syncProjectButton.textContent = SYNC_BUTTON_LABEL;
+        syncProjectButton.title = SYNC_BUTTON_TITLE;
       }
       const activeFileName = document.getElementById("activeFileName");
       const activeFileMeta = document.getElementById("activeFileMeta");
@@ -3936,13 +3997,21 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       async function saveProjectNow() {
+        if (saveAbortController) {
+          saveAbortController.abort();
+          setStatus("Cancelling…");
+          return;
+        }
+
         const saveButton = document.getElementById("saveProject");
         const active = state.files[state.activeFile];
         if (active && !active.binary) {
           active.content = UndertwigEditor.getValue();
         }
 
-        saveButton.disabled = true;
+        const abortController = new AbortController();
+        saveAbortController = abortController;
+        setSaveButtonBusy(true);
         try {
           let localOk = true;
           try {
@@ -3969,13 +4038,18 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               setStatus("Checking Google Drive for removed files…");
               const preview = await UndertwigCloud.previewSaveDeletions(state, {
                 projectName: projectName,
+                signal: abortController.signal,
               });
+              if (abortController.signal.aborted) {
+                setStatus("Save cancelled.");
+                return;
+              }
               deletions = (preview && preview.deletions) || [];
             }
 
             if (deletions.length) {
               const confirmed = await confirmDriveDeleteDialog(deletions, projectName);
-              if (!confirmed) {
+              if (!confirmed || abortController.signal.aborted) {
                 setStatus("Save cancelled.");
                 return;
               }
@@ -3985,7 +4059,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             await UndertwigCloud.saveProject(state, {
               projectName: projectName,
               deleteMissing: true,
+              signal: abortController.signal,
             });
+            if (abortController.signal.aborted) {
+              setStatus("Save cancelled.");
+              return;
+            }
             renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
             const deleteNote = deletions.length
               ? " Removed " +
@@ -4014,6 +4093,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             setStatusStorageFull({ force: true });
           }
         } catch (error) {
+          if (error && error.name === "AbortError") {
+            setStatus("Save cancelled.");
+            return;
+          }
           const message = (error && error.message) || "Could not save the project.";
           if (/insufficient authentication scopes/i.test(message)) {
             renderCloudStatus("disconnected");
@@ -4027,7 +4110,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
           setStatus(message, true);
         } finally {
-          saveButton.disabled = false;
+          if (saveAbortController === abortController) {
+            saveAbortController = null;
+          }
+          setSaveButtonBusy(false);
         }
       }
 
@@ -4624,7 +4710,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             ". Your projects live in Google Drive; invites share your project with collaborators.";
           collaborateLoginLink.classList.add("hidden");
           UndertwigInvite.preload();
-          if (saveButton) {
+          if (saveButton && saveButton.getAttribute("aria-busy") !== "true") {
             const shared =
               UndertwigCloud.isCurrentProjectShared &&
               UndertwigCloud.isCurrentProjectShared(getActiveProjectName());
@@ -4639,7 +4725,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           collaborateLoginLink.classList.remove("hidden");
           collaborateLoginLink.href = cloudLoginUrl();
           inviteForm.classList.add("hidden");
-          if (saveButton) {
+          if (saveButton && saveButton.getAttribute("aria-busy") !== "true") {
             saveButton.title = "Save in this browser";
           }
         }
@@ -7261,6 +7347,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       async function syncCurrentProjectFromDrive() {
+        if (syncAbortController) {
+          syncAbortController.abort();
+          setStatus("Cancelling…");
+          return;
+        }
         if (syncInFlight) {
           return;
         }
@@ -7293,12 +7384,24 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           active.content = UndertwigEditor.getValue();
         }
 
+        const abortController = new AbortController();
+        syncAbortController = abortController;
         startSyncSpinner();
         setStatus("Loading “" + projectName + "” from Google Drive…");
         try {
-          const pulled = await UndertwigCloud.pullProjectFromDrive(projectName, function (message) {
-            setStatus(message || "Loading from Google Drive…");
+          const pulled = await UndertwigCloud.pullProjectFromDrive(projectName, {
+            signal: abortController.signal,
+            onProgress: function (message) {
+              if (abortController.signal.aborted) {
+                return;
+              }
+              setStatus(message || "Loading from Google Drive…");
+            },
           });
+          if (abortController.signal.aborted) {
+            setStatus("Load cancelled.");
+            return;
+          }
           applyPulledProject(pulled);
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -7327,8 +7430,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               ")."
           );
         } catch (error) {
+          if (error && error.name === "AbortError") {
+            setStatus("Load cancelled.");
+            return;
+          }
           setStatus((error && error.message) || "Could not load from Google Drive.", true);
         } finally {
+          if (syncAbortController === abortController) {
+            syncAbortController = null;
+          }
           stopSyncSpinner();
         }
       }

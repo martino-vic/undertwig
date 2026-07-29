@@ -1271,18 +1271,33 @@
 
   async function previewSaveDeletions(state, options) {
     const opts = options || {};
-    await connect();
-    const projectName =
-      opts.projectName || inferProjectName(state && state.activeFile) || listRootProjects(state)[0];
-    if (!projectName) {
-      return { projectName: "", folderId: null, deletions: [] };
+    const signal = opts.signal;
+    const previousSignal = activeOperationSignal;
+    if (signal) {
+      activeOperationSignal = signal;
     }
-    const folderId = await resolveExistingProjectFolderId(projectName);
-    if (!folderId) {
-      return { projectName: projectName, folderId: null, deletions: [] };
+    try {
+      throwIfAborted(signal);
+      await connect();
+      throwIfAborted(signal);
+      const projectName =
+        opts.projectName || inferProjectName(state && state.activeFile) || listRootProjects(state)[0];
+      if (!projectName) {
+        return { projectName: "", folderId: null, deletions: [] };
+      }
+      const folderId = await resolveExistingProjectFolderId(projectName);
+      throwIfAborted(signal);
+      if (!folderId) {
+        return { projectName: projectName, folderId: null, deletions: [] };
+      }
+      const deletions = await findDriveDeletions(folderId, state, projectName);
+      throwIfAborted(signal);
+      return { projectName: projectName, folderId: folderId, deletions: deletions };
+    } finally {
+      if (signal && activeOperationSignal === signal) {
+        activeOperationSignal = previousSignal;
+      }
     }
-    const deletions = await findDriveDeletions(folderId, state, projectName);
-    return { projectName: projectName, folderId: folderId, deletions: deletions };
   }
 
   async function uploadFileToFolder(parentId, fileName, fileEntry, existingId) {
@@ -1624,9 +1639,11 @@
    * Pull a Drive folder into an Undertwig workspace project (Drive → file tree).
    * Used when an invitee opens an invite link.
    */
-  async function loadFolderAsProject(folderId, projectName, onProgress) {
+  async function loadFolderAsProject(folderId, projectName, onProgress, signal) {
     const notify = typeof onProgress === "function" ? onProgress : function () {};
+    throwIfAborted(signal);
     const meta = await refreshProjectMeta(folderId);
+    throwIfAborted(signal);
     if (!meta) {
       throw new Error("Could not read the Google Drive project folder.");
     }
@@ -1634,6 +1651,7 @@
 
     notify("Listing files in Google Drive / " + name + "…");
     const entries = await listFolderTree(folderId, "");
+    throwIfAborted(signal);
     const folders = [];
     const files = {};
     const fileEntries = [];
@@ -1660,6 +1678,7 @@
     }
 
     for (let i = 0; i < fileEntries.length; i += 1) {
+      throwIfAborted(signal);
       const item = fileEntries[i];
       notify("Downloading " + (i + 1) + "/" + fileEntries.length + ": " + item.entry.name + "…");
       const binary = isBinaryMime(item.entry.mimeType, item.entry.path);
@@ -1671,6 +1690,9 @@
           binary: binary,
         };
       } catch (error) {
+        if (error && error.name === "AbortError") {
+          throw error;
+        }
         throw new Error(
           "Could not download “" +
             item.entry.name +
@@ -1801,52 +1823,80 @@
    * Pull the named project's Google Drive folder into an Undertwig project snapshot.
    * Used by the file-tree Sync button (Drive → local tree).
    */
-  async function pullProjectFromDrive(projectName, onProgress) {
+  async function pullProjectFromDrive(projectName, onProgressOrOptions) {
+    let onProgress = null;
+    let signal = null;
+    if (typeof onProgressOrOptions === "function") {
+      onProgress = onProgressOrOptions;
+    } else if (onProgressOrOptions && typeof onProgressOrOptions === "object") {
+      onProgress = onProgressOrOptions.onProgress || null;
+      signal = onProgressOrOptions.signal || null;
+    }
+
     const name = String(projectName || "").trim();
     if (!name) {
       throw new Error("Set a current project in the file tree before syncing.");
     }
-    await connect();
 
-    let folderId = getMappedFolderId(name) || null;
-    if (!folderId && isCurrentProjectShared(name) && getProjectFolderId()) {
-      folderId = getProjectFolderId();
+    const previousSignal = activeOperationSignal;
+    if (signal) {
+      activeOperationSignal = signal;
     }
-    if (!folderId && isCollaborator() && getProjectFolderId()) {
-      const meta = await refreshProjectMeta(getProjectFolderId());
-      if (meta && (meta.name === name || !getMappedFolderId(name))) {
+    try {
+      throwIfAborted(signal);
+      await connect();
+      throwIfAborted(signal);
+
+      let folderId = getMappedFolderId(name) || null;
+      if (!folderId && isCurrentProjectShared(name) && getProjectFolderId()) {
         folderId = getProjectFolderId();
       }
-    }
-    if (!folderId) {
-      try {
-        const rootId = await ensureUndertwigFolder();
-        const children = await listChildren(rootId);
-        for (let i = 0; i < children.length; i += 1) {
-          const child = children[i];
-          if (
-            child &&
-            child.mimeType === "application/vnd.google-apps.folder" &&
-            child.name === name
-          ) {
-            folderId = child.id;
-            setMappedProject(name, folderId, "owner");
-            break;
-          }
+      if (!folderId && isCollaborator() && getProjectFolderId()) {
+        const meta = await refreshProjectMeta(getProjectFolderId());
+        throwIfAborted(signal);
+        if (meta && (meta.name === name || !getMappedFolderId(name))) {
+          folderId = getProjectFolderId();
         }
-      } catch (_error) {
-        // Fall through to the final error below.
+      }
+      if (!folderId) {
+        try {
+          const rootId = await ensureUndertwigFolder();
+          throwIfAborted(signal);
+          const children = await listChildren(rootId);
+          throwIfAborted(signal);
+          for (let i = 0; i < children.length; i += 1) {
+            const child = children[i];
+            if (
+              child &&
+              child.mimeType === "application/vnd.google-apps.folder" &&
+              child.name === name
+            ) {
+              folderId = child.id;
+              setMappedProject(name, folderId, "owner");
+              break;
+            }
+          }
+        } catch (error) {
+          if (error && error.name === "AbortError") {
+            throw error;
+          }
+          // Fall through to the final error below.
+        }
+      }
+      if (!folderId) {
+        throw new Error(
+          "No Google Drive folder found for “" +
+            name +
+            "”. Save the project first, or open it from an invite link."
+        );
+      }
+
+      return await loadFolderAsProject(folderId, name, onProgress, signal);
+    } finally {
+      if (signal && activeOperationSignal === signal) {
+        activeOperationSignal = previousSignal;
       }
     }
-    if (!folderId) {
-      throw new Error(
-        "No Google Drive folder found for “" +
-          name +
-          "”. Save the project first, or open it from an invite link."
-      );
-    }
-
-    return loadFolderAsProject(folderId, name, onProgress);
   }
 
   function isOwnerEmail(meta) {
