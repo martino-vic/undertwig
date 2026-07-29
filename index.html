@@ -4286,6 +4286,18 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         return new Promise(function (resolve) {
           driveDeleteDialogResolver = resolve;
+          if (saveAbortController) {
+            const onAbort = function () {
+              closeDriveDeleteDialog(false);
+            };
+            if (saveAbortController.signal.aborted) {
+              closeDriveDeleteDialog(false);
+              return;
+            }
+            saveAbortController.signal.addEventListener("abort", onAbort, {
+              once: true,
+            });
+          }
         });
       }
 
