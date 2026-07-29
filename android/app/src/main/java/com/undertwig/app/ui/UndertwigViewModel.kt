@@ -1,6 +1,7 @@
 package com.undertwig.app.ui
 
 import android.app.Application
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.undertwig.app.data.BibToolId
@@ -175,17 +176,55 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun saveActive() {
         val state = _editor.value
-        if (ProjectRepository.isBinaryPath(state.activePath)) return
-        repo.writeFile(state.projectId, state.activePath, state.editorText)
-        _editor.update {
-            it.copy(
-                dirty = false,
-                status = "Saved ${state.activePath}",
-                files = repo.listFiles(state.projectId),
-                folders = repo.listFolders(state.projectId),
-            )
+        if (state.projectId.isEmpty()) {
+            _editor.update {
+                it.copy(status = "Nothing to save", error = "Open a project first.")
+            }
+            return
         }
-        refreshProjects()
+        if (ProjectRepository.isBinaryPath(state.activePath)) {
+            _editor.update {
+                it.copy(
+                    status = "Can’t save binary here",
+                    error = "Open a text file to save edits.",
+                )
+            }
+            return
+        }
+        val path = state.activePath.ifBlank { "main.tex" }
+        val where = "${state.projectName}/$path"
+        runCatching {
+            repo.writeFile(state.projectId, path, state.editorText)
+            val written = repo.readFile(state.projectId, path)
+            check(!written.binary && written.content == state.editorText) {
+                "Saved file could not be verified."
+            }
+        }.fold(
+            onSuccess = {
+                val message = "Saved successfully · $where"
+                _editor.update {
+                    it.copy(
+                        dirty = false,
+                        status = message,
+                        error = null,
+                        files = repo.listFiles(state.projectId),
+                        folders = repo.listFolders(state.projectId),
+                    )
+                }
+                Toast.makeText(getApplication(), message, Toast.LENGTH_SHORT).show()
+                refreshProjects()
+            },
+            onFailure = { error ->
+                val detail = error.message ?: "Could not save $where."
+                _editor.update {
+                    it.copy(
+                        status = "Save failed",
+                        error = detail,
+                    )
+                }
+                Toast.makeText(getApplication(), "Save failed: $detail", Toast.LENGTH_LONG).show()
+            },
+        )
     }
 
     fun addFile(path: String) {
