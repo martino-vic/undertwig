@@ -2,8 +2,11 @@ package com.undertwig.app.engine
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.MutableContextWrapper
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
+import android.view.ContextThemeWrapper
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -14,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -25,37 +29,98 @@ data class CompileResult(
 
 /**
  * Runs SwiftLaTeX PdfTeX inside a WebView (local compute, not a browsed website).
+ * WebView is created lazily and only with an Activity-backed context.
  */
-class LatexEngine(context: Context) {
-    private val appContext = context.applicationContext
+class LatexEngine {
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val contextWrapper = MutableContextWrapper(null)
     private var webView: WebView? = null
     private var engineReady = false
     private var pendingReady: ((Result<Unit>) -> Unit)? = null
     private var pendingResult: ((Result<CompileResult>) -> Unit)? = null
     private var progressListener: ((String) -> Unit)? = null
+    private val creating = AtomicBoolean(false)
+
+    /** Bind to a live Activity (or other UI context) before compile. */
+    fun attach(context: Context) {
+        contextWrapper.baseContext = context
+    }
+
+    fun detach() {
+        mainHandler.post {
+            destroyWebView()
+            contextWrapper.baseContext = null
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun ensureWebView() {
         if (webView != null) return
-        val assetLoader = WebViewAssetLoader.Builder()
-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(appContext))
-            .build()
+        val base = contextWrapper.baseContext
+            ?: throw IllegalStateException("LatexEngine is not attached to a UI context.")
+        if (!creating.compareAndSet(false, true)) return
+        try {
+            // Application-context WebViews crash on many devices; theme-wrap as a safeguard.
+            val themed = ContextThemeWrapper(base, android.R.style.Theme_DeviceDefault)
+            val assetLoader = WebViewAssetLoader.Builder()
+                .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(base.applicationContext))
+                .build()
 
-        val view = WebView(appContext)
-        view.settings.javaScriptEnabled = true
-        view.settings.domStorageEnabled = true
-        view.settings.cacheMode = WebSettings.LOAD_DEFAULT
-        view.settings.allowFileAccess = false
-        view.addJavascriptInterface(NativeBridge(), "UndertwigNative")
-        view.webViewClient = object : WebViewClient() {
-            override fun shouldInterceptRequest(
-                view: WebView?,
-                request: WebResourceRequest?,
-            ) = request?.url?.let { assetLoader.shouldInterceptRequest(it) }
+            val view = WebView(themed)
+            view.settings.javaScriptEnabled = true
+            view.settings.domStorageEnabled = true
+            view.settings.cacheMode = WebSettings.LOAD_DEFAULT
+            view.settings.allowFileAccess = false
+            view.addJavascriptInterface(NativeBridge(), "UndertwigNative")
+            view.webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                ) = request?.url?.let { assetLoader.shouldInterceptRequest(it) }
+
+                override fun onReceivedError(
+                    view: WebView?,
+                    errorCode: Int,
+                    description: String?,
+                    failingUrl: String?,
+                ) {
+                    Log.e(TAG, "WebView error $errorCode: $description ($failingUrl)")
+                    if (!engineReady) {
+                        pendingReady?.invoke(
+                            Result.failure(IllegalStateException(description ?: "WebView failed to load")),
+                        )
+                        pendingReady = null
+                    }
+                }
+            }
+            webView = view
+            engineReady = false
+            view.loadUrl("https://appassets.androidplatform.net/assets/engine/runner.html")
+        } catch (error: Throwable) {
+            webView = null
+            Log.e(TAG, "Failed to create WebView", error)
+            throw IllegalStateException(
+                "Android System WebView is missing or failed to start. " +
+                    "Install/update Android System WebView on the emulator/device.",
+                error,
+            )
+        } finally {
+            creating.set(false)
         }
-        webView = view
-        view.loadUrl("https://appassets.androidplatform.net/assets/engine/runner.html")
+    }
+
+    private fun destroyWebView() {
+        try {
+            webView?.stopLoading()
+            webView?.destroy()
+        } catch (error: Throwable) {
+            Log.w(TAG, "WebView destroy failed", error)
+        }
+        webView = null
+        engineReady = false
+        pendingReady = null
+        pendingResult = null
+        progressListener = null
     }
 
     private suspend fun awaitReady() {
@@ -70,12 +135,20 @@ class LatexEngine(context: Context) {
                 }
             }
             cont.invokeOnCancellation { pendingReady = null }
+            // Timeout: if ready never arrives, fail rather than hang forever.
+            mainHandler.postDelayed({
+                if (!engineReady && pendingReady != null) {
+                    pendingReady?.invoke(
+                        Result.failure(
+                            IllegalStateException(
+                                "Engine page did not become ready. Check System WebView on the emulator.",
+                            ),
+                        ),
+                    )
+                    pendingReady = null
+                }
+            }, 20_000L)
         }
-    }
-
-    suspend fun warmUp() = withContext(Dispatchers.Main) {
-        ensureWebView()
-        awaitReady()
     }
 
     suspend fun compile(
@@ -110,16 +183,12 @@ class LatexEngine(context: Context) {
             webView?.evaluateJavascript(
                 "window.UndertwigEngine.compile($json)",
                 null,
-            )
+            ) ?: cont.resumeWithException(IllegalStateException("WebView was destroyed."))
         }
     }
 
     fun destroy() {
-        mainHandler.post {
-            webView?.destroy()
-            webView = null
-            engineReady = false
-        }
+        mainHandler.post { destroyWebView() }
     }
 
     private inner class NativeBridge {
@@ -153,5 +222,9 @@ class LatexEngine(context: Context) {
                 }
             }
         }
+    }
+
+    companion object {
+        private const val TAG = "UndertwigEngine"
     }
 }

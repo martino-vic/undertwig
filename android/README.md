@@ -31,6 +31,13 @@ This is **not** a Chrome Custom Tab / TWA wrapper of the website.
 
 `com.undertwig.app` · version `0.1.0`
 
+## Troubleshooting crashes
+
+- Prefer an emulator image **with Google Play** (includes Android System WebView).
+- If Convert fails later with a WebView error: open Play Store on the emulator → update **Android System WebView** / **Chrome**.
+- Cold start no longer creates a WebView (that used to crash on Application context).
+
 ## License note
 
 The app ships AGPL SwiftLaTeX Wasm assets under `app/src/main/assets/engine/`. See `vendor/swiftlatex/LICENSE` in the repo root.
+

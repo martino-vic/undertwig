@@ -33,7 +33,7 @@ data class EditorUiState(
 
 class UndertwigViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = ProjectRepository(application)
-    private val engine = LatexEngine(application)
+    private val engine = LatexEngine()
 
     private val _home = MutableStateFlow(HomeUiState())
     val home: StateFlow<HomeUiState> = _home.asStateFlow()
@@ -43,9 +43,11 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         refreshProjects()
-        viewModelScope.launch {
-            runCatching { engine.warmUp() }
-        }
+        // Do not create WebView here — Application context / early init crashes on many emulators.
+    }
+
+    fun attachEngine(context: android.content.Context) {
+        engine.attach(context)
     }
 
     fun refreshProjects() {

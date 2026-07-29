@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Undertwig" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.Undertwig" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:statusBarColor">@color/undertwig_bg</item>
         <item name="android:navigationBarColor">@color/undertwig_bg</item>
         <item name="android:windowBackground">@color/undertwig_bg</item>
+        <item name="colorPrimary">@color/undertwig_brand</item>
     </style>
 </resources>
