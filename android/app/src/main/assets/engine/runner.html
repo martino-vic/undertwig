@@ -42,12 +42,26 @@
 
       async function ensureFormat(engine) {
         post("progress", { message: "Loading TeX format…" });
-        var response = await fetch("./swiftlatexpdftex.fmt");
+        var fmtUrl = new URL("./swiftlatexpdftex.fmt", window.location.href).href;
+        // Prefer iframe-local fetch (avoids posting a ~10MB ArrayBuffer).
+        try {
+          await engine.preloadTexFile("swiftlatexpdftex.fmt", fmtUrl);
+          return;
+        } catch (urlErr) {
+          post("progress", {
+            message: "Loading TeX format (fallback)…",
+          });
+        }
+        // Fallback: parent fetch (async + asset loader) then post as base64 string.
+        var response = await fetch(fmtUrl);
         if (!response.ok) {
-          throw new Error("Could not load bundled swiftlatexpdftex.fmt (" + response.status + ")");
+          throw new Error(
+            "Could not load bundled swiftlatexpdftex.fmt (" + response.status + ")"
+          );
         }
         var buffer = await response.arrayBuffer();
-        await engine.preloadTexFile("swiftlatexpdftex.fmt", buffer);
+        var b64 = bytesToBase64(new Uint8Array(buffer));
+        await engine.preloadTexFile("swiftlatexpdftex.fmt", "base64:" + b64);
       }
 
       window.UndertwigEngine = {
