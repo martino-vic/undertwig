@@ -12,6 +12,8 @@
 
   let hostEl = null;
   let onChange = null;
+  let onSaveShortcut = null;
+  let onConvertShortcut = null;
   let impl = null;
   let initPromise = null;
   let pendingValue = "";
@@ -21,6 +23,22 @@
   let suppressChange = false;
   let resizeObserver = null;
   let latexLanguageRegistered = false;
+
+  function runSaveShortcut() {
+    if (typeof onSaveShortcut === "function") {
+      onSaveShortcut();
+      return true;
+    }
+    return false;
+  }
+
+  function runConvertShortcut() {
+    if (typeof onConvertShortcut === "function") {
+      onConvertShortcut();
+      return true;
+    }
+    return false;
+  }
 
   function prefersMobileEditor() {
     try {
@@ -313,6 +331,20 @@
           emitChange();
         });
 
+        // Ctrl/Cmd+S and Ctrl/Cmd+Enter — Monaco swallows these unless registered.
+        editor.addCommand(
+          monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+          function () {
+            runSaveShortcut();
+          }
+        );
+        editor.addCommand(
+          monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+          function () {
+            runConvertShortcut();
+          }
+        );
+
         return {
           kind: "monaco",
           getValue: function () {
@@ -568,7 +600,23 @@
         viewMod.drawSelection ? viewMod.drawSelection() : [],
         history ? history() : [],
         keymap.of(
-          [].concat(defaultKeymap).concat(historyKeymap).concat([indentWithTab])
+          [].concat(defaultKeymap)
+            .concat(historyKeymap)
+            .concat([indentWithTab])
+            .concat([
+              {
+                key: "Mod-s",
+                run: function () {
+                  return runSaveShortcut();
+                },
+              },
+              {
+                key: "Mod-Enter",
+                run: function () {
+                  return runConvertShortcut();
+                },
+              },
+            ])
         ),
         UndertwigHighlight,
         undertwigTheme,
@@ -681,6 +729,8 @@
     }
     hostEl = host;
     onChange = options && options.onChange ? options.onChange : null;
+    onSaveShortcut = options && options.onSave ? options.onSave : null;
+    onConvertShortcut = options && options.onConvert ? options.onConvert : null;
     if (!hostEl) {
       return Promise.reject(new Error("Editor host element missing."));
     }

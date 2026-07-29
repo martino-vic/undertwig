@@ -2986,7 +2986,7 @@
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260729a"></script>
-    <script src="latex-editor.js?v=20260728ax"></script>
+    <script src="latex-editor.js?v=20260729f"></script>
     <script>
 
       const DEMO_FIGURE_PNG_BASE64 =
@@ -5020,6 +5020,37 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       convertButton.addEventListener("click", compileProject);
       bibliographyButton.addEventListener("click", runProjectBibliography);
 
+      document.addEventListener("keydown", function (event) {
+        const mod = event.ctrlKey || event.metaKey;
+        if (!mod || event.altKey) {
+          return;
+        }
+        // Monaco/CodeMirror handle these while focused; avoid double-firing.
+        if (editorHost && editorHost.contains(event.target)) {
+          return;
+        }
+        const key = event.key;
+        if (key === "s" || key === "S") {
+          event.preventDefault();
+          saveProjectNow();
+          return;
+        }
+        if (key === "Enter" && !event.shiftKey) {
+          const target = event.target;
+          const tag = target && target.tagName ? String(target.tagName).toLowerCase() : "";
+          if (
+            tag === "input" ||
+            tag === "textarea" ||
+            tag === "select" ||
+            (target && target.isContentEditable)
+          ) {
+            return;
+          }
+          event.preventDefault();
+          compileProject();
+        }
+      });
+
       (function syncMobileAuthPlacement() {
         const mobileQuery = window.matchMedia("(max-width: 920px)");
         const landscapeQuery = window.matchMedia(
@@ -5162,6 +5193,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           file.content = value;
           persistProject();
           updateMeta();
+        },
+        onSave: function () {
+          saveProjectNow();
+        },
+        onConvert: function () {
+          compileProject();
         },
       })
         .then(function () {
