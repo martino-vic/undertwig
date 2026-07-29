@@ -98,18 +98,8 @@ UndertwigFrameWorker.prototype.postMessage = function (data, transfer) {
   if (!win) {
     return;
   }
-  // Android (esp. Samsung) WebView: passing undefined/non-Sequence as the
-  // transfer list throws "cannot be converted to a sequence". Omit it unless
-  // we have a real Transferable list; fall back to structured clone on error.
-  try {
-    if (transfer && typeof transfer.length === "number" && transfer.length > 0) {
-      win.postMessage(data, "*", transfer);
-    } else {
-      win.postMessage(data, "*");
-    }
-  } catch (_err) {
-    win.postMessage(data, "*");
-  }
+  // Never pass a transfer list on Android WebView.
+  win.postMessage(data, "*");
 };
 UndertwigFrameWorker.prototype.contentWindow = function () {
   return this._iframe && this._iframe.contentWindow;
@@ -181,12 +171,24 @@ var PdfTeXEngine = /** @class */ (function () {
                         this.checkEngineStatus();
                         this.latexWorkerStatus = EngineStatus.Busy;
                         start_compile_time = performance.now();
-                        return [4 /*yield*/, new Promise(function (resolve, _) {
+                        return [4 /*yield*/, new Promise(function (resolve, reject) {
+                                var settled = false;
+                                var timer = setTimeout(function () {
+                                    if (settled)
+                                        return;
+                                    settled = true;
+                                    _this.latexWorkerStatus = EngineStatus.Ready;
+                                    reject(new Error('Compile timed out waiting for engine result'));
+                                }, 180000);
                                 _this.latexWorker.onmessage = function (ev) {
                                     var data = ev['data'];
                                     var cmd = data['cmd'];
                                     if (cmd !== "compile")
                                         return;
+                                    if (settled)
+                                        return;
+                                    settled = true;
+                                    clearTimeout(timer);
                                     var result = data['result'];
                                     var log = data['log'];
                                     var status = data['status'];
@@ -197,8 +199,19 @@ var PdfTeXEngine = /** @class */ (function () {
                                     nice_report.log = log;
                                     nice_report.aux = data['aux'] || {};
                                     if (result === 'ok') {
-                                        var pdf = new Uint8Array(data['pdf']);
-                                        nice_report.pdf = pdf;
+                                        var pdfSource = null;
+                                        if (data['pdfViaParent'] && window.__undertwigPdfPayload) {
+                                            pdfSource = window.__undertwigPdfPayload;
+                                            window.__undertwigPdfPayload = null;
+                                        }
+                                        else if (data['pdf']) {
+                                            pdfSource = data['pdf'];
+                                        }
+                                        if (pdfSource) {
+                                            nice_report.pdf = pdfSource instanceof Uint8Array
+                                                ? pdfSource.slice(0)
+                                                : new Uint8Array(pdfSource);
+                                        }
                                     }
                                     resolve(nice_report);
                                 };
