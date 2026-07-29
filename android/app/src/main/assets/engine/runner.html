@@ -6,7 +6,8 @@
   <title>Undertwig Engine</title>
 </head>
 <body>
-  <script src="./PdfTeXEngine.js?v=8"></script>
+  <script src="./PdfTeXEngine.js?v=9"></script>
+  <script src="./bibliography.js?v=1"></script>
   <script>
     (function () {
       "use strict";
@@ -142,6 +143,34 @@
               ok: false,
               pdfBase64: null,
               log: String((error && error.message) || error || "Convert failed."),
+            });
+            return false;
+          }
+        },
+
+        runBibliography: async function (filesJson) {
+          try {
+            if (!window.UndertwigBibliography || typeof window.UndertwigBibliography.run !== "function") {
+              throw new Error("Bibliography engine is not available.");
+            }
+            var projectFiles = JSON.parse(filesJson);
+            var result = await window.UndertwigBibliography.run(
+              projectFiles,
+              function (message) {
+                post("progress", { message: message || "Updating bibliography…" });
+              }
+            );
+            post("bib-result", {
+              ok: !!(result && result.ok),
+              log: (result && result.log) || "No bibliography log returned.",
+              outputs: (result && result.outputs) || {},
+            });
+            return !!(result && result.ok);
+          } catch (error) {
+            post("bib-result", {
+              ok: false,
+              log: String((error && error.message) || error || "Bibliography failed."),
+              outputs: {},
             });
             return false;
           }

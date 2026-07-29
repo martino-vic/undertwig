@@ -333,6 +333,77 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun updateBibliography() {
+        val state = _editor.value
+        if (state.converting || state.projectId.isEmpty()) return
+        viewModelScope.launch {
+            if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
+                repo.writeFile(state.projectId, state.activePath, state.editorText)
+            }
+            _editor.update {
+                it.copy(
+                    converting = true,
+                    status = "Updating bibliography…",
+                    error = null,
+                    dirty = false,
+                )
+            }
+            val result = runCatching {
+                val files = repo.filesForCompile(state.projectId).mapValues { (_, file) ->
+                    file.content to file.binary
+                }
+                engine.runBibliography(files) { message ->
+                    _editor.update { ui -> ui.copy(status = message) }
+                }
+            }
+            result.fold(
+                onSuccess = { bib ->
+                    bib.outputs.forEach { (path, content) ->
+                        if (path.isNotBlank() && !ProjectRepository.isBinaryPath(path)) {
+                            runCatching {
+                                repo.writeFile(state.projectId, path, content)
+                            }
+                        }
+                    }
+                    val files = repo.listFiles(state.projectId)
+                    val active = _editor.value.activePath
+                    val editorText = if (active in files && !ProjectRepository.isBinaryPath(active)) {
+                        repo.readFile(state.projectId, active).content
+                    } else {
+                        _editor.value.editorText
+                    }
+                    _editor.update {
+                        it.copy(
+                            converting = false,
+                            status = if (bib.ok) {
+                                "Bibliography updated. Convert again to refresh the PDF."
+                            } else {
+                                "Bibliography failed."
+                            },
+                            lastLog = bib.log,
+                            files = files,
+                            folders = repo.listFolders(state.projectId),
+                            editorText = editorText,
+                            dirty = false,
+                            error = if (bib.ok) null else "Bibliography failed. Check the log.",
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    _editor.update {
+                        it.copy(
+                            converting = false,
+                            status = "Bibliography failed.",
+                            error = error.message ?: "Bibliography failed.",
+                            lastLog = error.message.orEmpty(),
+                        )
+                    }
+                },
+            )
+            refreshProjects()
+        }
+    }
+
     fun pdfFile(): File? {
         val path = _editor.value.pdfPath ?: return null
         return File(path).takeIf { it.exists() }

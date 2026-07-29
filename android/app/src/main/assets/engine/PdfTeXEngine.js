@@ -61,7 +61,7 @@ var EngineStatus;
     EngineStatus[EngineStatus["Busy"] = 3] = "Busy";
     EngineStatus[EngineStatus["Error"] = 4] = "Error";
 })(EngineStatus = exports.EngineStatus || (exports.EngineStatus = {}));
-var ENGINE_PATH = './swiftlatexpdftex.js?v=8';
+var ENGINE_PATH = './swiftlatexpdftex.js?v=9';
 var CompileResult = /** @class */ (function () {
     function CompileResult() {
         this.pdf = undefined;

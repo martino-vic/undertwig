@@ -27,6 +27,12 @@ data class CompileResult(
     val log: String,
 )
 
+data class BibliographyResult(
+    val ok: Boolean,
+    val log: String,
+    val outputs: Map<String, String>,
+)
+
 /**
  * Runs SwiftLaTeX PdfTeX inside a WebView (local compute, not a browsed website).
  * WebView is created lazily and only with an Activity-backed context.
@@ -38,6 +44,7 @@ class LatexEngine {
     private var engineReady = false
     private var pendingReady: ((Result<Unit>) -> Unit)? = null
     private var pendingResult: ((Result<CompileResult>) -> Unit)? = null
+    private var pendingBibResult: ((Result<BibliographyResult>) -> Unit)? = null
     private var progressListener: ((String) -> Unit)? = null
     private val creating = AtomicBoolean(false)
 
@@ -129,6 +136,7 @@ class LatexEngine {
         engineReady = false
         pendingReady = null
         pendingResult = null
+        pendingBibResult = null
         progressListener = null
     }
 
@@ -212,6 +220,57 @@ class LatexEngine {
         }
     }
 
+    suspend fun runBibliography(
+        files: Map<String, Pair<String, Boolean>>,
+        onProgress: (String) -> Unit = {},
+    ): BibliographyResult = withContext(Dispatchers.Main) {
+        ensureWebView()
+        awaitReady()
+        progressListener = onProgress
+        val payload = JSONObject()
+        files.forEach { (path, value) ->
+            val (content, binary) = value
+            payload.put(
+                path,
+                JSONObject()
+                    .put("content", content)
+                    .put("binary", binary),
+            )
+        }
+        val json = JSONObject.quote(payload.toString())
+        suspendCancellableCoroutine { cont ->
+            pendingBibResult = { result ->
+                progressListener = null
+                if (cont.isActive) {
+                    result.fold(
+                        onSuccess = { cont.resume(it) },
+                        onFailure = { cont.resumeWithException(it) },
+                    )
+                }
+            }
+            cont.invokeOnCancellation { pendingBibResult = null }
+            mainHandler.postDelayed({
+                if (pendingBibResult != null) {
+                    pendingBibResult?.invoke(
+                        Result.success(
+                            BibliographyResult(
+                                ok = false,
+                                log = "Bibliography timed out. Convert once, then try Bib again.",
+                                outputs = emptyMap(),
+                            ),
+                        ),
+                    )
+                    pendingBibResult = null
+                    progressListener = null
+                }
+            }, 300_000L)
+            webView?.evaluateJavascript(
+                "window.UndertwigEngine.runBibliography($json)",
+                null,
+            ) ?: cont.resumeWithException(IllegalStateException("WebView was destroyed."))
+        }
+    }
+
     fun destroy() {
         mainHandler.post { destroyWebView() }
     }
@@ -244,6 +303,25 @@ class LatexEngine {
                         )
                         pendingResult = null
                     }
+                    "bib-result" -> {
+                        val ok = obj.optBoolean("ok", false)
+                        val log = obj.optString("log", "")
+                        val outputs = linkedMapOf<String, String>()
+                        val outputsObj = obj.optJSONObject("outputs")
+                        if (outputsObj != null) {
+                            val keys = outputsObj.keys()
+                            while (keys.hasNext()) {
+                                val key = keys.next()
+                                outputs[key] = outputsObj.optString(key, "")
+                            }
+                        }
+                        pendingBibResult?.invoke(
+                            Result.success(
+                                BibliographyResult(ok = ok, log = log, outputs = outputs),
+                            ),
+                        )
+                        pendingBibResult = null
+                    }
                 }
             }
         }
@@ -252,6 +330,6 @@ class LatexEngine {
     companion object {
         private const val TAG = "UndertwigEngine"
         /** Bump whenever bundled engine JS/Wasm/fmt changes. */
-        private const val ENGINE_ASSET_VERSION = "8"
+        private const val ENGINE_ASSET_VERSION = "9"
     }
 }
