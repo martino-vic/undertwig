@@ -1,0 +1,74 @@
+\chapter{Interconnected Systems}
+\label{ch:systems}
+
+\section{Block diagram}
+\begin{figure}[ht]
+\centering
+\input{figures/tikz/control.tikz}
+\caption{Feedback interconnection with multiple named ports.}
+\label{fig:control}
+\end{figure}
+
+\section{Transfer-function soup}
+\begin{align}
+P(s)
+&=
+C(sI-A)^{-1}B+D,
+\\
+K(s)
+&=
+\frac{\omega_{c}^{2}}{s^{2}+2\zeta\omega_{c}s+\omega_{c}^{2}}
+\cdot
+\frac{T_{d}s+1}{\alpha T_{d}s+1},
+\\
+S(s)
+&=
+\bigl(I+P(s)K(s)\bigr)^{-1},
+&
+T(s)
+&=
+I-S(s).
+\end{align}
+
+\begin{assumption}
+The pair $(A,B)$ is stabilizable and $(A,C)$ is detectable.
+\end{assumption}
+
+\begin{corollary}
+Under the assumption above there exists a proper rational $K$ making
+$T\in\mathcal{H}_{\infty}$ with $\norm{T}_{\infty}<1$ whenever the plant
+satisfies the usual small-gain side conditions.
+\end{corollary}
+
+\section{Stochastic layer}
+\begin{align}
+\mathrm{d}X_{t}
+&=
+b(X_{t})\,\mathrm{d}t
++
+\sigma(X_{t})\,\mathrm{d}W_{t},
+\\
+\mathcal{L}v
+&=
+b\cdot\nabla v
++
+\tfrac12\tr\!\bigl(\sigma\sigma^{\mathsf T}D^{2}v\bigr),
+\\
+u(t,x)
+&=
+\E^{x}\!\left[
+\int_{0}^{t}
+f(X_{s})\,\mathrm{d}s
++
+g(X_{t})
+\right].
+\end{align}
+
+\begin{remark}
+The Feynman--Kac representation above is only used as compile ballast; no
+claim is made about numerical approximation quality inside Undertwig.
+\end{remark}
+
+\stressparagraph{Point back to \cref{fig:control,fig:spectra,eq:ode-core} so
+hyperref and cleveref both stay occupied.}
+Background reading: \cite{ZhouDoyleGlover1996,Oksendal2003,Khalil2002}.

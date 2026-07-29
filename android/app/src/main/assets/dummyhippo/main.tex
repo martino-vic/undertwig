@@ -1,0 +1,35 @@
+% DummyHippo — heavy multi-file stress project for Undertwig Convert
+% Import this whole folder (or zip) via Undertwig's import UI, then Convert.
+\documentclass[11pt,a4paper]{report}
+
+\input{inc/packages}
+\input{inc/settings}
+\input{inc/commands}
+
+\title{\textbf{DummyHippo}\\[0.4em]
+\large A Deliberately Heavy \LaTeX\ Stress Document}
+\author{Undertwig QA Suite}
+\date{\today}
+
+\graphicspath{{figures/}}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\listoffigures
+\listoftables
+\clearpage
+
+\input{chapters/01-overview}
+\input{chapters/02-analysis}
+\input{chapters/03-geometry}
+\input{chapters/04-numerics}
+\input{chapters/05-systems}
+\input{chapters/06-appendix-math}
+
+\bibliographystyle{plain}
+\phantomsection
+\addcontentsline{toc}{chapter}{\bibname}
+\bibliography{bib/references}
+
+\end{document}

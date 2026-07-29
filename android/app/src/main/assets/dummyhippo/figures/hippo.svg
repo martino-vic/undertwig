@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160">
+  <rect width="240" height="160" fill="#e8edf3"/>
+  <ellipse cx="120" cy="88" rx="70" ry="42" fill="#b87333"/>
+  <circle cx="88" cy="70" r="18" fill="#b87333"/>
+  <circle cx="152" cy="70" r="18" fill="#b87333"/>
+  <circle cx="82" cy="68" r="4" fill="#18212b"/>
+  <circle cx="146" cy="68" r="4" fill="#18212b"/>
+  <text x="120" y="148" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#18212b">hippo.svg</text>
+</svg>

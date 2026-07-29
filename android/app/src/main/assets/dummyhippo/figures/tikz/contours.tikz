@@ -1,0 +1,18 @@
+\begin{tikzpicture}[scale=1.05]
+\draw[->,thick] (-0.2,0) -- (6.2,0) node[right] {$x$};
+\draw[->,thick] (0,-0.2) -- (0,3.4) node[above] {$y$};
+
+\draw[hippoCopper,very thick,name path=A]
+  plot[smooth,domain=0.2:5.8,samples=80]
+  (\x,{1.2+0.55*sin(deg(\x*1.3))+0.12*\x});
+\draw[hippoInk!70,thick,name path=B]
+  plot[smooth,domain=0.2:5.8,samples=80]
+  (\x,{2.1+0.35*cos(deg(\x*0.9))-0.05*\x});
+
+\fill[name intersections={of=A and B,name=i,total=\t}]
+  \foreach \s in {1,...,\t}{(i-\s) circle (1.6pt)};
+
+\draw[decorate,decoration={brace,amplitude=5pt},hippoCopper]
+  (0.4,3.05) -- (5.6,3.05)
+  node[midway,above=6pt,font=\scriptsize] {annotated freehand contours};
+\end{tikzpicture}

@@ -1,0 +1,23 @@
+% Shared macros for DummyHippo chapters
+\newcommand{\stressparagraph}[1]{%
+  #1\ This paragraph is intentionally dense: it mixes inline math
+  $a_{i}=\sum_{k=1}^{n}\alpha_{ik}x^{k}$, citations, and cross-references so
+  the converter must keep a large macro state while paging through the
+  document repeatedly.%
+}
+
+\newcommand{\bigmatrixblock}{%
+  \begin{equation}
+    A =
+    \begin{pmatrix}
+      a_{11} & a_{12} & a_{13} & a_{14} & a_{15} \\
+      a_{21} & a_{22} & a_{23} & a_{24} & a_{25} \\
+      a_{31} & a_{32} & a_{33} & a_{34} & a_{35} \\
+      a_{41} & a_{42} & a_{43} & a_{44} & a_{45} \\
+      a_{51} & a_{52} & a_{53} & a_{54} & a_{55}
+    \end{pmatrix}
+    ,
+    \qquad
+    \det(A-\lambda I)=0.
+  \end{equation}
+}

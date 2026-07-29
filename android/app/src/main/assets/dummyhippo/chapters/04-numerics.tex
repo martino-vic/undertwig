@@ -1,0 +1,75 @@
+\chapter{Numerics and Plots}
+\label{ch:numerics}
+
+\section{PGFPlots stress}
+\begin{figure}[ht]
+\centering
+\input{figures/tikz/spectra.tikz}
+\caption{Several overlaid PGFPlots curves with a filled band.}
+\label{fig:spectra}
+\end{figure}
+
+\section{Discrete operators}
+Define the second-difference matrix $T_{n}\in\R^{n\times n}$ by
+\begin{equation}
+(T_{n}v)_{i}
+=
+\frac{v_{i-1}-2v_{i}+v_{i+1}}{h^{2}},
+\qquad
+h=\frac{1}{n+1},
+\end{equation}
+with homogeneous Dirichlet values $v_{0}=v_{n+1}=0$.
+
+\begin{align}
+\lambda_{k}(T_{n})
+&=
+-\frac{4}{h^{2}}\sin^{2}\!\left(\frac{k\pi}{2(n+1)}\right),
+&
+k&=1,\dots,n,
+\\
+\norm{T_{n}^{-1}}_{2}
+&=
+\frac{1}{\abs{\lambda_{1}(T_{n})}}
+=
+\frac{h^{2}}{4\sin^{2}\!\bigl(\pi/(2(n+1))\bigr)}.
+\end{align}
+
+\section{Algorithm box}
+\begin{hipponote}[title={Pseudo-code payload}]
+\begin{enumerate}[leftmargin=*,label=\arabic*.]
+  \item Assemble sparse residual $r = b - Ax$.
+  \item Apply $m$ steps of GMRES with restart length $\ell$.
+  \item Update $x\leftarrow x+\delta$ and recompute $r$.
+  \item Stop when $\norm{r}_{2}\le\tau\norm{b}_{2}$ or the iteration budget
+        $K_{\max}$ is exhausted.
+\end{enumerate}
+The same loop is written again symbolically as
+\[
+x_{k+1}
+=
+x_{k}
++
+\arg\min_{z\in\mathcal{K}_{m}(A,r_{k})}
+\norm{b-A(x_{k}+z)}_{2}.
+\]
+\end{hipponote}
+
+\section{Wide table}
+\begin{table}[ht]
+\centering
+\caption{Iteration counts for a fake solver sweep.}
+\label{tab:iters}
+\begin{tabularx}{\linewidth}{@{}l *{8}{>{\centering\arraybackslash}X}@{}}
+\toprule
+$n$ & 32 & 64 & 128 & 256 & 512 & 1024 & 2048 & 4096 \\
+\midrule
+CG & 18 & 31 & 52 & 88 & 140 & 221 & 360 & 590 \\
+GMRES & 12 & 19 & 29 & 44 & 67 & 101 & 155 & 240 \\
+BiCGSTAB & 15 & 24 & 38 & 61 & 97 & 150 & 233 & 361 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\stressparagraph{Numerical chapters combine floating-point-looking literals
+with macros so tokenization stays non-trivial.}
+Classic references: \cite{TrefethenBau1997,Saad2003,GolubVanLoan2013}.

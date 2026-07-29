@@ -1,0 +1,83 @@
+\chapter{Appendix: Symbolic Mass}
+\label{ch:appendix}
+
+\section{Repeated expansions}
+For $n=1,\dots,12$ define
+\begin{equation}
+p_{n}(z)
+=
+\sum_{k=0}^{n}
+\frac{(2k)!}{2^{2k}(k!)^{2}}
+\frac{z^{k}}{k+1}.
+\end{equation}
+Then the generating function identity
+\begin{equation}
+\sum_{n\ge0}p_{n}(z)t^{n}
+=
+\frac{1-\sqrt{1-2zt+t^{2}(z^{2}-1)\cdots}}{zt}
+\end{equation}
+is intentionally left in a slightly abusive form so the tokenizer still has
+to chew through nested radicals and factorials.
+
+\section{More matrices}
+\begin{align*}
+M &=
+\begin{bmatrix}
+1 & 2 & 3 & 4 & 5 & 6 \\
+0 & 1 & 2 & 3 & 4 & 5 \\
+0 & 0 & 1 & 2 & 3 & 4 \\
+0 & 0 & 0 & 1 & 2 & 3 \\
+0 & 0 & 0 & 0 & 1 & 2 \\
+0 & 0 & 0 & 0 & 0 & 1
+\end{bmatrix},
+&
+M^{-1} &=
+\begin{bmatrix}
+1 & -2 & 1 & 0 & 0 & 0 \\
+0 & 1 & -2 & 1 & 0 & 0 \\
+0 & 0 & 1 & -2 & 1 & 0 \\
+0 & 0 & 0 & 1 & -2 & 1 \\
+0 & 0 & 0 & 0 & 1 & -2 \\
+0 & 0 & 0 & 0 & 0 & 1
+\end{bmatrix}
+\text{(patterned)}.
+\end{align*}
+
+\section{Mini essays}
+\stressparagraph{First ballast paragraph.}
+\stressparagraph{Second ballast paragraph referring to \cref{ch:overview}.}
+\stressparagraph{Third ballast paragraph referring to \cref{ch:numerics}.}
+\stressparagraph{Fourth ballast paragraph referring to \cref{fig:pipeline}.}
+\stressparagraph{Fifth ballast paragraph referring to \cref{tab:iters}.}
+
+\section{Final identity dump}
+\begin{align}
+\sin x &= \sum_{k=0}^{\infty}(-1)^{k}\frac{x^{2k+1}}{(2k+1)!},
+&
+\cos x &= \sum_{k=0}^{\infty}(-1)^{k}\frac{x^{2k}}{(2k)!},
+\\
+e^{x} &= \sum_{k=0}^{\infty}\frac{x^{k}}{k!},
+&
+\log(1+x) &= \sum_{k=1}^{\infty}(-1)^{k+1}\frac{x^{k}}{k},
+\\
+\zeta(s) &= \sum_{n=1}^{\infty}n^{-s},
+&
+\Gamma(z) &= \int_{0}^{\infty}t^{z-1}e^{-t}\,\mathrm{d}t.
+\end{align}
+
+\begin{hipponote}[title={End of DummyHippo}]
+If this PDF appears after Convert, the engine survived a fairly hostile
+synthetic document. Check the compiler log for missing packages, undefined
+references on the first pass, and any font warnings.
+\end{hipponote}
+
+\section{Thanks---and a hippo}
+Thanks for reading through all of this.
+Here is a picture of a hippo.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.62\linewidth]{hippo.png}
+  \caption{A pixel hippo. You earned it.}
+  \label{fig:pixel-hippo}
+\end{figure}

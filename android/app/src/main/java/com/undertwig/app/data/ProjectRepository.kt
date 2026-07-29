@@ -39,16 +39,24 @@ class ProjectRepository(context: Context) {
     }
 
     /**
-     * Ensure the website Sample Project starter exists.
+     * Ensure default starters exist (Sample Project, then DummyHippo).
      * @return project id to auto-open when this was a first-empty install; otherwise null
      */
-    fun ensureSampleProject(): String? {
+    fun ensureDefaultProjects(): String? {
         val existing = listProjects()
-        if (existing.any { it.name == SAMPLE_PROJECT_NAME }) {
-            return null
+        val wasEmpty = existing.isEmpty()
+        var openId: String? = null
+
+        if (existing.none { it.name == SAMPLE_PROJECT_NAME }) {
+            val sample = createSampleProject()
+            if (wasEmpty) {
+                openId = sample.id
+            }
         }
-        val created = createSampleProject()
-        return if (existing.isEmpty()) created.id else null
+        if (listProjects().none { it.name == DUMMY_HIPPO_NAME }) {
+            createDummyHippoProject()
+        }
+        return openId
     }
 
     fun createSampleProject(): ProjectSummary {
@@ -59,6 +67,18 @@ class ProjectRepository(context: Context) {
         return ProjectSummary(
             id = id,
             name = SAMPLE_PROJECT_NAME,
+            updatedAt = System.currentTimeMillis(),
+        )
+    }
+
+    fun createDummyHippoProject(): ProjectSummary {
+        val id = UUID.randomUUID().toString()
+        val dir = File(root, id).also { it.mkdirs() }
+        copyAssetTree("dummyhippo", dir)
+        writeMeta(dir, DUMMY_HIPPO_NAME)
+        return ProjectSummary(
+            id = id,
+            name = DUMMY_HIPPO_NAME,
             updatedAt = System.currentTimeMillis(),
         )
     }
@@ -308,6 +328,7 @@ class ProjectRepository(context: Context) {
     companion object {
         private const val META_FILE = "project.json"
         const val SAMPLE_PROJECT_NAME = "Sample Project"
+        const val DUMMY_HIPPO_NAME = "DummyHippo"
 
         private val BINARY_EXTENSIONS = setOf(
             "png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff", "ico",

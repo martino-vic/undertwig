@@ -44,11 +44,11 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     val editor: StateFlow<EditorUiState> = _editor.asStateFlow()
 
     init {
-        // Match the website: ship Sample Project; open it on a fresh install.
-        val sampleId = repo.ensureSampleProject()
+        // Match the website starters: Sample Project + DummyHippo; open Sample on fresh install.
+        val openId = repo.ensureDefaultProjects()
         refreshProjects()
-        if (sampleId != null) {
-            openProject(sampleId)
+        if (openId != null) {
+            openProject(openId)
         }
         // Do not create WebView here — Application context / early init crashes on many emulators.
     }

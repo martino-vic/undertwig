@@ -1,0 +1,128 @@
+\chapter{Analytic Stress Tests}
+\label{ch:analysis}
+
+\section{Variational formulations}
+Let $\Omega\subset\R^{n}$ be a bounded Lipschitz domain. Consider the energy
+\begin{equation}
+\label{eq:energy}
+\mathcal{E}(u)
+=
+\frac12\int_{\Omega}\abs{\nabla u}^{2}\,\mathrm{d}x
++
+\int_{\Omega}V(u)\,\mathrm{d}x
+-
+\int_{\Omega}fu\,\mathrm{d}x.
+\end{equation}
+
+\begin{theorem}[Existence of minimizers]
+Suppose $V\in C^{1}(\R)$ satisfies $V(s)\ge c_{0}\abs{s}^{p}-c_{1}$ for some
+$p\ge 2$ and $c_{0}>0$. Then $\mathcal{E}$ admits a minimizer in
+$W^{1,p}_{0}(\Omega)$.
+\end{theorem}
+
+\begin{proof}[Sketch]
+Coercivity + weak lower semicontinuity of the Dirichlet integral. Pass to the
+limit with Minty--Browder if needed for the nonlinearity.
+\end{proof}
+
+\section{Cascade of identities}
+\begin{align}
+\label{eq:cascade-a}
+\partial_{t}u
+&=
+\Delta u + u - u^{3} + \sigma\xi,
+\\
+\label{eq:cascade-b}
+\partial_{t}v
+&=
+-\Delta^{2}v + \nabla\cdot\bigl(g(\abs{\nabla v}^{2})\nabla v\bigr),
+\\
+\label{eq:cascade-c}
+\partial_{t}w
+&=
+\operatorname{div}\!\left(
+\frac{\nabla w}{\sqrt{1+\abs{\nabla w}^{2}}}
+\right)
++
+\lambda(w-\bar w).
+\end{align}
+
+Combining \cref{eq:cascade-a,eq:cascade-b,eq:cascade-c} with the energy
+\eqref{eq:energy} yields a formal dissipation identity
+\begin{equation}
+\frac{\mathrm{d}}{\mathrm{d}t}
+\Bigl(
+\mathcal{E}(u)+\tfrac12\norm{v}_{H^{2}}^{2}+\norm{w}_{\mathrm{BV}}
+\Bigr)
++
+\mathcal{D}(u,v,w)
+=
+\mathcal{N}(\xi),
+\end{equation}
+where $\mathcal{D}$ collects non-negative dissipation and $\mathcal{N}$ is a
+noise pairing.
+
+\section{Long display nests}
+\begin{align*}
+I_{N}
+&=
+\sum_{k=1}^{N}
+\int_{0}^{1}
+\frac{x^{k-1}}{1+x^{k}}
+\log\!\left(1+x^{k}\right)
+\,\mathrm{d}x
+\\
+&=
+\sum_{k=1}^{N}
+\sum_{m=1}^{\infty}
+\frac{(-1)^{m+1}}{m}
+\int_{0}^{1}
+\frac{x^{k+m-1}}{1+x^{k}}
+\,\mathrm{d}x
+\\
+&=
+\sum_{k=1}^{N}
+\sum_{m=1}^{\infty}
+\sum_{j=0}^{\infty}
+\frac{(-1)^{m+1+j}}{m}
+\int_{0}^{1}
+x^{k(j+1)+m-1}
+\,\mathrm{d}x
+\\
+&=
+\sum_{k=1}^{N}
+\sum_{m=1}^{\infty}
+\sum_{j=0}^{\infty}
+\frac{(-1)^{m+1+j}}{m\bigl(k(j+1)+m\bigr)}.
+\end{align*}
+
+\bigmatrixblock
+
+\begin{proposition}
+For Hermitian $A$, the Rayleigh quotient
+$R(x)=\frac{\inner{Ax}{x}}{\inner{x}{x}}$ satisfies
+$\lambda_{\min}(A)\le R(x)\le\lambda_{\max}(A)$.
+\end{proposition}
+
+\section{Tabular density}
+\begin{table}[ht]
+\centering
+caption{Synthetic coefficient table used only to enlarge the layout pass.}
+\label{tab:coeffs}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Family & $\alpha$ & $\beta$ & $\gamma$ & $\delta$ & $\varepsilon$ \\
+\midrule
+A & 0.12 & 1.04 & -0.33 & 2.10 & 0.01 \\
+B & 0.45 & 0.88 &  0.17 & 1.55 & 0.07 \\
+C & 1.02 & 0.21 & -1.40 & 0.66 & 0.19 \\
+D & 0.77 & 1.91 &  0.05 & 3.02 & 0.44 \\
+E & 0.03 & 0.50 &  0.92 & 0.11 & 1.28 \\
+F & 2.14 & 0.09 & -0.61 & 1.77 & 0.33 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\stressparagraph{Cross-reference noise: see \cref{fig:hippo-grid,tab:coeffs,eq:ode-core}
+and the geometric constructions in \cref{ch:geometry}.}
+Related surveys include \cite{Evans2010,Brezis2011,Temam1997}.

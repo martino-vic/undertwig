@@ -1,0 +1,52 @@
+\chapter{Geometry and TikZ Load}
+\label{ch:geometry}
+
+\section{Layered schematic}
+\begin{figure}[ht]
+\centering
+\input{figures/tikz/pipeline.tikz}
+\caption{Multi-layer TikZ pipeline with fitted boxes and decorations.}
+\label{fig:pipeline}
+\end{figure}
+
+\section{Force-directed-looking graph}
+\begin{figure}[ht]
+\centering
+\input{figures/tikz/meshgraph.tikz}
+\caption{Dense node/edge graph meant to exercise PGF path processing.}
+\label{fig:meshgraph}
+\end{figure}
+
+\section{Curved annotations}
+\begin{figure}[ht]
+\centering
+\input{figures/tikz/contours.tikz}
+\caption{Contour-style curves with intersection marks and braces.}
+\label{fig:contours}
+\end{figure}
+
+\begin{example}
+The diagram in \cref{fig:pipeline} is purely decorative. Its only job is to
+force the engine through nested scopes, shadows, and fitted nodes while the
+surrounding text keeps the page builder busy.
+\end{example}
+
+\begin{hippowarn}
+Very large TikZ pictures can dominate compile time in Wasm engines. If Convert
+appears stuck, abort and try compiling a single chapter in isolation.
+\end{hippowarn}
+
+\section{Coordinate identities}
+\begin{align}
+x &= r\sin\theta\cos\phi, &
+y &= r\sin\theta\sin\phi, &
+z &= r\cos\theta,
+\\
+g_{\theta\theta} &= r^{2}, &
+g_{\phi\phi} &= r^{2}\sin^{2}\theta, &
+\sqrt{\abs{g}} &= r^{2}\sin\theta.
+\end{align}
+
+\stressparagraph{Geometric chapters are often where browser TeX shows the
+largest wall-clock cost because each path is expanded eagerly.}
+See also \cite{DoCarmo1976,Lee2013}.
