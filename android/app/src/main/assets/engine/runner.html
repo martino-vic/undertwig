@@ -6,8 +6,8 @@
   <title>Undertwig Engine</title>
 </head>
 <body>
-  <script src="./PdfTeXEngine.js?v=9"></script>
-  <script src="./bibliography.js?v=1"></script>
+  <script src="./PdfTeXEngine.js?v=10"></script>
+  <script src="./bibliography.js?v=10"></script>
   <script>
     (function () {
       "use strict";
@@ -43,8 +43,6 @@
 
       async function ensureFormat(engine) {
         post("progress", { message: "Loading TeX format…" });
-        // Fetch in the page (AssetLoader-backed), then transfer into the Worker.
-        // Real Workers accept transferable ArrayBuffers; the old iframe path did not.
         var fmtUrl = new URL("./swiftlatexpdftex.fmt", window.location.href).href;
         var response = await fetch(fmtUrl);
         if (!response.ok) {
@@ -59,85 +57,110 @@
         await engine.preloadTexFile("swiftlatexpdftex.fmt", buffer);
       }
 
+      async function compilePdfLaTeX(projectFiles) {
+        post("progress", { message: "Loading pdfLaTeX…" });
+        if (typeof PdfTeXEngine !== "function") {
+          throw new Error("PdfTeXEngine is not available.");
+        }
+        if (typeof Worker !== "function") {
+          throw new Error("Web Workers are not available in this WebView.");
+        }
+        var engine = new PdfTeXEngine();
+        await engine.loadEngine();
+        await ensureFormat(engine);
+        post("progress", { message: "Writing project files…" });
+
+        var folders = {};
+        Object.keys(projectFiles).forEach(function (path) {
+          var parts = path.split("/");
+          parts.pop();
+          var current = "";
+          parts.forEach(function (part) {
+            current = current ? current + "/" + part : part;
+            folders[current] = true;
+          });
+        });
+        Object.keys(folders)
+          .sort(function (a, b) {
+            return a.split("/").length - b.split("/").length;
+          })
+          .forEach(function (folder) {
+            engine.makeMemFSFolder(folder);
+          });
+
+        Object.keys(projectFiles).forEach(function (path) {
+          var file = projectFiles[path];
+          var content = file.binary
+            ? base64ToBytes(file.content)
+            : file.content || "";
+          engine.writeMemFSFile(path, content);
+        });
+
+        engine.setEngineMainFile("main.tex");
+        var result = null;
+        var auxFiles = {};
+        for (var pass = 1; pass <= 2; pass++) {
+          post("progress", {
+            message: "Converting with pdfLaTeX (pass " + pass + "/2)…",
+          });
+          await new Promise(function (r) {
+            setTimeout(r, 50);
+          });
+          Object.keys(auxFiles).forEach(function (path) {
+            engine.writeMemFSFile(path, auxFiles[path]);
+          });
+          result = await engine.compileLaTeX();
+          if (result && result.aux && typeof result.aux === "object") {
+            auxFiles = result.aux;
+          }
+          if (!result || result.status !== 0 || !result.pdf) {
+            break;
+          }
+        }
+
+        if (engine.closeWorker) {
+          try {
+            engine.closeWorker();
+          } catch (_e) {}
+        }
+
+        var ok = !!(result && result.status === 0 && result.pdf);
+        return {
+          ok: ok,
+          pdfBase64: ok ? bytesToBase64(result.pdf) : null,
+          log: (result && result.log) || "No compiler log returned.",
+        };
+      }
+
       window.UndertwigEngine = {
         ready: false,
-        compile: async function (filesJson) {
+        compile: async function (filesJson, engineId) {
           try {
-            post("progress", { message: "Loading pdfLaTeX…" });
-            if (typeof PdfTeXEngine !== "function") {
-              throw new Error("PdfTeXEngine is not available.");
-            }
-            if (typeof Worker !== "function") {
-              throw new Error("Web Workers are not available in this WebView.");
-            }
-            var engine = new PdfTeXEngine();
-            await engine.loadEngine();
-            await ensureFormat(engine);
-            post("progress", { message: "Writing project files…" });
-
             var projectFiles = JSON.parse(filesJson);
-            var folders = {};
-            Object.keys(projectFiles).forEach(function (path) {
-              var parts = path.split("/");
-              parts.pop();
-              var current = "";
-              parts.forEach(function (part) {
-                current = current ? current + "/" + part : part;
-                folders[current] = true;
-              });
-            });
-            Object.keys(folders)
-              .sort(function (a, b) {
-                return a.split("/").length - b.split("/").length;
-              })
-              .forEach(function (folder) {
-                engine.makeMemFSFolder(folder);
-              });
-
-            Object.keys(projectFiles).forEach(function (path) {
-              var file = projectFiles[path];
-              var content = file.binary
-                ? base64ToBytes(file.content)
-                : file.content || "";
-              engine.writeMemFSFile(path, content);
-            });
-
-            engine.setEngineMainFile("main.tex");
-            var result = null;
-            var auxFiles = {};
-            for (var pass = 1; pass <= 2; pass++) {
-              post("progress", {
-                message: "Converting with pdfLaTeX (pass " + pass + "/2)…",
-              });
-              await new Promise(function (r) {
-                setTimeout(r, 50);
-              });
-              Object.keys(auxFiles).forEach(function (path) {
-                engine.writeMemFSFile(path, auxFiles[path]);
-              });
-              result = await engine.compileLaTeX();
-              if (result && result.aux && typeof result.aux === "object") {
-                auxFiles = result.aux;
+            var engine = String(engineId || "pdflatex").toLowerCase();
+            var result;
+            if (engine === "lualatex") {
+              if (
+                !window.UndertwigBibliography ||
+                typeof window.UndertwigBibliography.compileLua !== "function"
+              ) {
+                throw new Error("LuaLaTeX engine is not available.");
               }
-              if (!result || result.status !== 0 || !result.pdf) {
-                break;
-              }
+              result = await window.UndertwigBibliography.compileLua(
+                projectFiles,
+                function (message) {
+                  post("progress", { message: message || "Converting with LuaLaTeX…" });
+                }
+              );
+            } else {
+              result = await compilePdfLaTeX(projectFiles);
             }
-
-            if (engine.closeWorker) {
-              try {
-                engine.closeWorker();
-              } catch (_e) {}
-            }
-
-            var ok = !!(result && result.status === 0 && result.pdf);
-            var pdfBase64 = ok ? bytesToBase64(result.pdf) : null;
             post("result", {
-              ok: ok,
-              pdfBase64: pdfBase64,
+              ok: !!(result && result.ok),
+              pdfBase64: (result && result.pdfBase64) || null,
               log: (result && result.log) || "No compiler log returned.",
             });
-            return ok;
+            return !!(result && result.ok);
           } catch (error) {
             post("result", {
               ok: false,
@@ -148,7 +171,7 @@
           }
         },
 
-        runBibliography: async function (filesJson) {
+        runBibliography: async function (filesJson, bibTool) {
           try {
             if (!window.UndertwigBibliography || typeof window.UndertwigBibliography.run !== "function") {
               throw new Error("Bibliography engine is not available.");
@@ -158,7 +181,8 @@
               projectFiles,
               function (message) {
                 post("progress", { message: message || "Updating bibliography…" });
-              }
+              },
+              bibTool || "bibtex"
             );
             post("bib-result", {
               ok: !!(result && result.ok),

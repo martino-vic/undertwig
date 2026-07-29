@@ -190,10 +190,10 @@
     return luaInitPromise;
   }
 
-  function postBibToolToWorker(files, onProgress) {
+  function postBibToolToWorker(files, tool, onProgress) {
     return new Promise(function (resolve, reject) {
       if (!luaWorker) {
-        reject(new Error("BibTeX worker is not ready."));
+        reject(new Error("Bibliography worker is not ready."));
         return;
       }
 
@@ -209,7 +209,7 @@
             "Bibliography helper timed out. Convert once, then try Bib again."
           )
         );
-      }, 90000);
+      }, 120000);
 
       var finish = function (fn) {
         if (settled) {
@@ -248,10 +248,296 @@
 
       luaWorker.postMessage({
         run_bibtool: true,
-        bib_tool: "bibtex",
+        bib_tool: tool || "bibtex",
         files: files,
         main_tex_path: "main.tex",
         main_job_path: "main.tex",
+      });
+    });
+  }
+
+  function bytesToBase64(bytes) {
+    var binary = "";
+    var chunk = 0x8000;
+    for (var i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(
+        null,
+        bytes.subarray(i, Math.min(i + chunk, bytes.length))
+      );
+    }
+    return btoa(binary);
+  }
+
+  function normalizeTextOutputs(outputs) {
+    var textOutputs = {};
+    Object.keys(outputs || {}).forEach(function (path) {
+      var value = outputs[path];
+      if (value == null) {
+        return;
+      }
+      if (typeof value === "string") {
+        textOutputs[path] = value;
+      } else if (value instanceof Uint8Array) {
+        textOutputs[path] = new TextDecoder("utf-8", { fatal: false }).decode(value);
+      } else {
+        textOutputs[path] = String(value);
+      }
+    });
+    return textOutputs;
+  }
+
+  function projectFilesToTypeward(projectFiles) {
+    return Object.keys(projectFiles || {})
+      .sort()
+      .map(function (path) {
+        var file = projectFiles[path];
+        var content = "";
+        if (file && file.binary) {
+          content = base64ToBytes(file.content);
+        } else {
+          content = file && file.content != null ? String(file.content) : "";
+        }
+        return { path: path, content: content };
+      });
+  }
+
+  function mergePreparedOutputs(projectFiles, outputs) {
+    var next = Object.assign({}, projectFiles || {});
+    Object.keys(outputs || {}).forEach(function (path) {
+      var key = String(path).replace(/^\/+/, "");
+      if (!key || outputs[path] == null) {
+        return;
+      }
+      next[key] = {
+        content: String(outputs[path]),
+        binary: false,
+      };
+    });
+    return next;
+  }
+
+  async function runTypewardBiber(projectFiles, notify) {
+    notify("Loading Biber WASM…");
+    var moduleUrl = new URL("./texlive-wasm/run-biber.js?v=10", global.location.href).href;
+    var mod = await import(moduleUrl);
+    if (!mod || typeof mod.runBiber !== "function") {
+      throw new Error("Biber WASM module failed to load.");
+    }
+    notify("Running Biber…");
+    var result = await mod.runBiber({
+      jobname: "main",
+      files: projectFilesToTypeward(projectFiles),
+      timeoutMs: 300000,
+    });
+    var outputs = normalizeTextOutputs((result && result.outputs) || {});
+    var hasBbl = Object.keys(outputs).some(function (path) {
+      return /\.bbl$/i.test(path) && String(outputs[path] || "").trim();
+    });
+    return {
+      ok: Boolean(result && (result.ok || result.exit_code === 0) && hasBbl),
+      log: (result && result.log) || "No Biber log returned.",
+      outputs: outputs,
+    };
+  }
+
+  async function runBibTeX(projectFiles, notify) {
+    notify("Bibliography (1/3): Preparing citation data");
+    var auxResult = await ensureBibtexAux(projectFiles, notify);
+
+    notify("Bibliography (2/3): Loading BibTeX engine");
+    await ensureLuaWorker(function (message) {
+      var text = String(message || "").replace(/\s+/g, " ").trim();
+      if (
+        text &&
+        (/Preparing|Downloading|Fetching|complete|texlive|wasm|package/i.test(text) ||
+          text.length < 100)
+      ) {
+        notify("Bibliography (2/3): Loading BibTeX engine — " + text);
+      }
+    });
+
+    notify("Bibliography (3/3): Running BibTeX");
+    var files = projectFilesToBusyTex(auxResult.files);
+    var data = await postBibToolToWorker(files, "bibtex", function (message) {
+      var text = String(message || "").replace(/\s+/g, " ").trim();
+      if (text) {
+        notify("Bibliography (3/3): Running BibTeX — " + text);
+      }
+    });
+
+    var outputs = Object.assign({}, data.outputs || {});
+    if (auxResult.wroteAux && auxResult.aux) {
+      Object.keys(auxResult.aux).forEach(function (path) {
+        var key = String(path).replace(/^\/+/, "");
+        if (key && outputs[key] == null && auxResult.aux[path] != null) {
+          outputs[key] = String(auxResult.aux[path]);
+        }
+      });
+    }
+
+    var textOutputs = normalizeTextOutputs(outputs);
+    var hasBbl = Object.keys(textOutputs).some(function (path) {
+      return /\.bbl$/i.test(path) && String(textOutputs[path] || "").trim();
+    });
+
+    return {
+      ok: Boolean(data.ok) || hasBbl,
+      log: data.log || "No bibliography log returned.",
+      outputs: textOutputs,
+    };
+  }
+
+  async function runBiber(projectFiles, notify) {
+    notify("Bibliography (1/4): Loading Biber helper");
+    await ensureLuaWorker(function (message) {
+      var text = String(message || "").replace(/\s+/g, " ").trim();
+      if (
+        text &&
+        (/Preparing|Downloading|Fetching|complete|texlive|wasm|package/i.test(text) ||
+          text.length < 100)
+      ) {
+        notify("Bibliography (1/4): Loading Biber helper — " + text);
+      }
+    });
+
+    notify("Bibliography (2/4): Preparing Biber control file");
+    var prep = await postBibToolToWorker(
+      projectFilesToBusyTex(projectFiles),
+      "biber",
+      function (message) {
+        var text = String(message || "").replace(/\s+/g, " ").trim();
+        if (text) {
+          notify("Bibliography (2/4): Preparing Biber control file — " + text);
+        }
+      }
+    );
+
+    var preparedFiles = mergePreparedOutputs(projectFiles, prep && prep.outputs);
+    var hasBcf = Object.keys(preparedFiles).some(function (path) {
+      return /(^|\/)main\.bcf$/i.test(path) || /\.bcf$/i.test(path);
+    });
+    if (!hasBcf) {
+      return {
+        ok: false,
+        log:
+          (prep && prep.log) ||
+          "Missing main.bcf for Biber. Convert a biblatex document once, then try Bib again.",
+        outputs: normalizeTextOutputs((prep && prep.outputs) || {}),
+      };
+    }
+
+    notify("Bibliography (3/4): Running Biber");
+    var result = await runTypewardBiber(preparedFiles, function (message) {
+      notify("Bibliography (3/4): " + String(message || "Running Biber…"));
+    });
+
+    var outputs = Object.assign(
+      {},
+      normalizeTextOutputs((prep && prep.outputs) || {}),
+      result.outputs || {}
+    );
+    return {
+      ok: Boolean(result && result.ok),
+      log:
+        ((prep && prep.log) || "") +
+        "\n\n" +
+        ((result && result.log) || "No Biber log returned."),
+      outputs: outputs,
+    };
+  }
+
+  function compileLuaLaTeX(projectFiles, onProgress) {
+    var notify = typeof onProgress === "function" ? onProgress : function () {};
+    return ensureLuaWorker(function (message) {
+      var text = String(message || "");
+      if (/Preparing|Downloading|complete/i.test(text)) {
+        notify("Downloading LuaLaTeX assets… " + text);
+      } else {
+        notify(text);
+      }
+    }).then(function () {
+      notify("Converting with LuaLaTeX…");
+      return new Promise(function (resolve, reject) {
+        if (!luaWorker) {
+          reject(new Error("LuaLaTeX worker is not ready."));
+          return;
+        }
+
+        var settled = false;
+        var timeout = setTimeout(function () {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          closeLuaWorker();
+          reject(new Error("LuaLaTeX compilation timed out."));
+        }, 300000);
+
+        var finish = function (fn) {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(timeout);
+          fn();
+        };
+
+        luaWorker.onmessage = function (event) {
+          var data = event && event.data ? event.data : {};
+          if (data.print) {
+            notify(String(data.print));
+          }
+          if (data.pdf !== undefined) {
+            finish(function () {
+              var ok = data.exit_code === 0 && Boolean(data.pdf);
+              var pdfBase64 = null;
+              if (ok && data.pdf) {
+                pdfBase64 =
+                  typeof data.pdf === "string"
+                    ? data.pdf
+                    : bytesToBase64(
+                        data.pdf instanceof Uint8Array
+                          ? data.pdf
+                          : new Uint8Array(data.pdf)
+                      );
+              }
+              resolve({
+                ok: ok,
+                pdfBase64: pdfBase64,
+                log: data.log || "No compiler log returned.",
+              });
+            });
+            return;
+          }
+          if (data.exception) {
+            finish(function () {
+              reject(new Error(String(data.exception)));
+            });
+          }
+        };
+
+        luaWorker.onerror = function (error) {
+          finish(function () {
+            reject(
+              new Error(
+                (error && error.message) || "LuaLaTeX worker failed during compile."
+              )
+            );
+          });
+        };
+
+        luaWorker.postMessage({
+          files: projectFilesToBusyTex(projectFiles),
+          main_tex_path: "main.tex",
+          bibtex: false,
+          makeindex: null,
+          rerun: true,
+          verbose: "silent",
+          driver: "luahbtex_bibtex8",
+          data_packages_js: null,
+          remote_endpoint: TEXLIVE_REMOTE,
+          shell_escape: false,
+        });
       });
     });
   }
@@ -342,84 +628,27 @@
   }
 
   /**
-   * Run BibTeX for the project. Returns { ok, log, outputs } where outputs
-   * maps relative paths to UTF-8 text (main.bbl, etc.).
+   * Bibliography + LuaLaTeX helpers for the Android engine WebView.
    */
   global.UndertwigBibliography = {
-    run: async function (projectFiles, onProgress) {
+    run: async function (projectFiles, onProgress, bibTool) {
       var notify = typeof onProgress === "function" ? onProgress : function () {};
+      var tool = String(bibTool || "bibtex").toLowerCase();
       try {
-        notify("Bibliography (1/3): Preparing citation data");
-        var auxResult = await ensureBibtexAux(projectFiles, notify);
-
-        notify("Bibliography (2/3): Loading BibTeX engine");
-        await ensureLuaWorker(function (message) {
-          var text = String(message || "").replace(/\s+/g, " ").trim();
-          if (
-            text &&
-            (/Preparing|Downloading|Fetching|complete|texlive|wasm|package/i.test(
-              text
-            ) ||
-              text.length < 100)
-          ) {
-            notify("Bibliography (2/3): Loading BibTeX engine — " + text);
-          }
-        });
-
-        notify("Bibliography (3/3): Running BibTeX");
-        var files = projectFilesToBusyTex(auxResult.files);
-        var data = await postBibToolToWorker(files, function (message) {
-          var text = String(message || "").replace(/\s+/g, " ").trim();
-          if (text) {
-            notify("Bibliography (3/3): Running BibTeX — " + text);
-          }
-        });
-
-        var outputs = Object.assign({}, data.outputs || {});
-        if (auxResult.wroteAux && auxResult.aux) {
-          Object.keys(auxResult.aux).forEach(function (path) {
-            var key = String(path).replace(/^\/+/, "");
-            if (key && outputs[key] == null && auxResult.aux[path] != null) {
-              outputs[key] = String(auxResult.aux[path]);
-            }
-          });
+        if (tool === "biber") {
+          return await runBiber(projectFiles, notify);
         }
-
-        // Normalize to plain string map for the Kotlin bridge.
-        var textOutputs = {};
-        Object.keys(outputs).forEach(function (path) {
-          var value = outputs[path];
-          if (value == null) {
-            return;
-          }
-          if (typeof value === "string") {
-            textOutputs[path] = value;
-          } else if (value instanceof Uint8Array) {
-            var chunk = 0x8000;
-            var binary = "";
-            for (var i = 0; i < value.length; i += chunk) {
-              binary += String.fromCharCode.apply(
-                null,
-                value.subarray(i, Math.min(i + chunk, value.length))
-              );
-            }
-            textOutputs[path] = binary;
-          } else {
-            textOutputs[path] = String(value);
-          }
-        });
-
-        var hasBbl = Object.keys(textOutputs).some(function (path) {
-          return /\.bbl$/i.test(path) && String(textOutputs[path] || "").trim();
-        });
-
-        return {
-          ok: Boolean(data.ok) || hasBbl,
-          log: data.log || "No bibliography log returned.",
-          outputs: textOutputs,
-        };
+        return await runBibTeX(projectFiles, notify);
       } finally {
         // Drop worker after each run to free memory on phones.
+        closeLuaWorker();
+      }
+    },
+
+    compileLua: async function (projectFiles, onProgress) {
+      try {
+        return await compileLuaLaTeX(projectFiles, onProgress);
+      } finally {
         closeLuaWorker();
       }
     },

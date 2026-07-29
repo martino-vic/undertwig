@@ -3,6 +3,9 @@ package com.undertwig.app.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.undertwig.app.data.BibToolId
+import com.undertwig.app.data.EnginePrefs
+import com.undertwig.app.data.LatexEngineId
 import com.undertwig.app.data.ProjectFile
 import com.undertwig.app.data.ProjectRepository
 import com.undertwig.app.data.ProjectSummary
@@ -45,6 +48,8 @@ data class EditorUiState(
     val pdfRevision: Long = 0L,
     /** Project-relative PDF currently shown in the full-screen viewer (any tree PDF). */
     val previewPdfRelativePath: String? = null,
+    val latexEngine: LatexEngineId = LatexEngineId.PdfLaTeX,
+    val bibTool: BibToolId = BibToolId.BibTeX,
     val error: String? = null,
 ) {
     val converting: Boolean get() = busy != EditorBusy.Idle
@@ -52,6 +57,7 @@ data class EditorUiState(
 
 class UndertwigViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = ProjectRepository(application)
+    private val enginePrefs = EnginePrefs(application)
     private val engine = LatexEngine()
     private var busyJob: Job? = null
     private var statusTickerJob: Job? = null
@@ -61,7 +67,12 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private val _home = MutableStateFlow(HomeUiState())
     val home: StateFlow<HomeUiState> = _home.asStateFlow()
 
-    private val _editor = MutableStateFlow(EditorUiState())
+    private val _editor = MutableStateFlow(
+        EditorUiState(
+            latexEngine = enginePrefs.latexEngine(),
+            bibTool = enginePrefs.bibTool(),
+        ),
+    )
     val editor: StateFlow<EditorUiState> = _editor.asStateFlow()
 
     init {
@@ -72,6 +83,26 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             openProject(openId)
         }
         // Do not create WebView here — Application context / early init crashes on many emulators.
+    }
+
+    fun setLatexEngine(engineId: LatexEngineId) {
+        enginePrefs.setLatexEngine(engineId)
+        _editor.update {
+            it.copy(
+                latexEngine = engineId,
+                status = "Engine: ${engineId.label}",
+            )
+        }
+    }
+
+    fun setBibTool(toolId: BibToolId) {
+        enginePrefs.setBibTool(toolId)
+        _editor.update {
+            it.copy(
+                bibTool = toolId,
+                status = "Bib tool: ${toolId.label}",
+            )
+        }
     }
 
     fun attachEngine(context: android.content.Context) {
@@ -114,6 +145,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             dirty = false,
             status = "Editing $active",
             pdfPath = pdf,
+            latexEngine = enginePrefs.latexEngine(),
+            bibTool = enginePrefs.bibTool(),
         )
     }
 
@@ -312,6 +345,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
                     repo.writeFile(state.projectId, state.activePath, state.editorText)
                 }
+                val engineId = _editor.value.latexEngine
                 startThrottledStatus("Convert: starting…")
                 _editor.update {
                     it.copy(
@@ -324,7 +358,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 val files = repo.filesForCompile(state.projectId).mapValues { (_, file) ->
                     file.content to file.binary
                 }
-                val compile = engine.compile(files) { message ->
+                val compile = engine.compile(files, engineId.id) { message ->
                     noteBusyStatus(tidyConvertStatus(message))
                 }
                 stopThrottledStatus()
@@ -397,6 +431,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
                     repo.writeFile(state.projectId, state.activePath, state.editorText)
                 }
+                val toolId = _editor.value.bibTool
                 startThrottledStatus("Bib: starting…")
                 _editor.update {
                     it.copy(
@@ -409,7 +444,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 val files = repo.filesForCompile(state.projectId).mapValues { (_, file) ->
                     file.content to file.binary
                 }
-                val bib = engine.runBibliography(files) { message ->
+                val bib = engine.runBibliography(files, toolId.id) { message ->
                     noteBusyStatus(tidyBibStatus(message))
                 }
                 bib.outputs.forEach { (path, content) ->
@@ -533,13 +568,18 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 "Convert: pass ${pass.groupValues[1]}/${pass.groupValues[2]}…"
             text.contains("TeX format", ignoreCase = true) ->
                 "Convert: format…"
+            text.contains("LuaLaTeX", ignoreCase = true) &&
+                text.contains("Downloading", ignoreCase = true) ->
+                "Convert: Lua assets…"
             text.contains("Loading pdfLaTeX", ignoreCase = true) ||
+                text.contains("Loading LuaLaTeX", ignoreCase = true) ||
                 text.contains("Loading", ignoreCase = true) ->
                 "Convert: loading…"
             text.contains("Writing", ignoreCase = true) ->
                 "Convert: writing…"
             text.contains("Converting", ignoreCase = true) ||
-                text.contains("pdfLaTeX", ignoreCase = true) ->
+                text.contains("pdfLaTeX", ignoreCase = true) ||
+                text.contains("LuaLaTeX", ignoreCase = true) ->
                 "Convert: running…"
             text.contains("Downloading", ignoreCase = true) ||
                 text.contains("Fetching", ignoreCase = true) ||
@@ -553,18 +593,28 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         val text = raw.replace(Regex("\\s+"), " ").trim()
         return when {
             text.contains("Preparing citation", ignoreCase = true) ||
-                text.contains("(1/3)") ->
+                text.contains("Preparing Biber", ignoreCase = true) ||
+                text.contains("(1/3)") ||
+                text.contains("(1/4)") ->
                 "Bib: preparing…"
             text.contains("Creating main.aux", ignoreCase = true) ->
                 "Bib: creating aux…"
+            text.contains("control file", ignoreCase = true) ||
+                text.contains("main.bcf", ignoreCase = true) ->
+                "Bib: building bcf…"
             text.contains("Downloading", ignoreCase = true) ||
                 text.contains("Fetching", ignoreCase = true) ->
                 "Bib: downloading…"
-            text.contains("Loading BibTeX", ignoreCase = true) ||
-                text.contains("(2/3)") ->
+            text.contains("Loading", ignoreCase = true) ||
+                text.contains("(2/3)") ||
+                text.contains("(2/4)") ->
                 "Bib: loading…"
+            text.contains("Running Biber", ignoreCase = true) ||
+                text.contains("(4/4)") ->
+                "Bib: running…"
             text.contains("Running BibTeX", ignoreCase = true) ||
-                text.contains("(3/3)") ->
+                text.contains("(3/3)") ||
+                text.contains("(3/4)") ->
                 "Bib: running…"
             else -> "Bib: working…"
         }

@@ -1,5 +1,8 @@
 package com.undertwig.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -19,7 +23,6 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,9 +33,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -44,12 +49,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.undertwig.app.data.BibToolId
+import com.undertwig.app.data.LatexEngineId
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +71,8 @@ fun EditorScreen(
     onBibliography: () -> Unit,
     onCancelBusy: () -> Unit,
     onOpenPdf: () -> Unit,
+    onSelectLatexEngine: (LatexEngineId) -> Unit,
+    onSelectBibTool: (BibToolId) -> Unit,
     onAddFile: (String) -> Unit,
     onAddFolder: (String) -> Unit,
     onDeletePath: (path: String, isFolder: Boolean) -> Unit,
@@ -72,6 +82,8 @@ fun EditorScreen(
     var addIsFolder by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("notes.tex") }
     var showLog by remember { mutableStateOf(false) }
+    var showEnginePicker by remember { mutableStateOf(false) }
+    var showBibPicker by remember { mutableStateOf(false) }
     var actionTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
     var renameTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
     var renameValue by remember { mutableStateOf("") }
@@ -174,55 +186,29 @@ fun EditorScreen(
                 val compactPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
                 val convertBusy = state.busy == EditorBusy.Convert
                 val bibBusy = state.busy == EditorBusy.Bibliography
-                Button(
+                LongPressActionButton(
+                    label = if (convertBusy) "Cancel" else "Convert",
+                    busy = convertBusy,
+                    enabled = !bibBusy,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
                     onClick = {
                         if (convertBusy) onCancelBusy() else onConvert()
                     },
-                    enabled = !bibBusy,
-                    contentPadding = compactPadding,
+                    onLongClick = { showEnginePicker = true },
                     modifier = Modifier.weight(1f),
-                ) {
-                    if (convertBusy) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .height(16.dp)
-                                .width(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("Cancel", maxLines = 1)
-                    } else {
-                        Text("Convert", maxLines = 1)
-                    }
-                }
-                Button(
+                )
+                LongPressActionButton(
+                    label = if (bibBusy) "Cancel" else "Bib",
+                    busy = bibBusy,
+                    enabled = !convertBusy,
+                    containerColor = Color(0xFFE67E22),
+                    contentColor = Color.White,
                     onClick = {
                         if (bibBusy) onCancelBusy() else onBibliography()
                     },
-                    enabled = !convertBusy,
-                    contentPadding = compactPadding,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFE67E22),
-                        contentColor = Color.White,
-                        disabledContainerColor = Color(0xFFE67E22).copy(alpha = 0.38f),
-                        disabledContentColor = Color.White.copy(alpha = 0.38f),
-                    ),
-                ) {
-                    if (bibBusy) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .height(16.dp)
-                                .width(16.dp),
-                            strokeWidth = 2.dp,
-                            color = Color.White,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("Cancel", maxLines = 1)
-                    } else {
-                        Text("Bib", maxLines = 1)
-                    }
-                }
+                    onLongClick = { showBibPicker = true },
+                )
                 OutlinedButton(
                     onClick = { showLog = true },
                     enabled = state.lastLog.isNotBlank(),
@@ -430,6 +416,73 @@ fun EditorScreen(
                 ) { Text("Copy") }
             },
         )
+    }
+
+    if (showEnginePicker) {
+        LatexEnginePickerSheet(
+            selected = state.latexEngine,
+            onSelect = onSelectLatexEngine,
+            onDismiss = { showEnginePicker = false },
+        )
+    }
+    if (showBibPicker) {
+        BibToolPickerSheet(
+            selected = state.bibTool,
+            onSelect = onSelectBibTool,
+            onDismiss = { showBibPicker = false },
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LongPressActionButton(
+    label: String,
+    busy: Boolean,
+    enabled: Boolean,
+    containerColor: Color,
+    contentColor: Color,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val bg = if (enabled) containerColor else containerColor.copy(alpha = 0.38f)
+    val fg = if (enabled) contentColor else contentColor.copy(alpha = 0.38f)
+    Surface(
+        modifier = modifier
+            .heightIn(min = 40.dp)
+            .combinedClickable(
+                enabled = enabled,
+                role = Role.Button,
+                interactionSource = interaction,
+                indication = ripple(),
+                onClick = onClick,
+                onLongClick = if (busy) null else onLongClick,
+            ),
+        shape = ButtonDefaults.shape,
+        color = bg,
+        contentColor = fg,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (busy) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .height(16.dp)
+                        .width(16.dp),
+                    strokeWidth = 2.dp,
+                    color = fg,
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(label, maxLines = 1, color = fg)
+        }
     }
 }
 

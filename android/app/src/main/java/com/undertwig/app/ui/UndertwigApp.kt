@@ -54,6 +54,8 @@ fun UndertwigApp(
                         navController.navigate("pdf")
                     }
                 },
+                onSelectLatexEngine = viewModel::setLatexEngine,
+                onSelectBibTool = viewModel::setBibTool,
                 onAddFile = viewModel::addFile,
                 onAddFolder = viewModel::addFolder,
                 onDeletePath = viewModel::deletePath,

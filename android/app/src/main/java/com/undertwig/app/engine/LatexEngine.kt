@@ -178,6 +178,7 @@ class LatexEngine {
 
     suspend fun compile(
         files: Map<String, Pair<String, Boolean>>,
+        engineId: String = "pdflatex",
         onProgress: (String) -> Unit = {},
     ): CompileResult = withContext(Dispatchers.Main) {
         ensureWebView()
@@ -193,7 +194,8 @@ class LatexEngine {
                     .put("binary", binary),
             )
         }
-        val json = JSONObject.quote(payload.toString())
+        val filesJson = JSONObject.quote(payload.toString())
+        val engineJson = JSONObject.quote(engineId.ifBlank { "pdflatex" })
         suspendCancellableCoroutine { cont ->
             pendingResult = { result ->
                 progressListener = null
@@ -227,7 +229,7 @@ class LatexEngine {
                 }
             }, 240_000L)
             webView?.evaluateJavascript(
-                "window.UndertwigEngine.compile($json)",
+                "window.UndertwigEngine.compile($filesJson, $engineJson)",
                 null,
             ) ?: cont.resumeWithException(IllegalStateException("WebView was destroyed."))
         }
@@ -235,6 +237,7 @@ class LatexEngine {
 
     suspend fun runBibliography(
         files: Map<String, Pair<String, Boolean>>,
+        bibTool: String = "bibtex",
         onProgress: (String) -> Unit = {},
     ): BibliographyResult = withContext(Dispatchers.Main) {
         ensureWebView()
@@ -250,7 +253,8 @@ class LatexEngine {
                     .put("binary", binary),
             )
         }
-        val json = JSONObject.quote(payload.toString())
+        val filesJson = JSONObject.quote(payload.toString())
+        val toolJson = JSONObject.quote(bibTool.ifBlank { "bibtex" })
         suspendCancellableCoroutine { cont ->
             pendingBibResult = { result ->
                 progressListener = null
@@ -282,7 +286,7 @@ class LatexEngine {
                 }
             }, 300_000L)
             webView?.evaluateJavascript(
-                "window.UndertwigEngine.runBibliography($json)",
+                "window.UndertwigEngine.runBibliography($filesJson, $toolJson)",
                 null,
             ) ?: cont.resumeWithException(IllegalStateException("WebView was destroyed."))
         }
@@ -356,6 +360,6 @@ class LatexEngine {
     companion object {
         private const val TAG = "UndertwigEngine"
         /** Bump whenever bundled engine JS/Wasm/fmt changes. */
-        private const val ENGINE_ASSET_VERSION = "9"
+        private const val ENGINE_ASSET_VERSION = "10"
     }
 }
