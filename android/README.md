@@ -36,6 +36,8 @@ This is **not** a Chrome Custom Tab / TWA wrapper of the website.
 - Prefer an emulator image **with Google Play** (includes Android System WebView).
 - If Convert fails later with a WebView error: open Play Store on the emulator → update **Android System WebView** / **Chrome**.
 - Cold start no longer creates a WebView (that used to crash on Application context).
+- Convert needs network the first time for LaTeX packages (article.cls, etc.). The TeX format file is bundled in the app.
+- If the log says `I can't find the format file 'swiftlatexpdftex.fmt'`, do a clean rebuild so `assets/engine/swiftlatexpdftex.fmt` is packaged.
 
 ## License note
 

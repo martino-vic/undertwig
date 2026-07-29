@@ -40,6 +40,16 @@
         }
       }
 
+      async function ensureFormat(engine) {
+        post("progress", { message: "Loading TeX format…" });
+        var response = await fetch("./swiftlatexpdftex.fmt");
+        if (!response.ok) {
+          throw new Error("Could not load bundled swiftlatexpdftex.fmt (" + response.status + ")");
+        }
+        var buffer = await response.arrayBuffer();
+        await engine.preloadTexFile("swiftlatexpdftex.fmt", buffer);
+      }
+
       window.UndertwigEngine = {
         ready: false,
         compile: async function (filesJson) {
@@ -50,6 +60,7 @@
             }
             var engine = new PdfTeXEngine();
             await engine.loadEngine();
+            await ensureFormat(engine);
             post("progress", { message: "Writing project files…" });
 
             var projectFiles = JSON.parse(filesJson);

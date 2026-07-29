@@ -71,6 +71,43 @@ var CompileResult = /** @class */ (function () {
     return CompileResult;
 }());
 exports.CompileResult = CompileResult;
+
+/* Undertwig Android: iframe "worker" so TeXlyre sync XHR works in WebView. */
+function UndertwigFrameWorker(frameUrl) {
+  var selfWorker = this;
+  this.onmessage = null;
+  this.onerror = null;
+  this._ready = false;
+  this._iframe = document.createElement("iframe");
+  this._iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+  this._iframe.style.cssText = "position:absolute;left:-9999px;width:1px;height:1px;border:0;opacity:0;";
+  this._onWinMessage = function (ev) {
+    if (!selfWorker._iframe || ev.source !== selfWorker._iframe.contentWindow) {
+      return;
+    }
+    if (typeof selfWorker.onmessage === "function") {
+      selfWorker.onmessage({ data: ev.data });
+    }
+  };
+  window.addEventListener("message", this._onWinMessage);
+  document.body.appendChild(this._iframe);
+  this._iframe.src = frameUrl;
+}
+UndertwigFrameWorker.prototype.postMessage = function (data, transfer) {
+  var win = this._iframe && this._iframe.contentWindow;
+  if (!win) {
+    return;
+  }
+  win.postMessage(data, "*", transfer);
+};
+UndertwigFrameWorker.prototype.terminate = function () {
+  window.removeEventListener("message", this._onWinMessage);
+  if (this._iframe && this._iframe.parentNode) {
+    this._iframe.parentNode.removeChild(this._iframe);
+  }
+  this._iframe = null;
+};
+
 var PdfTeXEngine = /** @class */ (function () {
     function PdfTeXEngine() {
         this.latexWorker = undefined;
@@ -87,7 +124,7 @@ var PdfTeXEngine = /** @class */ (function () {
                         }
                         this.latexWorkerStatus = EngineStatus.Init;
                         return [4 /*yield*/, new Promise(function (resolve, reject) {
-                                _this.latexWorker = new Worker(ENGINE_PATH);
+                                _this.latexWorker = new UndertwigFrameWorker(new URL('worker_frame.html', window.location.href).href);
                                 _this.latexWorker.onmessage = function (ev) {
                                     var data = ev['data'];
                                     var cmd = data['result'];
@@ -195,6 +232,39 @@ var PdfTeXEngine = /** @class */ (function () {
                                     }
                                 };
                                 _this.latexWorker.postMessage({ 'cmd': 'compileformat' });
+                            })];
+                    case 1:
+                        _a.sent();
+                        this.latexWorker.onmessage = function (_) {
+                        };
+                        return [2 /*return*/];
+                }
+            });
+        });
+    };
+
+    PdfTeXEngine.prototype.preloadTexFile = function (name, data) {
+        return __awaiter(this, void 0, void 0, function () {
+            var _this = this;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0:
+                        this.checkEngineStatus();
+                        this.latexWorkerStatus = EngineStatus.Busy;
+                        return [4 /*yield*/, new Promise(function (resolve, reject) {
+                                _this.latexWorker.onmessage = function (ev) {
+                                    var msg = ev['data'] || {};
+                                    if (msg['cmd'] !== 'preloadtex')
+                                        return;
+                                    _this.latexWorkerStatus = EngineStatus.Ready;
+                                    if (msg['result'] === 'ok') {
+                                        resolve();
+                                    }
+                                    else {
+                                        reject(new Error(msg['log'] || 'preloadtex failed'));
+                                    }
+                                };
+                                _this.latexWorker.postMessage({ 'cmd': 'preloadtex', 'name': name, 'data': data }, [data]);
                             })];
                     case 1:
                         _a.sent();
