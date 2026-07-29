@@ -2986,7 +2986,7 @@
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260729a"></script>
-    <script src="latex-editor.js?v=20260729f"></script>
+    <script src="latex-editor.js?v=20260729g"></script>
     <script>
 
       const DEMO_FIGURE_PNG_BASE64 =
@@ -5020,36 +5020,53 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       convertButton.addEventListener("click", compileProject);
       bibliographyButton.addEventListener("click", runProjectBibliography);
 
-      document.addEventListener("keydown", function (event) {
-        const mod = event.ctrlKey || event.metaKey;
-        if (!mod || event.altKey) {
-          return;
-        }
-        // Monaco/CodeMirror handle these while focused; avoid double-firing.
-        if (editorHost && editorHost.contains(event.target)) {
-          return;
-        }
-        const key = event.key;
-        if (key === "s" || key === "S") {
-          event.preventDefault();
-          saveProjectNow();
-          return;
-        }
-        if (key === "Enter" && !event.shiftKey) {
-          const target = event.target;
-          const tag = target && target.tagName ? String(target.tagName).toLowerCase() : "";
-          if (
-            tag === "input" ||
-            tag === "textarea" ||
-            tag === "select" ||
-            (target && target.isContentEditable)
-          ) {
+      // Capture phase so we beat Monaco (Ctrl+Enter = insert line) and the
+      // browser (Ctrl+S = Save Page As / download).
+      document.addEventListener(
+        "keydown",
+        function (event) {
+          const mod = event.ctrlKey || event.metaKey;
+          if (!mod || event.altKey) {
             return;
           }
-          event.preventDefault();
-          compileProject();
-        }
-      });
+          const key = event.key;
+          if (key === "s" || key === "S") {
+            event.preventDefault();
+            if (event.stopImmediatePropagation) {
+              event.stopImmediatePropagation();
+            } else {
+              event.stopPropagation();
+            }
+            saveProjectNow();
+            return;
+          }
+          if ((key === "Enter" || key === "NumpadEnter") && !event.shiftKey) {
+            const target = event.target;
+            const tag =
+              target && target.tagName ? String(target.tagName).toLowerCase() : "";
+            const inEditor =
+              editorHost &&
+              (target === editorHost || editorHost.contains(target));
+            if (
+              !inEditor &&
+              (tag === "input" ||
+                tag === "textarea" ||
+                tag === "select" ||
+                (target && target.isContentEditable))
+            ) {
+              return;
+            }
+            event.preventDefault();
+            if (event.stopImmediatePropagation) {
+              event.stopImmediatePropagation();
+            } else {
+              event.stopPropagation();
+            }
+            compileProject();
+          }
+        },
+        true
+      );
 
       (function syncMobileAuthPlacement() {
         const mobileQuery = window.matchMedia("(max-width: 920px)");

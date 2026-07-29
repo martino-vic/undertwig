@@ -331,19 +331,46 @@
           emitChange();
         });
 
-        // Ctrl/Cmd+S and Ctrl/Cmd+Enter — Monaco swallows these unless registered.
-        editor.addCommand(
-          monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
-          function () {
+        // Unbind Monaco's Ctrl/Cmd+Enter (insertLineAfter) so Convert can win.
+        try {
+          if (
+            editor._standaloneKeybindingService &&
+            typeof editor._standaloneKeybindingService.addDynamicKeybinding ===
+              "function"
+          ) {
+            editor._standaloneKeybindingService.addDynamicKeybinding(
+              "-editor.action.insertLineAfter",
+              undefined,
+              function () {}
+            );
+          }
+        } catch (unbindError) {
+          /* private API; capture-phase handler in index.html is the backup */
+        }
+        if (typeof monaco.editor.addKeybindingRules === "function") {
+          monaco.editor.addKeybindingRules([
+            {
+              keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+              command: null,
+            },
+          ]);
+        }
+        editor.addAction({
+          id: "undertwig.save",
+          label: "Save project",
+          keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+          run: function () {
             runSaveShortcut();
-          }
-        );
-        editor.addCommand(
-          monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
-          function () {
+          },
+        });
+        editor.addAction({
+          id: "undertwig.convert",
+          label: "Convert to PDF",
+          keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+          run: function () {
             runConvertShortcut();
-          }
-        );
+          },
+        });
 
         return {
           kind: "monaco",
@@ -599,24 +626,27 @@
         viewMod.highlightActiveLine ? viewMod.highlightActiveLine() : [],
         viewMod.drawSelection ? viewMod.drawSelection() : [],
         history ? history() : [],
+        // Custom shortcuts first — CM6 tries keymaps in order.
+        keymap.of([
+          {
+            key: "Mod-s",
+            preventDefault: true,
+            run: function () {
+              return runSaveShortcut();
+            },
+          },
+          {
+            key: "Mod-Enter",
+            preventDefault: true,
+            run: function () {
+              return runConvertShortcut();
+            },
+          },
+        ]),
         keymap.of(
           [].concat(defaultKeymap)
             .concat(historyKeymap)
             .concat([indentWithTab])
-            .concat([
-              {
-                key: "Mod-s",
-                run: function () {
-                  return runSaveShortcut();
-                },
-              },
-              {
-                key: "Mod-Enter",
-                run: function () {
-                  return runConvertShortcut();
-                },
-              },
-            ])
         ),
         UndertwigHighlight,
         undertwigTheme,
