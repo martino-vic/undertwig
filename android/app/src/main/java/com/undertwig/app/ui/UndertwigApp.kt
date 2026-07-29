@@ -35,14 +35,22 @@ fun UndertwigApp(
             EditorScreen(
                 state = editor,
                 onBack = { navController.popBackStack() },
-                onSelectFile = viewModel::selectFile,
+                onSelectFile = { path ->
+                    if (path.endsWith(".pdf", ignoreCase = true)) {
+                        if (viewModel.openPdfPreview(path)) {
+                            navController.navigate("pdf")
+                        }
+                    } else {
+                        viewModel.selectFile(path)
+                    }
+                },
                 onEditorChange = viewModel::onEditorChange,
                 onSave = viewModel::saveActive,
                 onConvert = viewModel::convert,
                 onBibliography = viewModel::updateBibliography,
                 onCancelBusy = viewModel::cancelBusy,
                 onOpenPdf = {
-                    if (editor.pdfPath != null) {
+                    if (viewModel.openPdfPreview("main.pdf")) {
                         navController.navigate("pdf")
                     }
                 },
@@ -57,7 +65,7 @@ fun UndertwigApp(
             if (file != null && file.exists()) {
                 PdfScreen(
                     pdfFile = file,
-                    title = "${editor.projectName}.pdf",
+                    title = viewModel.previewPdfTitle(),
                     onBack = { navController.popBackStack() },
                     contentRevision = editor.pdfRevision,
                 )

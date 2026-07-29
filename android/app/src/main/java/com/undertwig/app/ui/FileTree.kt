@@ -50,17 +50,12 @@ fun ProjectFileTree(
     onLongPressTarget: (FileBrowserTarget) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val treeFiles = remember(files) {
-        // Hide convert output only; keep figure PDFs visible in the browser.
-        files.filter { it != "main.pdf" && !it.endsWith("/main.pdf") }
-    }
-
-    LaunchedEffect(treeFiles, folders, currentDir) {
+    LaunchedEffect(files, folders, currentDir) {
         if (currentDir.isNotEmpty() &&
-            !dirExists(treeFiles, folders, currentDir)
+            !dirExists(files, folders, currentDir)
         ) {
             val fallback = parentDirOf(activePath).takeIf {
-                it.isEmpty() || dirExists(treeFiles, folders, it)
+                it.isEmpty() || dirExists(files, folders, it)
             } ?: ""
             if (fallback != currentDir) {
                 onCurrentDirChange(fallback)
@@ -68,8 +63,8 @@ fun ProjectFileTree(
         }
     }
 
-    val entries = remember(treeFiles, folders, currentDir) {
-        entriesInDir(treeFiles, folders, currentDir)
+    val entries = remember(files, folders, currentDir) {
+        entriesInDir(files, folders, currentDir)
     }
 
     Row(

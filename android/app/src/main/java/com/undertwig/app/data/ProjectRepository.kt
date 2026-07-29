@@ -282,6 +282,13 @@ class ProjectRepository(context: Context) {
         return file.takeIf { it.exists() && it.length() > 0L }
     }
 
+    /** Resolve a project-relative path to an existing file, or null. */
+    fun absoluteFile(projectId: String, relativePath: String): File? {
+        return runCatching {
+            resolve(projectId, relativePath).takeIf { it.isFile && it.length() > 0L }
+        }.getOrNull()
+    }
+
     private fun copyAssetTree(assetDir: String, destDir: File) {
         val assets = appContext.assets
         val children = assets.list(assetDir).orEmpty()
