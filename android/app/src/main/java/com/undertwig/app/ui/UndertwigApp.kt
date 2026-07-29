@@ -1,0 +1,60 @@
+package com.undertwig.app.ui
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+
+@Composable
+fun UndertwigApp(
+    viewModel: UndertwigViewModel = viewModel(),
+) {
+    val navController = rememberNavController()
+    val home by viewModel.home.collectAsStateWithLifecycle()
+    val editor by viewModel.editor.collectAsStateWithLifecycle()
+
+    NavHost(navController = navController, startDestination = "home") {
+        composable("home") {
+            HomeScreen(
+                projects = home.projects,
+                onOpen = { id ->
+                    viewModel.openProject(id)
+                    navController.navigate("editor")
+                },
+                onCreate = { name -> viewModel.createProject(name) },
+                onDelete = { id -> viewModel.deleteProject(id) },
+            )
+        }
+        composable("editor") {
+            EditorScreen(
+                state = editor,
+                onBack = { navController.popBackStack() },
+                onSelectFile = viewModel::selectFile,
+                onEditorChange = viewModel::onEditorChange,
+                onSave = viewModel::saveActive,
+                onConvert = viewModel::convert,
+                onOpenPdf = {
+                    if (editor.pdfPath != null) {
+                        navController.navigate("pdf")
+                    }
+                },
+                onAddFile = viewModel::addFile,
+            )
+        }
+        composable("pdf") {
+            val file = viewModel.pdfFile()
+            if (file != null && file.exists()) {
+                PdfScreen(
+                    pdfFile = file,
+                    title = "${editor.projectName}.pdf",
+                    onBack = { navController.popBackStack() },
+                )
+            } else {
+                navController.popBackStack()
+            }
+        }
+    }
+}
