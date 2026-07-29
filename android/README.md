@@ -37,10 +37,12 @@ Play Console uploads (pixel undertwig branding):
 
 - **App icon 512×512:** `android/branding/play_store_icon_512.png`
 - **Feature graphic 1024×500:** `android/branding/play_feature_graphic_1024x500.png`
-- **Phone screenshots** (1080×2400, portrait):
+- **Phone screenshots** (1080×2400):
   - `android/branding/screenshots/01-home.png`
   - `android/branding/screenshots/02-editor.png`
   - `android/branding/screenshots/03-pdf.png`
+- **7-inch tablet** (1080×1920, 9:16): `android/branding/screenshots/tablet-7/`
+- **10-inch tablet** (1800×3200, 9:16): `android/branding/screenshots/tablet-10/`
 
 Launcher icons are generated from the same sample-project twig (`drawable` + `mipmap-*`).
 
