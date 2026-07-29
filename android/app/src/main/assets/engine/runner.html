@@ -104,6 +104,10 @@
               post("progress", {
                 message: "Converting with pdfLaTeX (pass " + pass + "/2)…",
               });
+              // Let the progress bridge flush before the blocking Wasm compile.
+              await new Promise(function (r) {
+                setTimeout(r, 50);
+              });
               Object.keys(auxFiles).forEach(function (path) {
                 engine.writeMemFSFile(path, auxFiles[path]);
               });

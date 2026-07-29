@@ -180,6 +180,22 @@ class LatexEngine {
                 }
             }
             cont.invokeOnCancellation { pendingResult = null }
+            // Fail rather than spin on "Converting…" forever if JS never returns.
+            mainHandler.postDelayed({
+                if (pendingResult != null) {
+                    pendingResult?.invoke(
+                        Result.success(
+                            CompileResult(
+                                ok = false,
+                                pdfBytes = null,
+                                log = "Convert timed out. Try again, or check network for LaTeX packages.",
+                            ),
+                        ),
+                    )
+                    pendingResult = null
+                    progressListener = null
+                }
+            }, 240_000L)
             webView?.evaluateJavascript(
                 "window.UndertwigEngine.compile($json)",
                 null,

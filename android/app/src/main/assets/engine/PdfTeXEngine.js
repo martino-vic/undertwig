@@ -162,69 +162,50 @@ var PdfTeXEngine = /** @class */ (function () {
         }
     };
     PdfTeXEngine.prototype.compileLaTeX = function () {
-        return __awaiter(this, void 0, void 0, function () {
-            var start_compile_time, res;
-            var _this = this;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
-                    case 0:
-                        this.checkEngineStatus();
-                        this.latexWorkerStatus = EngineStatus.Busy;
-                        start_compile_time = performance.now();
-                        return [4 /*yield*/, new Promise(function (resolve, reject) {
-                                var settled = false;
-                                var timer = setTimeout(function () {
-                                    if (settled)
-                                        return;
-                                    settled = true;
-                                    _this.latexWorkerStatus = EngineStatus.Ready;
-                                    reject(new Error('Compile timed out waiting for engine result'));
-                                }, 180000);
-                                _this.latexWorker.onmessage = function (ev) {
-                                    var data = ev['data'];
-                                    var cmd = data['cmd'];
-                                    if (cmd !== "compile")
-                                        return;
-                                    if (settled)
-                                        return;
-                                    settled = true;
-                                    clearTimeout(timer);
-                                    var result = data['result'];
-                                    var log = data['log'];
-                                    var status = data['status'];
-                                    _this.latexWorkerStatus = EngineStatus.Ready;
-                                    console.log('Engine compilation finish ' + (performance.now() - start_compile_time));
-                                    var nice_report = new CompileResult();
-                                    nice_report.status = status;
-                                    nice_report.log = log;
-                                    nice_report.aux = data['aux'] || {};
-                                    if (result === 'ok') {
-                                        var pdfSource = null;
-                                        if (data['pdfViaParent'] && window.__undertwigPdfPayload) {
-                                            pdfSource = window.__undertwigPdfPayload;
-                                            window.__undertwigPdfPayload = null;
-                                        }
-                                        else if (data['pdf']) {
-                                            pdfSource = data['pdf'];
-                                        }
-                                        if (pdfSource) {
-                                            nice_report.pdf = pdfSource instanceof Uint8Array
-                                                ? pdfSource.slice(0)
-                                                : new Uint8Array(pdfSource);
-                                        }
-                                    }
-                                    resolve(nice_report);
-                                };
-                                _this.latexWorker.postMessage({ 'cmd': 'compilelatex' });
-                                console.log('Engine compilation start');
-                            })];
-                    case 1:
-                        res = _a.sent();
-                        this.latexWorker.onmessage = function (_) {
-                        };
-                        return [2 /*return*/, res];
+        var _this = this;
+        this.checkEngineStatus();
+        var start_compile_time = performance.now();
+        // Direct same-origin call — postMessage results hang on some Android WebViews.
+        return new Promise(function (resolve, reject) {
+            setTimeout(function () {
+                var win = _this.latexWorker && _this.latexWorker.contentWindow && _this.latexWorker.contentWindow();
+                if (!win || typeof win.__undertwigCompileLatex !== 'function') {
+                    reject(new Error('compile API missing in engine iframe'));
+                    return;
                 }
-            });
+                _this.latexWorkerStatus = EngineStatus.Busy;
+                var data;
+                try {
+                    data = win.__undertwigCompileLatex();
+                }
+                catch (err) {
+                    _this.latexWorkerStatus = EngineStatus.Ready;
+                    reject(err);
+                    return;
+                }
+                _this.latexWorkerStatus = EngineStatus.Ready;
+                console.log('Engine compilation finish ' + (performance.now() - start_compile_time));
+                var nice_report = new CompileResult();
+                nice_report.status = data && data.status;
+                nice_report.log = (data && data.log) || '';
+                nice_report.aux = (data && data.aux) || {};
+                if (data && data.result === 'ok') {
+                    var pdfSource = null;
+                    if (data.pdfViaParent && window.__undertwigPdfPayload) {
+                        pdfSource = window.__undertwigPdfPayload;
+                        window.__undertwigPdfPayload = null;
+                    }
+                    else if (data.pdf) {
+                        pdfSource = data.pdf;
+                    }
+                    if (pdfSource) {
+                        nice_report.pdf = pdfSource instanceof Uint8Array
+                            ? pdfSource.slice(0)
+                            : new Uint8Array(pdfSource);
+                    }
+                }
+                resolve(nice_report);
+            }, 0);
         });
     };
     /* Internal Use */
@@ -333,31 +314,54 @@ var PdfTeXEngine = /** @class */ (function () {
             }
         });
     };
+    PdfTeXEngine.prototype._workerWindow = function () {
+        return this.latexWorker && this.latexWorker.contentWindow && this.latexWorker.contentWindow();
+    };
     PdfTeXEngine.prototype.setEngineMainFile = function (filename) {
         this.checkEngineStatus();
+        var win = this._workerWindow();
+        if (win && typeof win.__undertwigSetMainFile === 'function') {
+            win.__undertwigSetMainFile(filename);
+            return;
+        }
         if (this.latexWorker !== undefined) {
             this.latexWorker.postMessage({ 'cmd': 'setmainfile', 'url': filename });
         }
     };
     PdfTeXEngine.prototype.writeMemFSFile = function (filename, srccode) {
         this.checkEngineStatus();
+        var win = this._workerWindow();
+        if (win && typeof win.__undertwigWriteFile === 'function') {
+            var result = win.__undertwigWriteFile(filename, srccode);
+            if (result && result.ok === false) {
+                throw new Error(result.log || 'writefile failed');
+            }
+            return;
+        }
         if (this.latexWorker !== undefined) {
             this.latexWorker.postMessage({ 'cmd': 'writefile', 'url': filename, 'src': srccode });
         }
     };
     PdfTeXEngine.prototype.makeMemFSFolder = function (folder) {
         this.checkEngineStatus();
-        if (this.latexWorker !== undefined) {
-            if (folder === '' || folder === '/') {
-                return;
+        if (folder === '' || folder === '/') {
+            return;
+        }
+        var win = this._workerWindow();
+        if (win && typeof win.__undertwigMkdir === 'function') {
+            var result = win.__undertwigMkdir(folder);
+            if (result && result.ok === false) {
+                throw new Error(result.log || 'mkdir failed');
             }
+            return;
+        }
+        if (this.latexWorker !== undefined) {
             this.latexWorker.postMessage({ 'cmd': 'mkdir', 'url': folder });
         }
     };
     PdfTeXEngine.prototype.flushCache = function () {
         this.checkEngineStatus();
         if (this.latexWorker !== undefined) {
-            // console.warn('Flushing');
             this.latexWorker.postMessage({ 'cmd': 'flushcache' });
         }
     };
