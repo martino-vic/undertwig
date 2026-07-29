@@ -312,10 +312,11 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
                     repo.writeFile(state.projectId, state.activePath, state.editorText)
                 }
+                startThrottledStatus("Convert: starting…")
                 _editor.update {
                     it.copy(
                         busy = EditorBusy.Convert,
-                        status = "Starting convert…",
+                        status = "Convert: starting…",
                         error = null,
                         dirty = false,
                     )
@@ -324,14 +325,15 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     file.content to file.binary
                 }
                 val compile = engine.compile(files) { message ->
-                    _editor.update { ui -> ui.copy(status = message) }
+                    noteBusyStatus(tidyConvertStatus(message))
                 }
+                stopThrottledStatus()
                 if (compile.ok && compile.pdfBytes != null) {
                     val pdf = repo.savePdf(state.projectId, compile.pdfBytes)
                     _editor.update {
                         it.copy(
                             busy = EditorBusy.Idle,
-                            status = "PDF ready.",
+                            status = "PDF ready",
                             lastLog = compile.log,
                             pdfPath = pdf.absolutePath,
                             pdfRevision = it.pdfRevision + 1,
@@ -344,30 +346,33 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     _editor.update {
                         it.copy(
                             busy = EditorBusy.Idle,
-                            status = "Conversion failed.",
+                            status = "Convert failed",
                             lastLog = compile.log,
                             error = "Conversion failed. Check the log.",
                         )
                     }
                 }
             } catch (_: CancellationException) {
+                stopThrottledStatus()
                 _editor.update {
                     it.copy(
                         busy = EditorBusy.Idle,
-                        status = "Conversion cancelled.",
+                        status = "Convert cancelled",
                         error = null,
                     )
                 }
             } catch (error: Exception) {
+                stopThrottledStatus()
                 _editor.update {
                     it.copy(
                         busy = EditorBusy.Idle,
-                        status = "Conversion failed.",
+                        status = "Convert failed",
                         error = error.message ?: "Conversion failed.",
                         lastLog = error.message.orEmpty(),
                     )
                 }
             } finally {
+                stopThrottledStatus()
                 if (busyJob === coroutineContext[Job]) {
                     busyJob = null
                 }
@@ -477,9 +482,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     /**
-     * One short status line during Bib: map noisy worker logs to compact phase
-     * labels, paint phase changes immediately, and refresh about every 10s with
-     * elapsed time so the top-bar subtitle stays fully readable.
+     * One short status line during Convert/Bib: map noisy worker logs to compact
+     * phase labels, paint phase changes immediately, and refresh about every 10s
+     * with elapsed time so the top-bar subtitle stays fully readable.
      */
     private fun startThrottledStatus(initial: String) {
         stopThrottledStatus()
@@ -517,6 +522,31 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         if (started <= 0L) return message
         val elapsedSec = ((System.currentTimeMillis() - started) / 1000L).toInt()
         return if (elapsedSec >= 10) "$message · ${elapsedSec}s" else message
+    }
+
+    private fun tidyConvertStatus(raw: String): String {
+        val text = raw.replace(Regex("\\s+"), " ").trim()
+        val pass = Regex("""pass\s+(\d+)\s*/\s*(\d+)""", RegexOption.IGNORE_CASE)
+            .find(text)
+        return when {
+            pass != null ->
+                "Convert: pass ${pass.groupValues[1]}/${pass.groupValues[2]}…"
+            text.contains("TeX format", ignoreCase = true) ->
+                "Convert: format…"
+            text.contains("Loading pdfLaTeX", ignoreCase = true) ||
+                text.contains("Loading", ignoreCase = true) ->
+                "Convert: loading…"
+            text.contains("Writing", ignoreCase = true) ->
+                "Convert: writing…"
+            text.contains("Converting", ignoreCase = true) ||
+                text.contains("pdfLaTeX", ignoreCase = true) ->
+                "Convert: running…"
+            text.contains("Downloading", ignoreCase = true) ||
+                text.contains("Fetching", ignoreCase = true) ||
+                text.contains("package", ignoreCase = true) ->
+                "Convert: packages…"
+            else -> "Convert: working…"
+        }
     }
 
     private fun tidyBibStatus(raw: String): String {
