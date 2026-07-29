@@ -343,7 +343,9 @@
   }
 
   function isInsufficientScopeMessage(message) {
-    return /insufficient (authentication )?scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions/i.test(
+    // Do not treat generic Drive "insufficientPermissions" (often "no access to this file")
+    // as a missing OAuth scope — that was forcing invitees through a second Google login.
+    return /insufficient authentication scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT|Request had insufficient authentication scopes/i.test(
       String(message || "")
     );
   }

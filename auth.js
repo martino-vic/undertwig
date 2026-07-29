@@ -15,6 +15,15 @@
       String(scope || "").replace(/\+/g, " ")
     );
   }
+
+  function nextPathNeedsInviteDrive(nextPath) {
+    try {
+      const path = safeNextPath(nextPath || "/");
+      return /(?:\?|&)project=/.test(path);
+    } catch (_error) {
+      return false;
+    }
+  }
   const GOOGLE_ISSUERS = new Set([
     "https://accounts.google.com",
     "accounts.google.com",
@@ -522,10 +531,25 @@
     url.searchParams.set("scope", LOGIN_SCOPES);
     url.searchParams.set("nonce", nonce);
     url.searchParams.set("state", state);
-    // Account picker only — do not force consent every login (returning users already granted Drive).
-    // New scopes still trigger Google's consent via include_granted_scopes.
-    url.searchParams.set("prompt", "select_account");
+    // Invite links / first Drive grant: ask for consent in THIS hop so private/incognito
+    // sessions get an access token and do not bounce through a second Google screen.
+    // Returning users with a stored Drive token only pick an account.
+    const forceDriveConsent =
+      nextPathNeedsInviteDrive(nextPath) || !hasStoredDriveAccessToken();
+    url.searchParams.set(
+      "prompt",
+      forceDriveConsent ? "select_account consent" : "select_account"
+    );
     url.searchParams.set("include_granted_scopes", "true");
+    try {
+      if (forceDriveConsent) {
+        sessionStorage.setItem("undertwig-login-asked-consent", "1");
+      } else {
+        sessionStorage.removeItem("undertwig-login-asked-consent");
+      }
+    } catch (_error) {
+      // Ignore.
+    }
     global.location.assign(url.toString());
   }
 
@@ -703,12 +727,15 @@
       if (!session) {
         throw new Error("Sign in again, then connect Google Drive.");
       }
+      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn, oauth.scope);
+      try {
+        sessionStorage.removeItem("undertwig-drive-scope-upgrade");
+        sessionStorage.removeItem("undertwig-login-asked-consent");
+        sessionStorage.removeItem("undertwig-needs-drive-connect");
+      } catch (_error) {
+        // Ignore.
+      }
       if (oauth.scope && !scopeIncludesDriveAccess(oauth.scope)) {
-        try {
-          sessionStorage.removeItem(DRIVE_TOKEN_STORAGE_KEY);
-        } catch (_error) {
-          // Ignore.
-        }
         let alreadyForced = false;
         try {
           alreadyForced = sessionStorage.getItem("undertwig-drive-force-consent") === "1";
@@ -730,10 +757,8 @@
             ", then click Retry and allow Drive access."
         );
       }
-      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn, oauth.scope);
       try {
         sessionStorage.removeItem("undertwig-drive-force-consent");
-        sessionStorage.removeItem("undertwig-drive-scope-upgrade");
       } catch (_error) {
         // Ignore.
       }
@@ -749,20 +774,30 @@
 
     const session = await loginWithCredential(oauth.idToken);
     if (oauth.accessToken) {
-      if (oauth.scope && !scopeIncludesDriveAccess(oauth.scope)) {
+      // Always persist; do not drop the token on brittle scope-string parsing.
+      rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn, oauth.scope);
+    }
+
+    let askedConsent = false;
+    try {
+      askedConsent = sessionStorage.getItem("undertwig-login-asked-consent") === "1";
+      sessionStorage.removeItem("undertwig-login-asked-consent");
+    } catch (_error) {
+      askedConsent = false;
+    }
+
+    // Hybrid login sometimes omits the access token. Only auto-handoff when the first
+    // hop did not already show consent — otherwise a private/incognito invite login
+    // bounces through a second Google screen that feels like "log in twice".
+    if (!hasStoredDriveAccessToken()) {
+      if (askedConsent || nextPathNeedsInviteDrive(nextPath)) {
         try {
-          sessionStorage.removeItem(DRIVE_TOKEN_STORAGE_KEY);
+          sessionStorage.setItem("undertwig-needs-drive-connect", "1");
         } catch (_error) {
           // Ignore.
         }
-      } else {
-        rememberDriveAccessToken(oauth.accessToken, oauth.expiresIn, oauth.scope);
+        return { session: session, nextPath: nextPath, needsDriveConnect: true };
       }
-    }
-
-    // Hybrid login sometimes returns an ID token without a usable Drive access token.
-    // Finish the Drive handoff quietly (no forced consent) before opening the editor.
-    if (!hasStoredDriveAccessToken()) {
       beginGoogleDriveTokenSignIn(nextPath, { forceConsent: false });
       return { session: session, nextPath: nextPath, driveHandoff: true };
     }
@@ -770,6 +805,7 @@
     try {
       sessionStorage.removeItem("undertwig-drive-force-consent");
       sessionStorage.removeItem("undertwig-drive-scope-upgrade");
+      sessionStorage.removeItem("undertwig-needs-drive-connect");
     } catch (_error) {
       // Ignore.
     }

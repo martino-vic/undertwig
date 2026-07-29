@@ -382,7 +382,14 @@
               setStatus("Signed in. Connecting Google Drive…", "ok");
               return;
             }
-            setStatus("Signed in. Opening editor…", "ok");
+            if (redirected.needsDriveConnect) {
+              setStatus(
+                "Signed in. Opening editor — use Retry under the file tree if Drive still needs a connection.",
+                "ok"
+              );
+            } else {
+              setStatus("Signed in. Opening editor…", "ok");
+            }
             window.setTimeout(() => redirectAfterLogin(redirected.nextPath || nextPath), 250);
             return;
           }

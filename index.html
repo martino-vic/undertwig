@@ -2980,8 +2980,8 @@
     </script>
 
     <script src="auth-config.js?v=20260728q"></script>
-    <script src="auth.js?v=20260729b"></script>
-    <script src="cloud-storage.js?v=20260729d"></script>
+    <script src="auth.js?v=20260729e"></script>
+    <script src="cloud-storage.js?v=20260729e"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -5760,9 +5760,25 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         if (!UndertwigCloud.hasAccessToken()) {
           renderCloudStatus("disconnected");
+          let needsDriveConnect = false;
+          try {
+            needsDriveConnect = sessionStorage.getItem("undertwig-needs-drive-connect") === "1";
+            if (needsDriveConnect) {
+              sessionStorage.removeItem("undertwig-needs-drive-connect");
+            }
+          } catch (_error) {
+            needsDriveConnect = false;
+          }
           if (sharedProjectId) {
             setStatus(
-              "Click Retry under the file tree to open the shared project on the owner's Google Drive.",
+              needsDriveConnect
+                ? "Signed in. Click Retry under the file tree once to connect Google Drive and open the shared project."
+                : "Click Retry under the file tree to open the shared project on the owner's Google Drive.",
+              true
+            );
+          } else if (needsDriveConnect) {
+            setStatus(
+              "Signed in. Click Retry under the file tree to connect Google Drive.",
               true
             );
           }
@@ -5832,23 +5848,59 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 const message = (joinError && joinError.message) || "Could not sync shared project.";
                 const code = joinError && joinError.code;
                 if (code === "missing-scope" || /insufficient authentication scopes/i.test(message)) {
-                  renderCloudStatus("disconnected");
-                  setStatus(
-                    "Google Drive permission needs an update to sync shared projects. Redirecting…",
-                    true
-                  );
+                  let upgradeStep = "";
                   try {
-                    if (UndertwigCloud.clearToken) {
-                      UndertwigCloud.clearToken();
-                    }
-                    UndertwigAuth.beginGoogleDriveTokenSignIn(inviteResumePath(sharedProjectId), {
-                      forceConsent: true,
-                    });
-                    return;
-                  } catch (_redirectError) {
-                    setStatus(message + " Click Retry under the file tree.", true);
-                    return;
+                    upgradeStep = sessionStorage.getItem("undertwig-drive-scope-upgrade") || "";
+                  } catch (_error) {
+                    upgradeStep = "";
                   }
+                  if (upgradeStep !== "soft" && upgradeStep !== "consent") {
+                    try {
+                      sessionStorage.setItem("undertwig-drive-scope-upgrade", "soft");
+                    } catch (_error) {
+                      // Ignore.
+                    }
+                    renderCloudStatus("disconnected");
+                    setStatus("Refreshing Google Drive connection for the shared project…");
+                    try {
+                      // Keep the existing token; soft reconnect avoids a second consent screen.
+                      UndertwigAuth.beginGoogleDriveTokenSignIn(
+                        inviteResumePath(sharedProjectId),
+                        { forceConsent: false }
+                      );
+                      return;
+                    } catch (_redirectError) {
+                      // Fall through to consent / Retry.
+                    }
+                  }
+                  if (upgradeStep === "soft") {
+                    try {
+                      sessionStorage.setItem("undertwig-drive-scope-upgrade", "consent");
+                    } catch (_error) {
+                      // Ignore.
+                    }
+                    renderCloudStatus("disconnected");
+                    setStatus(
+                      "Google Drive permission needs an update to sync shared projects. Redirecting…",
+                      true
+                    );
+                    try {
+                      if (UndertwigCloud.clearToken) {
+                        UndertwigCloud.clearToken();
+                      }
+                      UndertwigAuth.beginGoogleDriveTokenSignIn(
+                        inviteResumePath(sharedProjectId),
+                        { forceConsent: true }
+                      );
+                      return;
+                    } catch (_redirectError) {
+                      setStatus(message + " Click Retry under the file tree.", true);
+                      return;
+                    }
+                  }
+                  renderCloudStatus("disconnected");
+                  setStatus(message + " Click Retry under the file tree.", true);
+                  return;
                 }
                 renderCloudStatus("disconnected");
                 setStatus(message, true);
