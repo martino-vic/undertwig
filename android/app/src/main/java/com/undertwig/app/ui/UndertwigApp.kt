@@ -2,6 +2,7 @@ package com.undertwig.app.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -11,11 +12,14 @@ import androidx.navigation.compose.rememberNavController
 fun UndertwigApp(
     viewModel: UndertwigViewModel,
 ) {
-    val navController = rememberNavController()
     val home by viewModel.home.collectAsStateWithLifecycle()
     val editor by viewModel.editor.collectAsStateWithLifecycle()
+    val startDestination = remember {
+        if (viewModel.editor.value.projectId.isNotEmpty()) "editor" else "home"
+    }
+    val navController = rememberNavController()
 
-    NavHost(navController = navController, startDestination = "home") {
+    NavHost(navController = navController, startDestination = startDestination) {
         composable("home") {
             HomeScreen(
                 projects = home.projects,

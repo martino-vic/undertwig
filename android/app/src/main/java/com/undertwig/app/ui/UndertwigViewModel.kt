@@ -3,6 +3,7 @@ package com.undertwig.app.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.undertwig.app.data.ProjectFile
 import com.undertwig.app.data.ProjectRepository
 import com.undertwig.app.data.ProjectSummary
 import com.undertwig.app.engine.LatexEngine
@@ -42,7 +43,12 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     val editor: StateFlow<EditorUiState> = _editor.asStateFlow()
 
     init {
+        // Match the website: ship Sample Project; open it on a fresh install.
+        val sampleId = repo.ensureSampleProject()
         refreshProjects()
+        if (sampleId != null) {
+            openProject(sampleId)
+        }
         // Do not create WebView here — Application context / early init crashes on many emulators.
     }
 
@@ -74,14 +80,14 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         if (active !in files) {
             repo.createFile(id, "main.tex", "")
         }
-        val text = repo.readFile(id, active).content
+        val file = repo.readFile(id, active)
         val pdf = repo.pdfFile(id)?.absolutePath
         _editor.value = EditorUiState(
             projectId = id,
             projectName = repo.projectName(id),
             files = repo.listFiles(id),
             activePath = active,
-            editorText = text,
+            editorText = editorDisplayText(file),
             dirty = false,
             status = "Editing $active",
             pdfPath = pdf,
@@ -90,14 +96,14 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun selectFile(path: String) {
         val state = _editor.value
-        if (state.dirty) {
+        if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
             repo.writeFile(state.projectId, state.activePath, state.editorText)
         }
-        val text = repo.readFile(state.projectId, path).content
+        val file = repo.readFile(state.projectId, path)
         _editor.update {
             it.copy(
                 activePath = path,
-                editorText = text,
+                editorText = editorDisplayText(file),
                 dirty = false,
                 files = repo.listFiles(state.projectId),
                 status = "Editing $path",
@@ -106,11 +112,13 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun onEditorChange(text: String) {
+        if (ProjectRepository.isBinaryPath(_editor.value.activePath)) return
         _editor.update { it.copy(editorText = text, dirty = true) }
     }
 
     fun saveActive() {
         val state = _editor.value
+        if (ProjectRepository.isBinaryPath(state.activePath)) return
         repo.writeFile(state.projectId, state.activePath, state.editorText)
         _editor.update {
             it.copy(
@@ -134,7 +142,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         val state = _editor.value
         if (state.converting) return
         viewModelScope.launch {
-            if (state.dirty) {
+            if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
                 repo.writeFile(state.projectId, state.activePath, state.editorText)
             }
             _editor.update {
@@ -190,6 +198,14 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     fun pdfFile(): File? {
         val path = _editor.value.pdfPath ?: return null
         return File(path).takeIf { it.exists() }
+    }
+
+    private fun editorDisplayText(file: ProjectFile): String {
+        return if (file.binary) {
+            "(Binary asset — not editable here.)\n${file.path}"
+        } else {
+            file.content
+        }
     }
 
     override fun onCleared() {

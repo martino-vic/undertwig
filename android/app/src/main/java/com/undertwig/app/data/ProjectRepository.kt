@@ -1,6 +1,7 @@
 package com.undertwig.app.data
 
 import android.content.Context
+import android.util.Base64
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -18,6 +19,7 @@ data class ProjectFile(
 )
 
 class ProjectRepository(context: Context) {
+    private val appContext = context.applicationContext
     private val root = File(context.filesDir, "projects").also { it.mkdirs() }
 
     fun listProjects(): List<ProjectSummary> {
@@ -36,11 +38,36 @@ class ProjectRepository(context: Context) {
             .orEmpty()
     }
 
+    /**
+     * Ensure the website Sample Project starter exists.
+     * @return project id to auto-open when this was a first-empty install; otherwise null
+     */
+    fun ensureSampleProject(): String? {
+        val existing = listProjects()
+        if (existing.any { it.name == SAMPLE_PROJECT_NAME }) {
+            return null
+        }
+        val created = createSampleProject()
+        return if (existing.isEmpty()) created.id else null
+    }
+
+    fun createSampleProject(): ProjectSummary {
+        val id = UUID.randomUUID().toString()
+        val dir = File(root, id).also { it.mkdirs() }
+        copyAssetTree("sample", dir)
+        writeMeta(dir, SAMPLE_PROJECT_NAME)
+        return ProjectSummary(
+            id = id,
+            name = SAMPLE_PROJECT_NAME,
+            updatedAt = System.currentTimeMillis(),
+        )
+    }
+
     fun createProject(name: String): ProjectSummary {
         val id = UUID.randomUUID().toString()
         val dir = File(root, id).also { it.mkdirs() }
         val safeName = name.trim().ifEmpty { "Untitled" }
-        writeTextFile(dir, "main.tex", SAMPLE_MAIN_TEX)
+        writeTextFile(dir, "main.tex", BLANK_MAIN_TEX)
         writeMeta(dir, safeName)
         return ProjectSummary(id = id, name = safeName, updatedAt = System.currentTimeMillis())
     }
@@ -69,10 +96,15 @@ class ProjectRepository(context: Context) {
     fun readFile(projectId: String, relativePath: String): ProjectFile {
         val file = resolve(projectId, relativePath)
         require(file.exists()) { "Missing file: $relativePath" }
+        if (isBinaryPath(relativePath)) {
+            val b64 = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
+            return ProjectFile(path = relativePath, content = b64, binary = true)
+        }
         return ProjectFile(path = relativePath, content = file.readText(), binary = false)
     }
 
     fun writeFile(projectId: String, relativePath: String, content: String) {
+        require(!isBinaryPath(relativePath)) { "Refusing to overwrite binary file as text: $relativePath" }
         val dir = projectDir(projectId)
         writeTextFile(dir, relativePath, content)
         touch(dir)
@@ -92,7 +124,12 @@ class ProjectRepository(context: Context) {
     }
 
     fun filesForCompile(projectId: String): Map<String, ProjectFile> {
-        return listFiles(projectId).associateWith { path -> readFile(projectId, path) }
+        return listFiles(projectId)
+            .filter { path ->
+                val lower = path.lowercase()
+                !lower.endsWith(".pdf")
+            }
+            .associateWith { path -> readFile(projectId, path) }
     }
 
     fun savePdf(projectId: String, bytes: ByteArray): File {
@@ -105,6 +142,33 @@ class ProjectRepository(context: Context) {
     fun pdfFile(projectId: String): File? {
         val file = File(projectDir(projectId), "main.pdf")
         return file.takeIf { it.exists() && it.length() > 0L }
+    }
+
+    private fun copyAssetTree(assetDir: String, destDir: File) {
+        val assets = appContext.assets
+        val children = assets.list(assetDir).orEmpty()
+        if (children.isEmpty()) {
+            // File leaf (assets.list returns empty for files on some devices — use open).
+            assets.open(assetDir).use { input ->
+                destDir.parentFile?.mkdirs()
+                destDir.outputStream().use { output -> input.copyTo(output) }
+            }
+            return
+        }
+        destDir.mkdirs()
+        for (child in children) {
+            val assetPath = "$assetDir/$child"
+            val out = File(destDir, child)
+            val nested = assets.list(assetPath)
+            if (nested != null && nested.isNotEmpty()) {
+                copyAssetTree(assetPath, out)
+            } else {
+                out.parentFile?.mkdirs()
+                assets.open(assetPath).use { input ->
+                    out.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+        }
     }
 
     private fun projectDir(id: String): File = File(root, id).also { require(it.exists()) { "Unknown project" } }
@@ -144,15 +208,26 @@ class ProjectRepository(context: Context) {
 
     companion object {
         private const val META_FILE = "project.json"
-        private val SAMPLE_MAIN_TEX = """
+        const val SAMPLE_PROJECT_NAME = "Sample Project"
+
+        private val BINARY_EXTENSIONS = setOf(
+            "png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff", "ico",
+            "pdf", "wasm", "woff", "woff2", "ttf", "otf",
+        )
+
+        fun isBinaryPath(path: String): Boolean {
+            val ext = path.substringAfterLast('.', "").lowercase()
+            return ext in BINARY_EXTENSIONS
+        }
+
+        private val BLANK_MAIN_TEX = """
             \documentclass{article}
             \usepackage[margin=1in]{geometry}
-            \title{Hello from Undertwig}
-            \author{Android}
+            \title{Untitled}
+            \author{}
             \date{\today}
             \begin{document}
             \maketitle
-            This PDF was compiled on your device with SwiftLaTeX WebAssembly.
             \end{document}
         """.trimIndent() + "\n"
     }

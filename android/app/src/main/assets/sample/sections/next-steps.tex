@@ -1,0 +1,38 @@
+\section{Where to go next}
+\label{sec:next}
+
+\subsection{A heavier starter: DummyHippo}
+When this tutorial feels too small, try \textbf{DummyHippo}: a deliberately
+heavy multi-file project (nested chapters, TikZ/PGFPlots, denser math, and a
+larger bibliography). Use it as a tougher starting point once you are
+comfortable with the patterns above.
+
+Download or clone the folder from:
+\begin{center}
+\url{https://github.com/martino-vic/undertwig/tree/main/DummyHippo}
+\end{center}
+
+To bring it into this workspace:
+\begin{enumerate}
+  \item Open that link and download the \texttt{DummyHippo} folder
+        (clone the repository, or use GitHub's download / raw folder copy).
+  \item In the app, click \textbf{Import new project}.
+  \item Choose the local \texttt{DummyHippo} directory---the one that contains
+        \texttt{main.tex} (not only an inner \texttt{chapters} folder).
+  \item Compile with \textbf{Convert}. For citations, run
+        \textbf{Update Bibliography}, then \textbf{Convert} again.
+\end{enumerate}
+
+\subsection{Bibliography wrap-up}
+Classic references such as \cite{lamport94} and \cite{knuth84} are resolved from
+\texttt{references.bib} via
+\begin{verbatim}
+\bibliographystyle{plain}
+\bibliography{references}
+\end{verbatim}
+at the end of \texttt{main.tex}. Remember the usual loop: compile $\to$
+bibliography tool $\to$ compile again.
+
+\subsection{Thanks}
+Thanks for reading through all of this---now open a blank section and start
+writing your own material, or import DummyHippo if you want a tougher compile.

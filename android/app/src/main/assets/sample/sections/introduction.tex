@@ -1,0 +1,34 @@
+\section{Split the source into files}
+\label{sec:intro}
+
+This section lives in \texttt{sections/introduction.tex}.
+\texttt{main.tex} pulls it in with:
+
+\begin{verbatim}
+\input{sections/introduction}
+\end{verbatim}
+
+That is the usual way to keep a growing paper readable: one file per section,
+plus a short root file that only sets up packages and the document skeleton.
+
+\subsection{Shared macros}
+Commands such as \texttt{\textbackslash R} and \texttt{\textbackslash norm}
+are defined once in \texttt{macros.tex} (loaded near the top of
+\texttt{main.tex}). After that, you can write $\R$ or $\norm{x}$ anywhere
+without repeating the definition.
+
+\subsection{A labeled equation}
+For $x \in \R$, a classic identity is
+\begin{equation}
+\label{eq:euler}
+  e^{i\pi} + 1 = 0.
+\end{equation}
+The \texttt{\textbackslash label\{eq:euler\}} makes it possible to point back
+here later with \texttt{\textbackslash eqref\{eq:euler\}} or
+\texttt{\textbackslash ref\{eq:euler\}}. Cross-references update after you
+compile again (a second pass is normal).
+
+\subsection{Citations from a \texttt{.bib} file}
+A citation like \cite{lamport94} comes from \texttt{references.bib}.
+After the first successful compile, run your bibliography tool (BibTeX), then
+compile again so the reference list and in-text citations resolve.

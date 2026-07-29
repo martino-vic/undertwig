@@ -1,0 +1,37 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\input{macros}
+
+\title{A Mini \LaTeX{} Tutorial}
+\author{Learn by editing this project}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This starter project is a short hands-on tutorial.
+Each section shows a common pattern---multi-file input, macros, figures,
+tables, cross-references, math, and BibTeX---and briefly explains how the
+source produces what you see in the PDF. Edit any file in the tree, compile,
+and compare the output with the notes below.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\input{sections/introduction}
+\input{sections/results}
+\input{sections/next-steps}
+
+\bibliographystyle{plain}
+\phantomsection
+\addcontentsline{toc}{section}{\refname}
+\bibliography{references}
+
+\end{document}
