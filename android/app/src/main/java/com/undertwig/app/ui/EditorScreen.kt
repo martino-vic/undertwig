@@ -1,14 +1,21 @@
 package com.undertwig.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -17,9 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,10 +34,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -43,9 +51,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -54,10 +61,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.undertwig.app.data.BibToolId
 import com.undertwig.app.data.LatexEngineId
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.withTimeout
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -186,24 +189,19 @@ fun EditorScreen(
                 val compactPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
                 val convertBusy = state.busy == EditorBusy.Convert
                 val bibBusy = state.busy == EditorBusy.Bibliography
-                var suppressConvertClick by remember { mutableStateOf(false) }
-                var suppressBibClick by remember { mutableStateOf(false) }
-                Button(
+                ActionButton(
                     onClick = {
-                        if (suppressConvertClick) {
-                            suppressConvertClick = false
-                            return@Button
-                        }
                         if (convertBusy) onCancelBusy() else onConvert()
+                    },
+                    onLongClick = if (!convertBusy && !bibBusy) {
+                        { showEnginePicker = true }
+                    } else {
+                        null
                     },
                     enabled = !bibBusy,
                     contentPadding = compactPadding,
-                    modifier = Modifier
-                        .weight(1f)
-                        .observeLongPress(enabled = !convertBusy && !bibBusy) {
-                            suppressConvertClick = true
-                            showEnginePicker = true
-                        },
+                    expand = true,
+                    modifier = Modifier.weight(1f),
                 ) {
                     if (convertBusy) {
                         CircularProgressIndicator(
@@ -219,26 +217,20 @@ fun EditorScreen(
                         Text("Convert", maxLines = 1)
                     }
                 }
-                Button(
+                ActionButton(
                     onClick = {
-                        if (suppressBibClick) {
-                            suppressBibClick = false
-                            return@Button
-                        }
                         if (bibBusy) onCancelBusy() else onBibliography()
+                    },
+                    onLongClick = if (!convertBusy && !bibBusy) {
+                        { showBibPicker = true }
+                    } else {
+                        null
                     },
                     enabled = !convertBusy,
                     contentPadding = compactPadding,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFE67E22),
-                        contentColor = Color.White,
-                        disabledContainerColor = Color(0xFFE67E22).copy(alpha = 0.38f),
-                        disabledContentColor = Color.White.copy(alpha = 0.38f),
-                    ),
-                    modifier = Modifier.observeLongPress(enabled = !convertBusy && !bibBusy) {
-                        suppressBibClick = true
-                        showBibPicker = true
-                    },
+                    containerColor = Color(0xFFE67E22),
+                    contentColor = Color.White,
+                    expand = false,
                 ) {
                     if (bibBusy) {
                         CircularProgressIndicator(
@@ -480,28 +472,57 @@ fun EditorScreen(
 }
 
 /**
- * Observe a long-press without consuming the gesture, so Material [Button]
- * keeps its normal tap handling. Callers should suppress the following click.
+ * Material-looking action button that supports tap and long-press.
+ *
+ * [expand] must be true only when the caller gives this a weighted/filled width
+ * (e.g. Convert). Wrap-content siblings like Bib must keep [expand] false so
+ * they do not steal the whole bottom row.
  */
-private fun Modifier.observeLongPress(
-    enabled: Boolean = true,
-    onLongPress: () -> Unit,
-): Modifier {
-    if (!enabled) return this
-    return pointerInput(onLongPress) {
-        awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false)
-            try {
-                withTimeout(viewConfiguration.longPressTimeoutMillis) {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Final)
-                        val pressed = event.changes.any { it.pressed }
-                        if (!pressed) return@withTimeout
-                    }
-                }
-            } catch (_: TimeoutCancellationException) {
-                onLongPress()
-            }
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ActionButton(
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
+    enabled: Boolean,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    expand: Boolean = false,
+    containerColor: Color = MaterialTheme.colorScheme.primary,
+    contentColor: Color = MaterialTheme.colorScheme.onPrimary,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val bg = if (enabled) containerColor else containerColor.copy(alpha = 0.38f)
+    val fg = if (enabled) contentColor else contentColor.copy(alpha = 0.38f)
+    Surface(
+        modifier = modifier
+            .defaultMinSize(
+                minWidth = ButtonDefaults.MinWidth,
+                minHeight = ButtonDefaults.MinHeight,
+            )
+            .widthIn(min = ButtonDefaults.MinWidth)
+            .combinedClickable(
+                enabled = enabled,
+                role = Role.Button,
+                interactionSource = interaction,
+                indication = ripple(color = fg),
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+        shape = ButtonDefaults.shape,
+        color = bg,
+        contentColor = fg,
+        shadowElevation = if (enabled) 1.dp else 0.dp,
+    ) {
+        ProvideTextStyle(value = MaterialTheme.typography.labelLarge) {
+            Row(
+                modifier = Modifier
+                    .then(if (expand) Modifier.fillMaxWidth() else Modifier)
+                    .padding(contentPadding),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+                content = content,
+            )
         }
     }
 }
