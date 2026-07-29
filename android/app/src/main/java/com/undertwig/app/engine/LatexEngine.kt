@@ -13,6 +13,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -126,6 +127,13 @@ class LatexEngine {
     }
 
     private fun destroyWebView() {
+        val ready = pendingReady
+        val compile = pendingResult
+        val bib = pendingBibResult
+        pendingReady = null
+        pendingResult = null
+        pendingBibResult = null
+        progressListener = null
         try {
             webView?.stopLoading()
             webView?.destroy()
@@ -134,10 +142,10 @@ class LatexEngine {
         }
         webView = null
         engineReady = false
-        pendingReady = null
-        pendingResult = null
-        pendingBibResult = null
-        progressListener = null
+        // Resume waiters so Cancel cannot leave coroutines suspended forever.
+        ready?.invoke(Result.failure(CancellationException("Cancelled")))
+        compile?.invoke(Result.failure(CancellationException("Cancelled")))
+        bib?.invoke(Result.failure(CancellationException("Cancelled")))
     }
 
     private suspend fun awaitReady() {
@@ -196,7 +204,12 @@ class LatexEngine {
                     )
                 }
             }
-            cont.invokeOnCancellation { pendingResult = null }
+            cont.invokeOnCancellation {
+                pendingResult = null
+                progressListener = null
+                // Tear down Wasm workers so Cancel stops work, not just the UI wait.
+                destroyWebView()
+            }
             // Fail rather than spin on "Converting…" forever if JS never returns.
             mainHandler.postDelayed({
                 if (pendingResult != null) {
@@ -248,7 +261,11 @@ class LatexEngine {
                     )
                 }
             }
-            cont.invokeOnCancellation { pendingBibResult = null }
+            cont.invokeOnCancellation {
+                pendingBibResult = null
+                progressListener = null
+                destroyWebView()
+            }
             mainHandler.postDelayed({
                 if (pendingBibResult != null) {
                     pendingBibResult?.invoke(
@@ -268,6 +285,15 @@ class LatexEngine {
                 "window.UndertwigEngine.runBibliography($json)",
                 null,
             ) ?: cont.resumeWithException(IllegalStateException("WebView was destroyed."))
+        }
+    }
+
+    /** Abort in-flight Convert/Bib by destroying the engine WebView (and its workers). */
+    fun cancelCurrentWork() {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            destroyWebView()
+        } else {
+            mainHandler.post { destroyWebView() }
         }
     }
 

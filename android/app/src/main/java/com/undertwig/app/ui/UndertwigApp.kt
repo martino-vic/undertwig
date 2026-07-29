@@ -40,6 +40,7 @@ fun UndertwigApp(
                 onSave = viewModel::saveActive,
                 onConvert = viewModel::convert,
                 onBibliography = viewModel::updateBibliography,
+                onCancelBusy = viewModel::cancelBusy,
                 onOpenPdf = {
                     if (editor.pdfPath != null) {
                         navController.navigate("pdf")

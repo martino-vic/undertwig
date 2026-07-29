@@ -7,16 +7,25 @@ import com.undertwig.app.data.ProjectFile
 import com.undertwig.app.data.ProjectRepository
 import com.undertwig.app.data.ProjectSummary
 import com.undertwig.app.engine.LatexEngine
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import kotlin.coroutines.coroutineContext
 
 data class HomeUiState(
     val projects: List<ProjectSummary> = emptyList(),
 )
+
+enum class EditorBusy {
+    Idle,
+    Convert,
+    Bibliography,
+}
 
 data class EditorUiState(
     val projectId: String = "",
@@ -27,17 +36,20 @@ data class EditorUiState(
     val editorText: String = "",
     val dirty: Boolean = false,
     val status: String = "Ready.",
-    val converting: Boolean = false,
+    val busy: EditorBusy = EditorBusy.Idle,
     val lastLog: String = "",
     val pdfPath: String? = null,
     /** Increments on each successful Convert so PdfScreen reloads overwritten main.pdf. */
     val pdfRevision: Long = 0L,
     val error: String? = null,
-)
+) {
+    val converting: Boolean get() = busy != EditorBusy.Idle
+}
 
 class UndertwigViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = ProjectRepository(application)
     private val engine = LatexEngine()
+    private var busyJob: Job? = null
 
     private val _home = MutableStateFlow(HomeUiState())
     val home: StateFlow<HomeUiState> = _home.asStateFlow()
@@ -280,131 +292,173 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun convert() {
         val state = _editor.value
-        if (state.converting) return
-        viewModelScope.launch {
-            if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
-                repo.writeFile(state.projectId, state.activePath, state.editorText)
+        when (state.busy) {
+            EditorBusy.Convert -> {
+                cancelBusy()
+                return
             }
-            _editor.update {
-                it.copy(converting = true, status = "Starting convert…", error = null, dirty = false)
-            }
-            val result = runCatching {
+            EditorBusy.Bibliography -> return
+            EditorBusy.Idle -> Unit
+        }
+        busyJob = viewModelScope.launch {
+            try {
+                if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
+                    repo.writeFile(state.projectId, state.activePath, state.editorText)
+                }
+                _editor.update {
+                    it.copy(
+                        busy = EditorBusy.Convert,
+                        status = "Starting convert…",
+                        error = null,
+                        dirty = false,
+                    )
+                }
                 val files = repo.filesForCompile(state.projectId).mapValues { (_, file) ->
                     file.content to file.binary
                 }
-                engine.compile(files) { message ->
+                val compile = engine.compile(files) { message ->
                     _editor.update { ui -> ui.copy(status = message) }
                 }
-            }
-            result.fold(
-                onSuccess = { compile ->
-                    if (compile.ok && compile.pdfBytes != null) {
-                        val pdf = repo.savePdf(state.projectId, compile.pdfBytes)
-                        _editor.update {
-                            it.copy(
-                                converting = false,
-                                status = "PDF ready.",
-                                lastLog = compile.log,
-                                pdfPath = pdf.absolutePath,
-                                pdfRevision = it.pdfRevision + 1,
-                                error = null,
-                            )
-                        }
-                    } else {
-                        _editor.update {
-                            it.copy(
-                                converting = false,
-                                status = "Conversion failed.",
-                                lastLog = compile.log,
-                                error = "Conversion failed. Check the log.",
-                            )
-                        }
-                    }
-                },
-                onFailure = { error ->
+                if (compile.ok && compile.pdfBytes != null) {
+                    val pdf = repo.savePdf(state.projectId, compile.pdfBytes)
                     _editor.update {
                         it.copy(
-                            converting = false,
-                            status = "Conversion failed.",
-                            error = error.message ?: "Conversion failed.",
-                            lastLog = error.message.orEmpty(),
+                            busy = EditorBusy.Idle,
+                            status = "PDF ready.",
+                            lastLog = compile.log,
+                            pdfPath = pdf.absolutePath,
+                            pdfRevision = it.pdfRevision + 1,
+                            error = null,
                         )
                     }
-                },
-            )
-            refreshProjects()
+                } else {
+                    _editor.update {
+                        it.copy(
+                            busy = EditorBusy.Idle,
+                            status = "Conversion failed.",
+                            lastLog = compile.log,
+                            error = "Conversion failed. Check the log.",
+                        )
+                    }
+                }
+            } catch (_: CancellationException) {
+                _editor.update {
+                    it.copy(
+                        busy = EditorBusy.Idle,
+                        status = "Conversion cancelled.",
+                        error = null,
+                    )
+                }
+            } catch (error: Exception) {
+                _editor.update {
+                    it.copy(
+                        busy = EditorBusy.Idle,
+                        status = "Conversion failed.",
+                        error = error.message ?: "Conversion failed.",
+                        lastLog = error.message.orEmpty(),
+                    )
+                }
+            } finally {
+                if (busyJob === coroutineContext[Job]) {
+                    busyJob = null
+                }
+                refreshProjects()
+            }
         }
     }
 
     fun updateBibliography() {
         val state = _editor.value
-        if (state.converting || state.projectId.isEmpty()) return
-        viewModelScope.launch {
-            if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
-                repo.writeFile(state.projectId, state.activePath, state.editorText)
+        if (state.projectId.isEmpty()) return
+        when (state.busy) {
+            EditorBusy.Bibliography -> {
+                cancelBusy()
+                return
             }
-            _editor.update {
-                it.copy(
-                    converting = true,
-                    status = "Updating bibliography…",
-                    error = null,
-                    dirty = false,
-                )
-            }
-            val result = runCatching {
+            EditorBusy.Convert -> return
+            EditorBusy.Idle -> Unit
+        }
+        busyJob = viewModelScope.launch {
+            try {
+                if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
+                    repo.writeFile(state.projectId, state.activePath, state.editorText)
+                }
+                _editor.update {
+                    it.copy(
+                        busy = EditorBusy.Bibliography,
+                        status = "Updating bibliography…",
+                        error = null,
+                        dirty = false,
+                    )
+                }
                 val files = repo.filesForCompile(state.projectId).mapValues { (_, file) ->
                     file.content to file.binary
                 }
-                engine.runBibliography(files) { message ->
+                val bib = engine.runBibliography(files) { message ->
                     _editor.update { ui -> ui.copy(status = message) }
                 }
-            }
-            result.fold(
-                onSuccess = { bib ->
-                    bib.outputs.forEach { (path, content) ->
-                        if (path.isNotBlank() && !ProjectRepository.isBinaryPath(path)) {
-                            runCatching {
-                                repo.writeFile(state.projectId, path, content)
-                            }
+                bib.outputs.forEach { (path, content) ->
+                    if (path.isNotBlank() && !ProjectRepository.isBinaryPath(path)) {
+                        runCatching {
+                            repo.writeFile(state.projectId, path, content)
                         }
                     }
-                    val files = repo.listFiles(state.projectId)
-                    val active = _editor.value.activePath
-                    val editorText = if (active in files && !ProjectRepository.isBinaryPath(active)) {
-                        repo.readFile(state.projectId, active).content
-                    } else {
-                        _editor.value.editorText
-                    }
-                    _editor.update {
-                        it.copy(
-                            converting = false,
-                            status = if (bib.ok) {
-                                "Bibliography updated. Convert again to refresh the PDF."
-                            } else {
-                                "Bibliography failed."
-                            },
-                            lastLog = bib.log,
-                            files = files,
-                            folders = repo.listFolders(state.projectId),
-                            editorText = editorText,
-                            dirty = false,
-                            error = if (bib.ok) null else "Bibliography failed. Check the log.",
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _editor.update {
-                        it.copy(
-                            converting = false,
-                            status = "Bibliography failed.",
-                            error = error.message ?: "Bibliography failed.",
-                            lastLog = error.message.orEmpty(),
-                        )
-                    }
-                },
-            )
-            refreshProjects()
+                }
+                val listed = repo.listFiles(state.projectId)
+                val active = _editor.value.activePath
+                val editorText = if (active in listed && !ProjectRepository.isBinaryPath(active)) {
+                    repo.readFile(state.projectId, active).content
+                } else {
+                    _editor.value.editorText
+                }
+                _editor.update {
+                    it.copy(
+                        busy = EditorBusy.Idle,
+                        status = if (bib.ok) {
+                            "Bibliography updated. Convert again to refresh the PDF."
+                        } else {
+                            "Bibliography failed."
+                        },
+                        lastLog = bib.log,
+                        files = listed,
+                        folders = repo.listFolders(state.projectId),
+                        editorText = editorText,
+                        dirty = false,
+                        error = if (bib.ok) null else "Bibliography failed. Check the log.",
+                    )
+                }
+            } catch (_: CancellationException) {
+                _editor.update {
+                    it.copy(
+                        busy = EditorBusy.Idle,
+                        status = "Bibliography cancelled.",
+                        error = null,
+                    )
+                }
+            } catch (error: Exception) {
+                _editor.update {
+                    it.copy(
+                        busy = EditorBusy.Idle,
+                        status = "Bibliography failed.",
+                        error = error.message ?: "Bibliography failed.",
+                        lastLog = error.message.orEmpty(),
+                    )
+                }
+            } finally {
+                if (busyJob === coroutineContext[Job]) {
+                    busyJob = null
+                }
+                refreshProjects()
+            }
         }
+    }
+
+    fun cancelBusy() {
+        if (_editor.value.busy == EditorBusy.Idle) return
+        _editor.update { it.copy(status = "Cancelling…") }
+        engine.cancelCurrentWork()
+        busyJob?.cancel()
+        busyJob = null
     }
 
     fun pdfFile(): File? {

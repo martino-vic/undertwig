@@ -41,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -59,6 +60,7 @@ fun EditorScreen(
     onSave: () -> Unit,
     onConvert: () -> Unit,
     onBibliography: () -> Unit,
+    onCancelBusy: () -> Unit,
     onOpenPdf: () -> Unit,
     onAddFile: (String) -> Unit,
     onAddFolder: (String) -> Unit,
@@ -163,13 +165,17 @@ fun EditorScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val compactPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                val convertBusy = state.busy == EditorBusy.Convert
+                val bibBusy = state.busy == EditorBusy.Bibliography
                 Button(
-                    onClick = onConvert,
-                    enabled = !state.converting,
+                    onClick = {
+                        if (convertBusy) onCancelBusy() else onConvert()
+                    },
+                    enabled = !bibBusy,
                     contentPadding = compactPadding,
                     modifier = Modifier.weight(1f),
                 ) {
-                    if (state.converting) {
+                    if (convertBusy) {
                         CircularProgressIndicator(
                             modifier = Modifier
                                 .height(16.dp)
@@ -177,22 +183,38 @@ fun EditorScreen(
                             strokeWidth = 2.dp,
                             color = MaterialTheme.colorScheme.onPrimary,
                         )
-                        Spacer(modifier.width(6.dp))
-                        Text("…", maxLines = 1)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Cancel", maxLines = 1)
                     } else {
                         Text("Convert", maxLines = 1)
                     }
                 }
                 Button(
-                    onClick = onBibliography,
-                    enabled = !state.converting,
+                    onClick = {
+                        if (bibBusy) onCancelBusy() else onBibliography()
+                    },
+                    enabled = !convertBusy,
                     contentPadding = compactPadding,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        containerColor = Color(0xFFE67E22),
+                        contentColor = Color.White,
+                        disabledContainerColor = Color(0xFFE67E22).copy(alpha = 0.38f),
+                        disabledContentColor = Color.White.copy(alpha = 0.38f),
                     ),
                 ) {
-                    Text("Bib", maxLines = 1)
+                    if (bibBusy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .height(16.dp)
+                                .width(16.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Cancel", maxLines = 1)
+                    } else {
+                        Text("Bib", maxLines = 1)
+                    }
                 }
                 OutlinedButton(
                     onClick = { showLog = true },
