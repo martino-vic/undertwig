@@ -193,8 +193,7 @@ class DriveSyncRepository(
             return@withContext FileLockResult(
                 ok = false,
                 lock = existing,
-                message = "${existing.holderLabel()} is in the writing room for “$rel”. " +
-                    "Live collaboration is not supported yet — the writing room has space for only one person at a time.",
+                message = "${existing.holderLabel()} is currently in the writing room. The writing room has space for one person only at the time.",
             )
         }
         val payload = buildLockJson(
@@ -209,8 +208,7 @@ class DriveSyncRepository(
             return@withContext FileLockResult(
                 ok = false,
                 lock = again,
-                message = "${again.holderLabel()} is in the writing room for “$rel”. " +
-                    "Live collaboration is not supported yet — the writing room has space for only one person at a time.",
+                message = "${again.holderLabel()} is currently in the writing room. The writing room has space for one person only at the time.",
             )
         }
         FileLockResult(ok = true, lock = again)
@@ -238,8 +236,7 @@ class DriveSyncRepository(
                 return@withContext FileLockResult(
                     ok = false,
                     lock = existing,
-                    message = "${existing.holderLabel()} is in the writing room for “$rel”. " +
-                        "Live collaboration is not supported yet — the writing room has space for only one person at a time.",
+                    message = "${existing.holderLabel()} is currently in the writing room. The writing room has space for one person only at the time.",
                 )
             }
             return@withContext acquireFileLock(

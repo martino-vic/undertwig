@@ -3097,7 +3097,7 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260729e"></script>
-    <script src="cloud-storage.js?v=20260730j"></script>
+    <script src="cloud-storage.js?v=20260730k"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -4165,7 +4165,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         ) {
           setStatus(
             fileLockOccupied.message ||
-              "Someone is in the writing room for this file.",
+              "Someone is currently in the writing room. The writing room has space for one person only at the time.",
             true
           );
           writingRoomGateDismissedKey = null;
@@ -6677,7 +6677,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                   fullPath: projectName + "/" + relPath,
                   message:
                     (result && result.message) ||
-                    "Someone else entered the writing room for this file.",
+                    "Someone is currently in the writing room. The writing room has space for one person only at the time.",
                   lock: result && result.lock,
                 };
                 updateWritingRoomUi();
@@ -6778,7 +6778,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               setControl(
                 writingRoomButton,
                 "Room occupied",
-                fileLockOccupied.message || "Someone is in the writing room"
+                fileLockOccupied.message ||
+                  "Someone is currently in the writing room. The writing room has space for one person only at the time."
               );
             } else {
               setControl(
@@ -6908,12 +6909,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (mode === "occupied") {
           title.textContent = "Writing room occupied";
           message.textContent =
-            (fileLockOccupied && fileLockOccupied.message
-              ? fileLockOccupied.message + " "
-              : "") +
-            "Live collaboration is not supported yet — the writing room has space for only one person at a time. You can read “" +
-            rel +
-            "” now. Abandoned rooms free shortly after the holder leaves or closes the browser.";
+            (fileLockOccupied && fileLockOccupied.message) ||
+            "Someone is currently in the writing room. The writing room has space for one person only at the time.";
           addButton("OK", "cancel", "modal-confirm");
         } else if (mode === "exit") {
           title.textContent = "Exit writing room?";
@@ -7093,9 +7090,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               lock: lock,
               message:
                 UndertwigCloud.lockHolderLabel(lock) +
-                " is in the writing room for “" +
-                rel +
-                "”. Live collaboration is not supported yet — only one person at a time.",
+                " is currently in the writing room. The writing room has space for one person only at the time.",
             };
           } else {
             fileLockOccupied = null;
@@ -7144,7 +7139,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               lock: result && result.lock,
               message:
                 (result && result.message) ||
-                "Someone is already in the writing room for this file.",
+                "Someone is currently in the writing room. The writing room has space for one person only at the time.",
             };
             setStatus(fileLockOccupied.message, true);
             writingRoomGateDismissedKey = null;

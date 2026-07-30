@@ -3323,9 +3323,7 @@
         lock: existing,
         message:
           lockHolderLabel(existing) +
-          " is in the writing room for “" +
-          rel +
-          "”. Live collaboration is not supported yet — the writing room has space for only one person at a time.",
+          " is currently in the writing room. The writing room has space for one person only at the time.",
       };
     }
     const payload = buildLockPayload(rel, isLockHeldByMe(existing) ? existing : null);
@@ -3338,9 +3336,7 @@
         lock: again,
         message:
           lockHolderLabel(again) +
-          " is in the writing room for “" +
-          rel +
-          "”. Live collaboration is not supported yet — the writing room has space for only one person at a time.",
+          " is currently in the writing room. The writing room has space for one person only at the time.",
       };
     }
     const lock = again || Object.assign({}, payload, {
@@ -3370,9 +3366,7 @@
           lock: existing,
           message:
             lockHolderLabel(existing) +
-            " is in the writing room for “" +
-            rel +
-            "”. Live collaboration is not supported yet — the writing room has space for only one person at a time.",
+            " is currently in the writing room. The writing room has space for one person only at the time.",
         };
       }
       return acquireFileLock(projectName, rel);

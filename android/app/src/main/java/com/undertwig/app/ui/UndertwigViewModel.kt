@@ -605,8 +605,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         return@launch
                     }
                     val message =
-                        "${lock.holderLabel()} is in the writing room for “$path”. " +
-                            "Live collaboration is not supported yet — the writing room has space for only one person at a time."
+                        "${lock.holderLabel()} is currently in the writing room. The writing room has space for one person only at the time."
                     val occupiedKey = "occupied:$path"
                     _editor.update {
                         it.copy(
@@ -714,7 +713,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     heldFileLockPath = null
                     stopFileLockHeartbeat()
                     val message = result.message
-                        ?: "Someone is already in the writing room for this file."
+                        ?: "Someone is currently in the writing room. The writing room has space for one person only at the time."
                     _editor.update {
                         it.copy(
                             writingRoomBusy = false,
@@ -889,7 +888,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     if (!result.ok) {
                         heldFileLockPath = null
                         val message = result.message
-                            ?: "Someone else entered the writing room for this file."
+                            ?: "Someone is currently in the writing room. The writing room has space for one person only at the time."
                         _editor.update {
                             it.copy(
                                 inWritingRoom = false,

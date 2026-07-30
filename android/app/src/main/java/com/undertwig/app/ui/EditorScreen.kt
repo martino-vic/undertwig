@@ -806,9 +806,7 @@ fun EditorScreen(
                 onDismissRequest = onDismissWritingRoomPrompt,
                 title = { Text("Writing room occupied") },
                 text = {
-                    Text(
-                        "${prompt.message} You can read the file now, and enter when it is free.",
-                    )
+                    Text(prompt.message)
                 },
                 confirmButton = {
                     TextButton(onClick = onConfirmWritingRoomPrompt) { Text("OK") }
