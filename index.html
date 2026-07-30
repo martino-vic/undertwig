@@ -3149,6 +3149,7 @@
     <script src="invite.js?v=20260728q"></script>
     <script src="local-project-fs.js?v=20260730i"></script>
     <script src="local-desktop.js?v=20260730i"></script>
+    <script src="workspace-storage.js?v=20260730a"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260729a"></script>
@@ -3470,7 +3471,20 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         "ico",
         "svg",
       ]);
-      const state = loadProject();
+      // Live workspace. Hydrated from IndexedDB (with localStorage migration) before UI boot.
+      const state = {
+        version: 2,
+        currentProject: "",
+        activeFile: "",
+        folders: [],
+        files: {},
+      };
+      let workspacePersistTimer = null;
+      let workspacePersistInFlight = null;
+      let workspacePersistQueued = false;
+      let workspacePersistFailed = false;
+      let storageFullStatusAt = 0;
+      const STORAGE_FULL_STATUS_COOLDOWN_MS = 60 * 1000;
       let engine = null;
       let pdfUrl = null;
 
@@ -4307,7 +4321,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
           let localOk = true;
           try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            localOk = await persistWorkspaceNow();
           } catch (_error) {
             localOk = false;
           }
@@ -4410,7 +4424,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           try {
             setStatus("Saving in this browser…");
             await yieldToUi();
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            localOk = await persistWorkspaceNow();
           } catch (_error) {
             localOk = false;
           }
@@ -5848,44 +5862,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       syncEngineMenuUi();
       syncBibToolMenuUi();
 
-      // Populate tree/file state immediately; editor value is buffered until Monaco/CM6 loads.
-      render();
-
-      UndertwigEditor.init(editorHost, {
-        onChange: function (value) {
-          const file = state.files[state.activeFile];
-          if (!file || file.binary) return;
-          file.content = value;
-          if (fileLockHeldProject && fileLockHeldProject === getActiveProjectName()) {
-            writingRoomSessionDirty = true;
-            // Local only while in the writing room. Cloud autosave would make
-            // Discard impossible (Load would just pull the edits already uploaded).
-            persistProject({ skipCloud: true });
-          } else {
-            persistProject();
-          }
-          noteWritingRoomActivity();
-          updateMeta();
-        },
-        onSave: function () {
-          saveProjectNow();
-        },
-        onConvert: function () {
-          compileProject();
-        },
-      })
-        .then(function () {
-          render();
-          UndertwigEditor.layout();
-        })
-        .catch(function (error) {
-          console.error("Editor failed to initialize:", error);
-          setStatus(
-            "Code editor failed to load. Hard-refresh and check your network connection.",
-            true
-          );
-        });
-
       function relayoutEditorSoon() {
         window.setTimeout(function () {
           UndertwigEditor.layout();
@@ -5903,39 +5879,158 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
       }
 
-      function loadProject() {
+      function applyWorkspaceToState(workspace) {
+        const normalized = normalizeWorkspace(workspace);
+        state.version = normalized.version;
+        state.currentProject = normalized.currentProject;
+        state.activeFile = normalized.activeFile;
+        state.folders = normalized.folders;
+        state.files = normalized.files;
+        return normalized;
+      }
+
+      function readWorkspaceFromLocalStorage() {
         try {
           const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
           if (stored && stored.files && stored.activeFile) {
-            const normalized = normalizeWorkspace(stored);
-            // Persist sample upgrades (bib / TOC / figure) so they stick across reloads.
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-            } catch (_error) {
-              // Ignore quota issues; in-memory upgrade still applies this session.
-            }
-            return normalized;
+            return normalizeWorkspace(stored);
           }
-        } catch (_) {
-          // Fall through to legacy / default.
+        } catch (_error) {
+          // Fall through.
         }
-
         try {
           const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY));
           if (legacy && legacy.files && legacy.activeFile) {
-            const migrated = migrateLegacyWorkspace(legacy);
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-            } catch (_error) {
-              // Ignore.
-            }
-            return migrated;
+            return migrateLegacyWorkspace(legacy);
           }
-        } catch (_) {
-          // Fall back to the starter document when stored data is unavailable.
+        } catch (_error) {
+          // Fall through.
+        }
+        return null;
+      }
+
+      function clearLegacyLocalStorageWorkspace() {
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+        } catch (_error) {
+          // Ignore.
+        }
+        try {
+          localStorage.removeItem(LEGACY_STORAGE_KEY);
+        } catch (_error) {
+          // Ignore.
+        }
+      }
+
+      async function loadProjectAsync() {
+        let fromIdb = null;
+        if (window.UndertwigWorkspaceStorage && UndertwigWorkspaceStorage.load) {
+          try {
+            fromIdb = await UndertwigWorkspaceStorage.load();
+          } catch (error) {
+            console.warn("IndexedDB workspace load failed:", error);
+          }
+        }
+        if (fromIdb && fromIdb.files) {
+          const normalized = normalizeWorkspace(fromIdb);
+          // Drop any leftover localStorage copy so quota is free for other prefs.
+          clearLegacyLocalStorageWorkspace();
+          return normalized;
+        }
+
+        const fromLs = readWorkspaceFromLocalStorage();
+        if (fromLs) {
+          // Migrate off the 5MB localStorage ceiling.
+          try {
+            if (window.UndertwigWorkspaceStorage && UndertwigWorkspaceStorage.save) {
+              await UndertwigWorkspaceStorage.save(fromLs);
+              clearLegacyLocalStorageWorkspace();
+            }
+          } catch (error) {
+            console.warn("Workspace migration to IndexedDB failed:", error);
+          }
+          return fromLs;
         }
 
         return createDefaultProject();
+      }
+
+      function estimateWorkspaceBytes(workspace) {
+        try {
+          return JSON.stringify(workspace || state).length;
+        } catch (_error) {
+          return 0;
+        }
+      }
+
+      function scheduleWorkspacePersist() {
+        if (workspacePersistTimer) {
+          clearTimeout(workspacePersistTimer);
+        }
+        const bytes = estimateWorkspaceBytes(state);
+        const delay = bytes > 1.5 * 1024 * 1024 ? 1200 : 350;
+        workspacePersistTimer = setTimeout(function () {
+          workspacePersistTimer = null;
+          flushWorkspacePersist();
+        }, delay);
+      }
+
+      function flushWorkspacePersist() {
+        if (workspacePersistInFlight) {
+          workspacePersistQueued = true;
+          return workspacePersistInFlight;
+        }
+        if (workspacePersistTimer) {
+          clearTimeout(workspacePersistTimer);
+          workspacePersistTimer = null;
+        }
+
+        workspacePersistInFlight = (async function () {
+          if (window.UndertwigWorkspaceStorage && UndertwigWorkspaceStorage.save) {
+            try {
+              await UndertwigWorkspaceStorage.save(state);
+              workspacePersistFailed = false;
+              storageFullStatusAt = 0;
+              clearLegacyLocalStorageWorkspace();
+              return true;
+            } catch (error) {
+              console.warn("IndexedDB workspace save failed:", error);
+            }
+          }
+
+          // Fallback for browsers without IDB / rare IDB failures: only if it fits.
+          try {
+            const payload = JSON.stringify(state);
+            if (payload.length > 4 * 1024 * 1024) {
+              workspacePersistFailed = true;
+              return false;
+            }
+            localStorage.setItem(STORAGE_KEY, payload);
+            workspacePersistFailed = false;
+            storageFullStatusAt = 0;
+            return true;
+          } catch (_error) {
+            workspacePersistFailed = true;
+            return false;
+          }
+        })()
+          .finally(function () {
+            workspacePersistInFlight = null;
+            if (workspacePersistQueued) {
+              workspacePersistQueued = false;
+              flushWorkspacePersist();
+            }
+          });
+
+        return workspacePersistInFlight;
+      }
+
+      async function persistWorkspaceNow() {
+        const ok = await flushWorkspacePersist();
+        if (!ok) {
+          setStatusStorageFull({ force: true });
+        }
+        return ok;
       }
 
       function migrateLegacyWorkspace(legacy) {
@@ -6557,11 +6652,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                   sharedProject.currentProject || sharedProject.projectName || "SharedProject";
                 // Keep existing local projects under Other; make the Drive project Current.
                 adoptSharedProjectAsCurrent(sharedProject);
-                try {
-                  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-                } catch (_error) {
-                  // Local cache is optional.
-                }
+                await persistWorkspaceNow();
                 collapsedFolders.delete(projectName);
                 persistCollapsedFolders();
                 render();
@@ -6797,24 +6888,28 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return cloudInitPromise;
       }
 
-      let storageFullStatusAt = 0;
-      const STORAGE_FULL_STATUS_COOLDOWN_MS = 60 * 1000;
-
       function persistProject(options) {
         const immediateCloud = Boolean(options && options.immediateCloud);
         const skipCloud = Boolean(options && options.skipCloud);
-        let localSaved = true;
+        const awaitLocal = Boolean(options && options.awaitLocal);
 
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-          storageFullStatusAt = 0;
-        } catch (error) {
-          localSaved = false;
-          if (!UndertwigAuth.isLoggedIn()) {
-            setStatusStorageFull();
-            return false;
-          }
+        // Primary local persistence is IndexedDB (large projects fit). Never block
+        // typing on a synchronous localStorage stringify of the whole tree.
+        if (awaitLocal) {
+          return persistWorkspaceNow().then(function (localSaved) {
+            if (
+              !skipCloud &&
+              UndertwigCloud.isAvailable() &&
+              (cloudStatusMode === "connected" || UndertwigCloud.hasAccessToken())
+            ) {
+              scheduleCloudSave(immediateCloud);
+              return true;
+            }
+            return localSaved;
+          });
         }
+
+        scheduleWorkspacePersist();
 
         if (
           !skipCloud &&
@@ -6822,17 +6917,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           (cloudStatusMode === "connected" || UndertwigCloud.hasAccessToken())
         ) {
           scheduleCloudSave(immediateCloud);
-          if (!localSaved) {
-            setStatus(
-              "This browser has hit its storage limit. Saving to Google Drive instead…"
-            );
-          }
-          return true;
-        }
-
-        if (!localSaved) {
-          setStatusStorageFull();
-          return false;
         }
 
         return true;
@@ -7667,11 +7751,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                   },
                 });
                 applyPulledProject(pulled);
-                try {
-                  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-                } catch (_error) {
-                  // Local cache is optional.
-                }
+                scheduleWorkspacePersist();
                 collapsedFolders.delete(projectName);
                 persistCollapsedFolders();
                 render();
@@ -7822,11 +7902,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           },
         });
         applyPulledProject(pulled);
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        } catch (_error) {
-          // Optional.
-        }
+        scheduleWorkspacePersist();
         collapsedFolders.delete(name);
         persistCollapsedFolders();
         render();
@@ -8148,7 +8224,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
-        const size = file.binary ? base64ToBytes(file.content).byteLength : new Blob([file.content]).size;
+        let size = 0;
+        if (file.binary) {
+          size = base64ToBytes(file.content).byteLength;
+        } else {
+          // Avoid allocating a Blob on every keystroke for large files.
+          size =
+            typeof file.content === "string"
+              ? file.content.length
+              : 0;
+        }
         activeFileMeta.textContent = `${file.binary ? "Asset" : "Text"} file, ${formatBytes(size)}`;
       }
 
@@ -8798,7 +8883,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             applyPulledProject(pulled);
           }
           try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            scheduleWorkspacePersist();
           } catch (_error) {
             // Local cache is optional.
           }
@@ -9673,6 +9758,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
         }
 
+        // Flush IndexedDB now so a large import is durable before the status message.
+        const saved = await persistWorkspaceNow();
+        if (!saved) {
+          render();
+          return;
+        }
+
         const linkedNote =
           options && options.directoryHandle
             ? " Linked so Save writes back to that folder."
@@ -9693,6 +9785,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               linkedNote,
             true
           );
+          render();
           return;
         }
 
@@ -9706,6 +9799,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             ")." +
             linkedNote
         );
+        render();
       }
 
       async function importNewProjectFromDirectoryPicker() {
@@ -9961,11 +10055,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
           applyPulledProject(pulled);
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-          } catch (_error) {
-            // Local cache is optional.
-          }
+          scheduleWorkspacePersist();
           collapsedFolders.delete(projectName);
           persistCollapsedFolders();
           render();
@@ -10153,7 +10243,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
 
         try {
-          if (!persistProject({ immediateCloud: true })) {
+          const saved = await persistProject({
+            immediateCloud: true,
+            awaitLocal: true,
+          });
+          if (!saved) {
             return;
           }
         } catch (error) {
@@ -10656,9 +10750,67 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       // Boot after all declarations so invite sync can run (see cloudInitPromise TDZ note).
-      refreshAuthUi();
-      refreshSaveFileButtonVisibility();
-      initCloudProject();
+      const undertwigReady = (async function bootUndertwig() {
+        try {
+          const loaded = await loadProjectAsync();
+          applyWorkspaceToState(loaded);
+        } catch (error) {
+          console.warn("Workspace load failed; using starter project.", error);
+          applyWorkspaceToState(createDefaultProject());
+        }
+
+        // Persist upgraded sample content (and migrate) without blocking the UI.
+        scheduleWorkspacePersist();
+
+        render();
+
+        try {
+          await UndertwigEditor.init(editorHost, {
+            onChange: function (value) {
+              const file = state.files[state.activeFile];
+              if (!file || file.binary) return;
+              file.content = value;
+              if (fileLockHeldProject && fileLockHeldProject === getActiveProjectName()) {
+                writingRoomSessionDirty = true;
+                // Local only while in the writing room. Cloud autosave would make
+                // Discard impossible (Load would just pull the edits already uploaded).
+                persistProject({ skipCloud: true });
+              } else {
+                persistProject();
+              }
+              noteWritingRoomActivity();
+              updateMeta();
+            },
+            onSave: function () {
+              saveProjectNow();
+            },
+            onConvert: function () {
+              compileProject();
+            },
+          });
+          render();
+          UndertwigEditor.layout();
+        } catch (error) {
+          console.error("Editor failed to initialize:", error);
+          setStatus(
+            "Code editor failed to load. Hard-refresh and check your network connection.",
+            true
+          );
+        }
+
+        refreshAuthUi();
+        refreshSaveFileButtonVisibility();
+        initCloudProject();
+      })();
+
+      window.addEventListener("pagehide", function () {
+        flushWorkspacePersist();
+      });
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "hidden") {
+          flushWorkspacePersist();
+        }
+      });
     </script>
   </body>
 </html>
