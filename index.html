@@ -6762,13 +6762,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const currentNode = currentName
           ? root.children.find((node) => node.type === "folder" && node.path === currentName)
           : null;
-        // Drive-owned and invited locals live under Cloud, not Other.
+        // Locals always stay under Other (even when the same name is also listed in Cloud).
         const otherNodes = root.children.filter(
-          (node) =>
-            node.type === "folder" &&
-            node.path !== currentName &&
-            !(showCloudSection && cloudOwnNames.has(node.path)) &&
-            !(showCloudSection && invitedNames.has(node.path))
+          (node) => node.type === "folder" && node.path !== currentName
         );
 
         const currentSection = document.createElement("div");

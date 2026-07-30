@@ -319,8 +319,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         val local = repo.listProjects()
         val items = mutableListOf<HomeProjectItem>()
         val localFolderIds = local.mapNotNull { it.driveFolderId }.toSet()
-        val localNamesLower = local.map { it.name.trim().lowercase() }.toSet()
 
+        // Locals always appear (neutral, bottom). Own Drive remotes always appear too
+        // (cool hue, sorted by last modified) — even when names or folder links match.
         for (project in local) {
             val role = project.driveRole?.lowercase()
             val origin = when {
@@ -339,8 +340,6 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         for (remote in cachedDriveOwned) {
-            if (remote.folderId in localFolderIds) continue
-            if (remote.name.trim().lowercase() in localNamesLower) continue
             items += HomeProjectItem(
                 key = "drive:${remote.folderId}",
                 name = remote.name,
@@ -354,7 +353,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
         for (remote in cachedDriveInvited) {
             if (remote.folderId in localFolderIds) continue
-            // Already shown as local invited mirror.
+            // Already shown as local invited mirror (warm hue in the cloud group).
             if (items.any {
                     it.origin == ProjectOrigin.Invited &&
                         (it.driveFolderId == remote.folderId ||
