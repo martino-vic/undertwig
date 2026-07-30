@@ -114,12 +114,20 @@ class AuthRepository(context: Context) {
     /**
      * Returns a Google Drive OAuth access token for the signed-in user.
      * May show a consent UI the first time Drive access is needed.
+     *
+     * @param forceRefresh skip the local cache and ask Google Play Services for a fresh token
+     * (used after Drive returns 401 invalid credentials).
      */
-    suspend fun ensureDriveAccessToken(activity: Activity): String {
-        val cached = prefs.getString(KEY_DRIVE_TOKEN, null)
-        val expiresAt = prefs.getLong(KEY_DRIVE_EXPIRES, 0L)
-        if (!cached.isNullOrBlank() && expiresAt > System.currentTimeMillis() + 60_000L) {
-            return cached
+    suspend fun ensureDriveAccessToken(activity: Activity, forceRefresh: Boolean = false): String {
+        if (!forceRefresh) {
+            val cached = prefs.getString(KEY_DRIVE_TOKEN, null)
+            val expiresAt = prefs.getLong(KEY_DRIVE_EXPIRES, 0L)
+            // Keep the local cache short — Google may invalidate tokens before our estimate.
+            if (!cached.isNullOrBlank() && expiresAt > System.currentTimeMillis() + 30_000L) {
+                return cached
+            }
+        } else {
+            clearDriveToken()
         }
 
         val email = currentUser()?.email
@@ -142,12 +150,26 @@ class AuthRepository(context: Context) {
         }
         val token = result.accessToken?.takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("Google Drive access was not granted.")
-        // Access tokens typically last ~1h; refresh via authorize() on next Save.
+        // Prefer Google's expiry when available; otherwise cache briefly.
+        val expiresAtMs = driveTokenExpiryMs(result)
         prefs.edit()
             .putString(KEY_DRIVE_TOKEN, token)
-            .putLong(KEY_DRIVE_EXPIRES, System.currentTimeMillis() + 55 * 60_000L)
+            .putLong(KEY_DRIVE_EXPIRES, expiresAtMs)
             .apply()
         return token
+    }
+
+    private fun driveTokenExpiryMs(result: com.google.android.gms.auth.api.identity.AuthorizationResult): Long {
+        val now = System.currentTimeMillis()
+        // AuthorizationResult#getAccessTokenExpirationTime exists on newer Play services.
+        val fromApi = runCatching {
+            val method = result.javaClass.methods.firstOrNull { method ->
+                method.name == "getAccessTokenExpirationTime" && method.parameterCount == 0
+            } ?: return@runCatching null
+            val value = method.invoke(result) as? Long ?: return@runCatching null
+            if (value > now + 60_000L) value else null
+        }.getOrNull()
+        return fromApi ?: (now + 5 * 60_000L)
     }
 
     fun clearDriveToken() {
@@ -156,6 +178,11 @@ class AuthRepository(context: Context) {
             .remove(KEY_DRIVE_EXPIRES)
             .apply()
     }
+
+    class InvalidDriveCredentialsException(
+        message: String = "Google Drive credentials are invalid or expired.",
+        cause: Throwable? = null,
+    ) : Exception(message, cause)
 
     suspend fun signOut() {
         runCatching {
@@ -253,5 +280,14 @@ class AuthRepository(context: Context) {
         private const val KEY_ID_TOKEN = "id_token"
         private const val KEY_DRIVE_TOKEN = "drive_access_token"
         private const val KEY_DRIVE_EXPIRES = "drive_access_expires"
+
+        fun isInvalidCredentialsMessage(message: String?): Boolean {
+            val text = message.orEmpty()
+            return text.contains("invalid authentication credentials", ignoreCase = true) ||
+                text.contains("Invalid Credentials", ignoreCase = true) ||
+                text.contains("authError", ignoreCase = true) ||
+                text.contains("UNAUTHENTICATED", ignoreCase = true) ||
+                Regex("""\b401\b""").containsMatchIn(text)
+        }
     }
 }

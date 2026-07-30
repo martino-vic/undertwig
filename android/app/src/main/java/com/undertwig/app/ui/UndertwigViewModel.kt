@@ -200,9 +200,10 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         cloudJob = viewModelScope.launch {
             _home.update { it.copy(cloudLoading = true, cloudError = null) }
             try {
-                val token = authRepo.ensureDriveAccessToken(activity)
                 val email = _auth.value.user?.email
-                val (owned, invited) = driveSync.listCloudProjects(token, email)
+                val (owned, invited) = withDriveAccess(activity) { token ->
+                    driveSync.listCloudProjects(token, email)
+                }
                 cachedDriveOwned = owned
                 cachedDriveInvited = invited
                 _home.update {
@@ -223,7 +224,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 _home.update { it.copy(cloudLoading = false) }
                 throw e
             } catch (e: Exception) {
-                authRepo.clearDriveToken()
+                if (isInvalidDriveCredentials(e)) {
+                    authRepo.clearDriveToken()
+                }
                 _home.update {
                     it.copy(
                         cloudLoading = false,
@@ -249,18 +252,19 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         openCloudJob = viewModelScope.launch {
             _home.update { it.copy(openingKey = item.key) }
             try {
-                val token = authRepo.ensureDriveAccessToken(activity)
                 val role = when (item.origin) {
                     ProjectOrigin.Invited -> "writer"
                     ProjectOrigin.Drive, ProjectOrigin.Local -> "owner"
                 }
-                val id = driveSync.pullProject(
-                    accessToken = token,
-                    folderId = folderId,
-                    projectName = item.name,
-                    role = role,
-                    ownerEmail = item.ownerEmail,
-                )
+                val id = withDriveAccess(activity) { token ->
+                    driveSync.pullProject(
+                        accessToken = token,
+                        folderId = folderId,
+                        projectName = item.name,
+                        role = role,
+                        ownerEmail = item.ownerEmail,
+                    )
+                }
                 openProject(id)
                 refreshCloudProjects(activity)
                 _home.update { it.copy(openingKey = null) }
@@ -276,7 +280,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 _home.update { it.copy(openingKey = null) }
                 throw e
             } catch (e: Exception) {
-                authRepo.clearDriveToken()
+                if (isInvalidDriveCredentials(e)) {
+                    authRepo.clearDriveToken()
+                }
                 _home.update { it.copy(openingKey = null) }
                 Toast.makeText(
                     getApplication(),
@@ -465,8 +471,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 saveJob = viewModelScope.launch {
                     _editor.update { it.copy(status = "Saving to Drive…") }
                     try {
-                        val token = authRepo.ensureDriveAccessToken(activity)
-                        driveSync.uploadProject(token, projectId, projectName)
+                        withDriveAccess(activity) { token ->
+                            driveSync.uploadProject(token, projectId, projectName)
+                        }
                         flashStatus("Saved successfully")
                     } catch (e: AuthRepository.SignInCancelledException) {
                         flashStatus("Saved locally")
@@ -478,7 +485,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        authRepo.clearDriveToken()
+                        if (isInvalidDriveCredentials(e)) {
+                            authRepo.clearDriveToken()
+                        }
                         _editor.update {
                             it.copy(
                                 status = "Drive save failed",
@@ -545,8 +554,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 )
             }
             try {
-                val token = authRepo.ensureDriveAccessToken(activity)
-                driveSync.pullFile(token, state.projectId, state.projectName, path)
+                withDriveAccess(activity) { token ->
+                    driveSync.pullFile(token, state.projectId, state.projectName, path)
+                }
                 val files = repo.listFiles(state.projectId)
                 val folders = repo.listFolders(state.projectId)
                 val active = _editor.value.activePath
@@ -590,7 +600,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 _editor.update { it.copy(loadingFile = false) }
                 throw e
             } catch (e: Exception) {
-                authRepo.clearDriveToken()
+                if (isInvalidDriveCredentials(e)) {
+                    authRepo.clearDriveToken()
+                }
                 _editor.update {
                     it.copy(
                         loadingFile = false,
@@ -619,6 +631,32 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             if (_editor.value.status == message) {
                 restoreEditingStatus()
             }
+        }
+    }
+
+    private fun isInvalidDriveCredentials(error: Throwable): Boolean {
+        if (error is AuthRepository.InvalidDriveCredentialsException) return true
+        return AuthRepository.isInvalidCredentialsMessage(error.message)
+    }
+
+    /**
+     * Run a Drive API call with an access token. On invalid/expired credentials, clear the
+     * local cache, force a fresh authorize, and retry once.
+     */
+    private suspend fun <T> withDriveAccess(activity: Activity, block: suspend (String) -> T): T {
+        val firstToken = authRepo.ensureDriveAccessToken(activity, forceRefresh = false)
+        return try {
+            block(firstToken)
+        } catch (e: Exception) {
+            if (e is CancellationException || e is AuthRepository.SignInCancelledException) {
+                throw e
+            }
+            if (!isInvalidDriveCredentials(e)) {
+                throw e
+            }
+            authRepo.clearDriveToken()
+            val freshToken = authRepo.ensureDriveAccessToken(activity, forceRefresh = true)
+            block(freshToken)
         }
     }
 

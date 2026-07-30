@@ -364,7 +364,7 @@ class DriveSyncRepository(
         try {
             val code = connection.responseCode
             if (code !in 200..299) {
-                throw IllegalStateException(readError(connection, "Could not download a Drive file."))
+                throwDriveHttpError(code, connection, "Could not download a Drive file.")
             }
             return connection.inputStream.use { it.readBytes() }
         } finally {
@@ -539,7 +539,7 @@ class DriveSyncRepository(
                     uploadFile(accessToken, parentId, fileName, file, existingId = null)
                     return
                 }
-                throw IllegalStateException(readError(connection, "Could not upload $fileName to Google Drive."))
+                throwDriveHttpError(code, connection, "Could not upload $fileName to Google Drive.")
             }
         } finally {
             connection.disconnect()
@@ -556,7 +556,7 @@ class DriveSyncRepository(
         try {
             val code = connection.responseCode
             if (code !in 200..299) {
-                throw IllegalStateException(readError(connection, "Google Drive request failed."))
+                throwDriveHttpError(code, connection, "Google Drive request failed.")
             }
             return JSONObject(readBody(connection))
         } finally {
@@ -579,7 +579,7 @@ class DriveSyncRepository(
             connection.outputStream.use { it.write(bytes) }
             val code = connection.responseCode
             if (code !in 200..299) {
-                throw IllegalStateException(readError(connection, "Could not create Drive folder."))
+                throwDriveHttpError(code, connection, "Could not create Drive folder.")
             }
             return JSONObject(readBody(connection))
         } finally {
@@ -596,9 +596,23 @@ class DriveSyncRepository(
         return BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { it.readText() }
     }
 
+    private fun throwDriveHttpError(code: Int, connection: HttpURLConnection, fallback: String): Nothing {
+        val message = readError(connection, fallback)
+        if (code == 401 || AuthRepository.isInvalidCredentialsMessage(message)) {
+            throw AuthRepository.InvalidDriveCredentialsException(message)
+        }
+        throw IllegalStateException(message)
+    }
+
     private fun readError(connection: HttpURLConnection, fallback: String): String {
         val raw = runCatching { readBody(connection) }.getOrNull().orEmpty()
-        if (raw.isBlank()) return fallback
+        if (raw.isBlank()) {
+            return if (connection.responseCode == 401) {
+                "Request had invalid authentication credentials."
+            } else {
+                fallback
+            }
+        }
         return try {
             val err = JSONObject(raw).optJSONObject("error")
             err?.optString("message")?.takeIf { it.isNotBlank() } ?: fallback
