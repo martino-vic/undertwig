@@ -1957,14 +1957,13 @@
     return projects;
   }
 
-  /** True for invited project folders; keep shares whose parent Undertwig is unreadable. */
+  /**
+   * True only when a parent folder is named Undertwig and is not owned by me.
+   * Unrelated shared Drive folders are excluded from Cloud (invited).
+   */
   async function isUnderForeignUndertwig(folderMeta, me) {
     const want = String(me || "").toLowerCase();
     const parents = Array.isArray(folderMeta && folderMeta.parents) ? folderMeta.parents : [];
-    if (!parents.length) {
-      return true;
-    }
-    let readableParents = 0;
     for (let i = 0; i < parents.length; i += 1) {
       const parentId = String(parents[i] || "").trim();
       if (!parentId) {
@@ -1975,10 +1974,8 @@
         "id,name,mimeType,trashed,owners"
       );
       if (!isDriveFolderMeta(parent)) {
-        // Invitees often cannot read the owner's Undertwig parent folder.
-        return true;
+        continue;
       }
-      readableParents += 1;
       if (String(parent.name || "").toLowerCase() !== String(CLOUD_FOLDER_NAME).toLowerCase()) {
         continue;
       }
@@ -1987,7 +1984,7 @@
         return true;
       }
     }
-    return readableParents === 0;
+    return false;
   }
 
   /**
@@ -2022,11 +2019,7 @@
     const invited = [];
     const invitedIds = {};
     const shared = await driveSearch(
-      "(" +
-        "sharedWithMe = true or " +
-        "('me' in writers and not 'me' in owners) or " +
-        "('me' in readers and not 'me' in owners)" +
-        ") and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+      "sharedWithMe = true and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
       100
     );
 

@@ -250,7 +250,7 @@ fun HomeScreen(
                         if (invitedProjects.isEmpty()) {
                             item(key = "invited-empty") {
                                 Text(
-                                    "Projects shared with you appear here after you open an invitation link or are invited by email.",
+                                    "Projects shared with you via Undertwig appear here (inside someone’s Undertwig folder).",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),

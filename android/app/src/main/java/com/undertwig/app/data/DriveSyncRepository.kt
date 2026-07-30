@@ -194,12 +194,7 @@ class DriveSyncRepository(
 
         val shared = driveSearch(
             accessToken,
-            // Email/user shares show up in sharedWithMe. Writer ACLs catch some link opens.
-            "(" +
-                "sharedWithMe = true or " +
-                "('me' in writers and not 'me' in owners) or " +
-                "('me' in readers and not 'me' in owners)" +
-                ") and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+            "sharedWithMe = true and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
             pageSize = 100,
         )
         for (i in 0 until shared.length()) {
@@ -229,10 +224,9 @@ class DriveSyncRepository(
                 continue
             }
 
-            // Project folder shared directly. Invitees often cannot read the parent
-            // Undertwig folder metadata — still treat those shares as invited.
+            // Only Undertwig projects: parent folder named "Undertwig" (not owned by me).
             val meta = folderMetaWithParents(accessToken, id) ?: child
-            if (!isInvitedSharedProjectFolder(accessToken, meta, me)) continue
+            if (!isUnderForeignUndertwig(accessToken, meta, me)) continue
             invitedIds += id
             invited += DriveRemoteProject(
                 folderId = id,
@@ -245,8 +239,7 @@ class DriveSyncRepository(
             )
         }
 
-        // Invites opened via link on desktop may not appear in sharedWithMe; merge the
-        // cross-device registry written when the invite was accepted.
+        // Invites opened via Undertwig (link/email) — confirmed even if parent isn't readable.
         for (remembered in loadRememberedInvitedProjects(accessToken)) {
             val id = remembered.folderId
             if (id in ownedIds || id == rootId || id in invitedIds) continue
@@ -259,20 +252,15 @@ class DriveSyncRepository(
     }
 
     /**
-     * True for a shared project folder under someone else's Undertwig, or when the parent
-     * cannot be read (typical for invitees who only received the project folder).
-     * False only when every readable parent is confirmed not to be a foreign Undertwig.
+     * True only when a parent folder is named Undertwig and is not owned by [me].
+     * Unrelated shared Drive folders are excluded.
      */
-    private fun isInvitedSharedProjectFolder(
+    private fun isUnderForeignUndertwig(
         accessToken: String,
         folderMeta: JSONObject,
         me: String,
     ): Boolean {
-        val parents = folderMeta.optJSONArray("parents")
-        if (parents == null || parents.length() == 0) {
-            return true
-        }
-        var readableParents = 0
+        val parents = folderMeta.optJSONArray("parents") ?: return false
         for (i in 0 until parents.length()) {
             val parentId = parents.optString(i).takeIf { it.isNotBlank() } ?: continue
             val parent = runCatching {
@@ -281,12 +269,7 @@ class DriveSyncRepository(
                     "$DRIVE_API/files/${Uri.encode(parentId)}" +
                         "?supportsAllDrives=true&fields=id,name,mimeType,trashed,owners",
                 )
-            }.getOrNull()
-            if (parent == null) {
-                // No access to parent metadata — keep the shared project.
-                return true
-            }
-            readableParents += 1
+            }.getOrNull() ?: continue
             if (parent.optBoolean("trashed", false)) continue
             if (parent.optString("mimeType") != "application/vnd.google-apps.folder") continue
             if (!parent.optString("name").equals(CLOUD_FOLDER_NAME, ignoreCase = true)) continue
@@ -295,8 +278,7 @@ class DriveSyncRepository(
                 return true
             }
         }
-        // All parents readable and none were a foreign Undertwig → skip unrelated shares.
-        return readableParents == 0
+        return false
     }
 
     private fun folderMetaWithParents(accessToken: String, folderId: String): JSONObject? {
