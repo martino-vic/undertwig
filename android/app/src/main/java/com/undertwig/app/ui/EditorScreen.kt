@@ -12,18 +12,24 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -32,11 +38,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -49,13 +58,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -75,6 +84,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -88,7 +98,7 @@ import com.undertwig.app.data.LatexEngineId
 import com.undertwig.app.data.ProjectDownloadInfo
 import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun EditorScreen(
     state: EditorUiState,
@@ -201,10 +211,26 @@ fun EditorScreen(
     var browserDir by remember(state.projectId) {
         mutableStateOf(parentDirOf(state.activePath))
     }
+    var overflowOpen by remember { mutableStateOf(false) }
+    val imeVisible = WindowInsets.isImeVisible
+    val editorScroll = rememberScrollState()
+
+    LaunchedEffect(imeVisible) {
+        if (!imeVisible) return@LaunchedEffect
+        // After the IME resizes the window, nudge scroll so the caret area stays reachable.
+        delay(80)
+        val max = editorScroll.maxValue
+        if (max > 0) {
+            val bump = (max * 0.35f).toInt().coerceIn(120, 480)
+            editorScroll.animateScrollTo((editorScroll.value + bump).coerceAtMost(max))
+        }
+    }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
             .pointerInput(state.inWritingRoom) {
                 if (!state.inWritingRoom) return@pointerInput
                 awaitPointerEventScope {
@@ -215,45 +241,131 @@ fun EditorScreen(
                 }
             },
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            state.projectName,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            state.status,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = {
-                            addIsFolder = false
-                            newName = "notes.tex"
-                            showAdd = true
-                        },
+            Surface(tonalElevation = 2.dp) {
+                Column(modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .padding(horizontal = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "Add file or folder")
-                    }
-                    IconButton(onClick = onSave) {
-                        Icon(Icons.Default.Save, contentDescription = "Save")
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 6.dp),
+                        ) {
+                            Text(
+                                state.projectName,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                state.status,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        IconButton(onClick = onSave) {
+                            Icon(Icons.Default.Save, contentDescription = "Save")
+                        }
+                        if (authUser != null) {
+                            if (state.loadingFile) {
+                                IconButton(onClick = onCancelLoadFromDrive) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = "Cancel load",
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .rotate(loadAngle),
+                                    )
+                                }
+                            } else {
+                                IconButton(onClick = onLoadFromDrive) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = "Load current project from Google Drive",
+                                    )
+                                }
+                            }
+                        }
+                        Box {
+                            IconButton(onClick = { overflowOpen = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More")
+                            }
+                            DropdownMenu(
+                                expanded = overflowOpen,
+                                onDismissRequest = { overflowOpen = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("New file / folder") },
+                                    onClick = {
+                                        overflowOpen = false
+                                        addIsFolder = false
+                                        newName = "notes.tex"
+                                        showAdd = true
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Add, contentDescription = null)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Download project") },
+                                    onClick = {
+                                        overflowOpen = false
+                                        val info = onPrepareDownload()
+                                        if (info == null) {
+                                            Toast.makeText(
+                                                context,
+                                                "Open a project to download.",
+                                                Toast.LENGTH_SHORT,
+                                            ).show()
+                                        } else {
+                                            downloadInfo = info
+                                        }
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Download, contentDescription = null)
+                                    },
+                                )
+                                if (authUser != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("Account") },
+                                        onClick = {
+                                            overflowOpen = false
+                                            showAccount = true
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.AccountCircle, contentDescription = null)
+                                        },
+                                    )
+                                } else {
+                                    DropdownMenuItem(
+                                        text = { Text(if (signingIn) "Signing in…" else "Log in") },
+                                        onClick = {
+                                            overflowOpen = false
+                                            onLogin()
+                                        },
+                                        enabled = !signingIn,
+                                        leadingIcon = {
+                                            Icon(Icons.Default.AccountCircle, contentDescription = null)
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     }
                     if (state.writingRoomAvailable) {
                         TextButton(
                             onClick = onWritingRoomClick,
                             enabled = !state.writingRoomBusy,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 0.dp),
                         ) {
                             Text(
                                 if (state.inWritingRoom) {
@@ -265,61 +377,8 @@ fun EditorScreen(
                             )
                         }
                     }
-                    if (authUser != null) {
-                        if (state.loadingFile) {
-                            TextButton(onClick = onCancelLoadFromDrive) {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = null,
-                                    modifier = Modifier
-                                        .size(18.dp)
-                                        .rotate(loadAngle),
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text("Cancel")
-                            }
-                        } else {
-                            IconButton(onClick = onLoadFromDrive) {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "Load current project from Google Drive",
-                                )
-                            }
-                        }
-                    }
-                    IconButton(
-                        onClick = {
-                            val info = onPrepareDownload()
-                            if (info == null) {
-                                Toast.makeText(
-                                    context,
-                                    "Open a project to download.",
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            } else {
-                                downloadInfo = info
-                            }
-                        },
-                    ) {
-                        Icon(Icons.Default.Download, contentDescription = "Download project")
-                    }
-                    if (authUser != null) {
-                        IconButton(onClick = { showAccount = true }) {
-                            Icon(
-                                Icons.Default.AccountCircle,
-                                contentDescription = "Account ${authUser.email}",
-                            )
-                        }
-                    } else {
-                        TextButton(
-                            onClick = onLogin,
-                            enabled = !signingIn,
-                        ) {
-                            Text(if (signingIn) "…" else "Log in")
-                        }
-                    }
-                },
-            )
+                }
+            }
         },
     ) { padding ->
         PullToRefreshBox(
@@ -336,20 +395,22 @@ fun EditorScreen(
             Column(
                 modifier = Modifier.fillMaxSize(),
             ) {
-                key(state.projectId) {
-                    ProjectFileTree(
-                        files = state.files,
-                        folders = state.folders,
-                        activePath = state.activePath,
-                        currentDir = browserDir,
-                        onCurrentDirChange = { browserDir = it },
-                        onSelectFile = { path ->
-                            browserDir = parentDirOf(path)
-                            onSelectFile(path)
-                        },
-                        onLongPressTarget = { actionTarget = it },
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    )
+                if (!imeVisible) {
+                    key(state.projectId) {
+                        ProjectFileTree(
+                            files = state.files,
+                            folders = state.folders,
+                            activePath = state.activePath,
+                            currentDir = browserDir,
+                            onCurrentDirChange = { browserDir = it },
+                            onSelectFile = { path ->
+                                browserDir = parentDirOf(path)
+                                onSelectFile(path)
+                            },
+                            onLongPressTarget = { actionTarget = it },
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
                 }
 
                 val darkEditor = isSystemInDarkTheme()
@@ -382,7 +443,8 @@ fun EditorScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(horizontal = 12.dp)
-                                .verticalScroll(rememberScrollState()),
+                                .padding(bottom = if (imeVisible) 72.dp else 0.dp)
+                                .verticalScroll(editorScroll),
                             textStyle = TextStyle(
                                 color = MaterialTheme.colorScheme.onBackground,
                                 fontFamily = FontFamily.Monospace,
@@ -395,121 +457,123 @@ fun EditorScreen(
                     }
                 }
 
-                state.writingRoomOccupiedMessage?.let { lockMessage ->
-                    Text(
-                        lockMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    )
-                }
-                if (state.writingRoomAvailable && !state.inWritingRoom && state.writingRoomOccupiedMessage == null) {
-                    Text(
-                        "Editor locked — enter the writing room to edit.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    )
-                }
-                if (state.writingRoomAvailable && state.inWritingRoom) {
-                    Text(
-                        "You are in the writing room. Exit when you are done so others can edit.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    )
-                }
+                if (!imeVisible) {
+                    state.writingRoomOccupiedMessage?.let { lockMessage ->
+                        Text(
+                            lockMessage,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
+                    if (state.writingRoomAvailable && !state.inWritingRoom && state.writingRoomOccupiedMessage == null) {
+                        Text(
+                            "Editor locked — enter the writing room to edit.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
+                    if (state.writingRoomAvailable && state.inWritingRoom) {
+                        Text(
+                            "You are in the writing room. Exit when you are done so others can edit.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val compactPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
-                    val convertBusy = state.busy == EditorBusy.Convert
-                    val bibBusy = state.busy == EditorBusy.Bibliography
-                    ActionButton(
-                        onClick = {
-                            if (convertBusy) onCancelBusy() else onConvert()
-                        },
-                        onLongClick = if (!convertBusy && !bibBusy) {
-                            { showEnginePicker = true }
-                        } else {
-                            null
-                        },
-                        enabled = !bibBusy,
-                        contentPadding = compactPadding,
-                        expand = true,
-                        modifier = Modifier.weight(1f),
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (convertBusy) {
-                            CircularProgressIndicator(
-                                modifier = Modifier
-                                    .height(16.dp)
-                                    .width(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text("Cancel", maxLines = 1)
-                        } else {
-                            Text("Convert", maxLines = 1)
+                        val compactPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                        val convertBusy = state.busy == EditorBusy.Convert
+                        val bibBusy = state.busy == EditorBusy.Bibliography
+                        ActionButton(
+                            onClick = {
+                                if (convertBusy) onCancelBusy() else onConvert()
+                            },
+                            onLongClick = if (!convertBusy && !bibBusy) {
+                                { showEnginePicker = true }
+                            } else {
+                                null
+                            },
+                            enabled = !bibBusy,
+                            contentPadding = compactPadding,
+                            expand = true,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            if (convertBusy) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier
+                                        .height(16.dp)
+                                        .width(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("Cancel", maxLines = 1)
+                            } else {
+                                Text("Convert", maxLines = 1)
+                            }
                         }
-                    }
-                    ActionButton(
-                        onClick = {
-                            if (bibBusy) onCancelBusy() else onBibliography()
-                        },
-                        onLongClick = if (!convertBusy && !bibBusy) {
-                            { showBibPicker = true }
-                        } else {
-                            null
-                        },
-                        enabled = !convertBusy,
-                        contentPadding = compactPadding,
-                        containerColor = Color(0xFFE67E22),
-                        contentColor = Color.White,
-                        expand = false,
-                    ) {
-                        if (bibBusy) {
-                            CircularProgressIndicator(
-                                modifier = Modifier
-                                    .height(16.dp)
-                                    .width(16.dp),
-                                strokeWidth = 2.dp,
-                                color = Color.White,
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text("Cancel", maxLines = 1)
-                        } else {
-                            Text("Bib", maxLines = 1)
+                        ActionButton(
+                            onClick = {
+                                if (bibBusy) onCancelBusy() else onBibliography()
+                            },
+                            onLongClick = if (!convertBusy && !bibBusy) {
+                                { showBibPicker = true }
+                            } else {
+                                null
+                            },
+                            enabled = !convertBusy,
+                            contentPadding = compactPadding,
+                            containerColor = Color(0xFFE67E22),
+                            contentColor = Color.White,
+                            expand = false,
+                        ) {
+                            if (bibBusy) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier
+                                        .height(16.dp)
+                                        .width(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color.White,
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("Cancel", maxLines = 1)
+                            } else {
+                                Text("Bib", maxLines = 1)
+                            }
                         }
-                    }
-                    OutlinedButton(
-                        onClick = { showLog = true },
-                        enabled = state.lastLog.isNotBlank(),
-                        contentPadding = compactPadding,
-                    ) {
-                        Text("Log", maxLines = 1)
-                    }
-                    if (state.pdfPath != null) {
                         OutlinedButton(
-                            onClick = onOpenPdf,
+                            onClick = { showLog = true },
+                            enabled = state.lastLog.isNotBlank(),
                             contentPadding = compactPadding,
                         ) {
-                            Text("PDF", maxLines = 1)
+                            Text("Log", maxLines = 1)
+                        }
+                        if (state.pdfPath != null) {
+                            OutlinedButton(
+                                onClick = onOpenPdf,
+                                contentPadding = compactPadding,
+                            ) {
+                                Text("PDF", maxLines = 1)
+                            }
                         }
                     }
-                }
 
-                state.error?.let {
-                    Text(
-                        it,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    )
+                    state.error?.let {
+                        Text(
+                            it,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
                 }
             }
         }
@@ -846,14 +910,36 @@ fun EditorScreen(
             )
         }
         is WritingRoomPrompt.IdleExit -> {
+            var remainingSec by remember(prompt) {
+                mutableIntStateOf(
+                    (UndertwigViewModel.WRITING_ROOM_IDLE_AUTO_EXIT_MS / 1000L).toInt(),
+                )
+            }
+            LaunchedEffect(prompt) {
+                while (remainingSec > 0) {
+                    delay(1000)
+                    remainingSec -= 1
+                }
+                onConfirmWritingRoomPrompt()
+            }
+            val mins = remainingSec / 60
+            val secs = remainingSec % 60
+            val countdown = "$mins:" + secs.toString().padStart(2, '0')
             AlertDialog(
                 onDismissRequest = onDismissWritingRoomPrompt,
                 title = { Text("Still in the writing room?") },
                 text = {
                     val minutes = prompt.minutes
-                    Text(
-                        "You've been inactive for $minutes minute${if (minutes == 1) "" else "s"}. Would you like to exit the writing room so others can edit “${prompt.projectName}”?",
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "You've been inactive for $minutes minute${if (minutes == 1) "" else "s"}. Would you like to exit the writing room so others can edit “${prompt.projectName}”?",
+                        )
+                        Text(
+                            "Leaving automatically in $countdown if you don’t respond.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                        )
+                    }
                 },
                 confirmButton = {
                     TextButton(onClick = onConfirmWritingRoomPrompt) { Text("Exit writing room") }

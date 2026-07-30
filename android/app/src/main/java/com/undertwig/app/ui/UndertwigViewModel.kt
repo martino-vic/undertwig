@@ -121,6 +121,11 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private var writingRoomBusyTimeoutJob: Job? = null
     /** After an explicit Exit, do not auto-resume a leftover held-by-me lock. */
     private var writingRoomSuppressResumeKey: String? = null
+    /**
+     * Edits made while holding the writing room (survives file switches), matching
+     * desktop `writingRoomSessionDirty`.
+     */
+    private var writingRoomSessionDirty: Boolean = false
 
     private var heldWritingRoomProjectId: String? = null
     /** After View only / OK, don't re-popup the door until the user asks or the project changes. */
@@ -442,6 +447,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         // Leave previous writing room before switching to a different project.
         if (heldWritingRoomProjectId != null && heldWritingRoomProjectId != id) {
             scheduleReleaseHeldWritingRoom()
+            writingRoomSessionDirty = false
         }
         val files = repo.listFiles(id)
         val active = when {
@@ -505,6 +511,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         if (_editor.value.editorReadOnly) return
         if (ProjectRepository.isBinaryPath(_editor.value.activePath)) return
         _editor.update { it.copy(editorText = text, dirty = true) }
+        if (heldWritingRoomProjectId != null) {
+            writingRoomSessionDirty = true
+        }
         noteWritingRoomActivity()
     }
 
@@ -774,6 +783,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                                 "You are in the writing room for “$projectName”. " +
                                     "Latest Drive changes are loaded. Exit when you are done.",
                         )
+                        writingRoomSessionDirty = false
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -828,7 +838,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 repo.writeFile(state.projectId, state.activePath, state.editorText)
             }
         }
-        if (_editor.value.dirty) {
+        // Match desktop: room-scoped dirty survives file switches.
+        if (_editor.value.dirty || writingRoomSessionDirty) {
             _editor.update {
                 it.copy(writingRoomPrompt = WritingRoomPrompt.ExitUnsaved(projectName))
             }
@@ -844,6 +855,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun performExitWritingRoom(activity: Activity, projectName: String) {
+        writingRoomSessionDirty = false
         _editor.update {
             it.copy(
                 inWritingRoom = false,
@@ -910,6 +922,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         withDriveAccess(activity) { token ->
                             driveSync.uploadProject(token, projectId, projectName)
                         }
+                        writingRoomSessionDirty = false
                         _editor.update { it.copy(dirty = false) }
                     }
                     UnsavedExitChoice.SaveLocalCopy -> {
@@ -924,6 +937,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         repo.duplicateProjectLocally(projectId, copyName)
                         refreshProjects()
                         // Work desk + editor: same as Discard — Load latest from Drive.
+                        writingRoomSessionDirty = false
                         _editor.update {
                             it.copy(
                                 dirty = false,
@@ -941,6 +955,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                     UnsavedExitChoice.Discard -> {
                         // Do not flush discarded edits to disk — match the Load button.
+                        writingRoomSessionDirty = false
                         _editor.update {
                             it.copy(
                                 dirty = false,
@@ -1110,12 +1125,15 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 val minutes = prompt.minutes
                 _editor.update { it.copy(writingRoomPrompt = null) }
                 exitWritingRoom(activity, skipConfirm = true)
-                _editor.update {
-                    it.copy(
-                        status = "Left the writing room after $minutes minute" +
-                            (if (minutes == 1) "" else "s") +
-                            " of inactivity.",
-                    )
+                // If unsaved dialog appeared, user is still in the room — don't claim we left.
+                if (_editor.value.writingRoomPrompt !is WritingRoomPrompt.ExitUnsaved) {
+                    _editor.update {
+                        it.copy(
+                            status = "Left the writing room after $minutes minute" +
+                                (if (minutes == 1) "" else "s") +
+                                " of inactivity.",
+                        )
+                    }
                 }
             }
             is WritingRoomPrompt.Occupied -> {
@@ -1271,6 +1289,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         withDriveAccess(activity) { token ->
                             driveSync.uploadProject(token, projectId, projectName)
                         }
+                        writingRoomSessionDirty = false
                         statusFlashJob?.cancel()
                         _editor.update {
                             it.copy(
@@ -1981,6 +2000,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         private const val STATUS_FLASH_MS = 2_500L
         private const val WRITING_ROOM_IDLE_MS = 5 * 60 * 1000L
         private const val WRITING_ROOM_IDLE_MINUTES = 5
+        /** Match desktop: auto-exit countdown once the idle dialog is open. */
+        const val WRITING_ROOM_IDLE_AUTO_EXIT_MS = 2 * 60 * 1000L
     }
 
     /**
