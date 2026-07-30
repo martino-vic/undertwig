@@ -27,4 +27,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Match web visibilitychange: refresh writing-room lock after returning to the app.
+        viewModel.noteWritingRoomActivity()
+        viewModel.refreshWritingRoomStatus(this)
+    }
 }

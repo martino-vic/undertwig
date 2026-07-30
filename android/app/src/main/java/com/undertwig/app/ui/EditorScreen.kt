@@ -201,6 +201,17 @@ fun EditorScreen(
     }
 
     Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(state.inWritingRoom) {
+                if (!state.inWritingRoom) return@pointerInput
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent()
+                        onWritingRoomActivity()
+                    }
+                }
+            },
         topBar = {
             TopAppBar(
                 title = {
@@ -244,9 +255,9 @@ fun EditorScreen(
                         ) {
                             Text(
                                 when {
-                                    state.inWritingRoom -> "Exit room"
+                                    state.inWritingRoom -> "Exit writing room"
                                     state.writingRoomOccupiedMessage != null -> "Room occupied"
-                                    else -> "Enter room"
+                                    else -> "Enter writing room"
                                 },
                                 maxLines = 1,
                             )
@@ -752,6 +763,10 @@ fun EditorScreen(
         is WritingRoomPrompt.Enter -> {
             AlertDialog(
                 onDismissRequest = onDismissWritingRoomPrompt,
+                properties = androidx.compose.ui.window.DialogProperties(
+                    dismissOnBackPress = true,
+                    dismissOnClickOutside = false,
+                ),
                 title = { Text("Enter writing room") },
                 text = {
                     Text(
@@ -790,7 +805,7 @@ fun EditorScreen(
                 text = {
                     val minutes = prompt.minutes
                     Text(
-                        "You've been inactive for $minutes minute${if (minutes == 1) "" else "s"}. Would you like to exit the writing room so others can edit?",
+                        "You've been inactive for $minutes minute${if (minutes == 1) "" else "s"}. Would you like to exit the writing room so others can edit “${prompt.projectName}”?",
                     )
                 },
                 confirmButton = {

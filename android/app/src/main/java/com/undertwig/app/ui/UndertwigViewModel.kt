@@ -92,7 +92,7 @@ sealed class WritingRoomPrompt {
     data class Enter(val projectName: String) : WritingRoomPrompt()
     data class Exit(val projectName: String) : WritingRoomPrompt()
     data class Occupied(val message: String) : WritingRoomPrompt()
-    data class IdleExit(val minutes: Int) : WritingRoomPrompt()
+    data class IdleExit(val minutes: Int, val projectName: String) : WritingRoomPrompt()
 }
 
 class UndertwigViewModel(application: Application) : AndroidViewModel(application) {
@@ -111,6 +111,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private var fileLockJob: Job? = null
     private var fileLockHeartbeatJob: Job? = null
     private var writingRoomIdleJob: Job? = null
+    private var writingRoomBusyTimeoutJob: Job? = null
     private var heldWritingRoomProjectId: String? = null
     /** After View only / OK, don't re-popup the door until the user asks or the project changes. */
     private var writingRoomGateDismissedKey: String? = null
@@ -520,7 +521,12 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 return@launch
             }
             _editor.update {
-                it.copy(writingRoomPrompt = WritingRoomPrompt.IdleExit(WRITING_ROOM_IDLE_MINUTES))
+                it.copy(
+                    writingRoomPrompt = WritingRoomPrompt.IdleExit(
+                        minutes = WRITING_ROOM_IDLE_MINUTES,
+                        projectName = _editor.value.projectName,
+                    ),
+                )
             }
         }
     }
@@ -553,6 +559,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         val projectId = state.projectId
         val projectName = state.projectName
         val inRoom = heldWritingRoomProjectId == projectId
+        // Match web: auto-door only for editable (non-binary) files.
+        val gateApplies = !ProjectRepository.isBinaryPath(state.activePath)
 
         fileLockJob?.cancel()
         fileLockJob = viewModelScope.launch {
@@ -562,6 +570,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         writingRoomAvailable = true,
                         writingRoomOccupiedMessage = null,
                         inWritingRoom = true,
+                        status = "You are in the writing room for “$projectName”. Exit when you are done.",
                     )
                 }
                 return@launch
@@ -588,21 +597,21 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                                 writingRoomOccupiedMessage = null,
                                 inWritingRoom = true,
                                 writingRoomPrompt = null,
-                                status = "You are in the writing room for “$projectName”.",
+                                status = "You are in the writing room for “$projectName”. Exit when you are done.",
                             )
                         }
                         return@launch
                     }
                     val message =
                         "${lock.holderLabel()} is currently in the writing room. The writing room has space for one person only at the time."
-                    val occupiedKey = "occupied:$projectId"
+                    val occupiedKey = "occupied:$projectName"
                     _editor.update {
                         it.copy(
                             writingRoomAvailable = true,
                             writingRoomOccupiedMessage = message,
                             inWritingRoom = false,
                             status = "Read-only — writing room occupied",
-                            writingRoomPrompt = if (writingRoomGateDismissedKey == occupiedKey) {
+                            writingRoomPrompt = if (!gateApplies || writingRoomGateDismissedKey == occupiedKey) {
                                 null
                             } else {
                                 WritingRoomPrompt.Occupied(message)
@@ -610,13 +619,13 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         )
                     }
                 } else {
-                    val enterKey = "enter:$projectId"
+                    val enterKey = "enter:$projectName"
                     _editor.update {
                         it.copy(
                             writingRoomAvailable = true,
                             writingRoomOccupiedMessage = null,
                             inWritingRoom = false,
-                            writingRoomPrompt = if (writingRoomGateDismissedKey == enterKey) {
+                            writingRoomPrompt = if (!gateApplies || writingRoomGateDismissedKey == enterKey) {
                                 null
                             } else {
                                 WritingRoomPrompt.Enter(projectName)
@@ -625,13 +634,13 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
             } catch (_: Exception) {
-                val enterKey = "enter:$projectId"
+                val enterKey = "enter:$projectName"
                 _editor.update {
                     it.copy(
                         writingRoomAvailable = true,
                         writingRoomOccupiedMessage = null,
                         inWritingRoom = false,
-                        writingRoomPrompt = if (writingRoomGateDismissedKey == enterKey) {
+                        writingRoomPrompt = if (!gateApplies || writingRoomGateDismissedKey == enterKey) {
                             null
                         } else {
                             WritingRoomPrompt.Enter(projectName)
@@ -649,6 +658,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         val state = _editor.value
         if (!state.writingRoomAvailable || state.writingRoomBusy) return
         if (state.inWritingRoom && heldWritingRoomProjectId == state.projectId) return
+        writingRoomGateDismissedKey = null
         if (state.writingRoomOccupiedMessage != null) {
             _editor.update {
                 it.copy(
@@ -669,7 +679,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         val projectId = state.projectId
         val projectName = state.projectName
         val user = _auth.value.user
-        _editor.update { it.copy(writingRoomBusy = true, writingRoomPrompt = null, error = null) }
+        setWritingRoomBusy(true)
+        _editor.update { it.copy(writingRoomPrompt = null, error = null) }
         fileLockJob?.cancel()
         fileLockJob = viewModelScope.launch {
             try {
@@ -686,13 +697,13 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     heldWritingRoomProjectId = projectId
                     writingRoomGateDismissedKey = null
                     startFileLockHeartbeat(activity, projectId, projectName)
+                    setWritingRoomBusy(false)
                     _editor.update {
                         it.copy(
-                            writingRoomBusy = false,
                             inWritingRoom = true,
                             writingRoomOccupiedMessage = null,
                             writingRoomPrompt = null,
-                            status = "You are in the writing room for “$projectName”.",
+                            status = "You are in the writing room for “$projectName”. Exit when you are done.",
                             error = null,
                         )
                     }
@@ -701,9 +712,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     stopFileLockHeartbeat()
                     val message = result.message
                         ?: "Someone is currently in the writing room. The writing room has space for one person only at the time."
+                    setWritingRoomBusy(false)
                     _editor.update {
                         it.copy(
-                            writingRoomBusy = false,
                             inWritingRoom = false,
                             writingRoomOccupiedMessage = message,
                             status = "Read-only",
@@ -713,9 +724,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
             } catch (e: Exception) {
+                setWritingRoomBusy(false)
                 _editor.update {
                     it.copy(
-                        writingRoomBusy = false,
                         inWritingRoom = false,
                         error = e.message ?: "Could not enter the writing room.",
                         status = "Writing room failed",
@@ -804,10 +815,10 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     fun dismissWritingRoomPrompt() {
         when (val prompt = _editor.value.writingRoomPrompt) {
             is WritingRoomPrompt.Enter -> {
-                writingRoomGateDismissedKey = "enter:${_editor.value.projectId}"
+                writingRoomGateDismissedKey = "enter:${prompt.projectName}"
             }
             is WritingRoomPrompt.Occupied -> {
-                writingRoomGateDismissedKey = "occupied:${_editor.value.projectId}"
+                writingRoomGateDismissedKey = "occupied:${_editor.value.projectName}"
             }
             is WritingRoomPrompt.IdleExit -> {
                 // Stay in the room — restart the idle watch.
@@ -830,13 +841,33 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 exitWritingRoom(activity, skipConfirm = true)
             }
             is WritingRoomPrompt.IdleExit -> {
+                val minutes = prompt.minutes
                 _editor.update { it.copy(writingRoomPrompt = null) }
                 exitWritingRoom(activity, skipConfirm = true)
+                _editor.update {
+                    it.copy(
+                        status = "Left the writing room after $minutes minute" +
+                            (if (minutes == 1) "" else "s") +
+                            " of inactivity.",
+                    )
+                }
             }
             is WritingRoomPrompt.Occupied -> {
                 dismissWritingRoomPrompt()
             }
             null -> Unit
+        }
+    }
+
+    private fun setWritingRoomBusy(busy: Boolean) {
+        writingRoomBusyTimeoutJob?.cancel()
+        writingRoomBusyTimeoutJob = null
+        _editor.update { it.copy(writingRoomBusy = busy) }
+        if (busy) {
+            writingRoomBusyTimeoutJob = viewModelScope.launch {
+                delay(15_000L)
+                _editor.update { it.copy(writingRoomBusy = false) }
+            }
         }
     }
 
@@ -870,6 +901,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                     if (!result.ok) {
                         heldWritingRoomProjectId = null
+                        stopFileLockHeartbeat()
                         val message = result.message
                             ?: "Someone is currently in the writing room. The writing room has space for one person only at the time."
                         _editor.update {
@@ -908,8 +940,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
         if (state.writingRoomAvailable && !state.inWritingRoom) {
+            writingRoomGateDismissedKey = null
             val message = state.writingRoomOccupiedMessage
-                ?: "Enter the writing room before saving this file to Google Drive. The writing room has space for only one person at a time."
+                ?: "Enter the writing room before saving this project to Google Drive. The writing room has space for only one person at a time."
             _editor.update {
                 it.copy(
                     status = "Read-only",
