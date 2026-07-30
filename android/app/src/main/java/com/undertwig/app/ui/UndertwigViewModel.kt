@@ -259,13 +259,24 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     ProjectOrigin.Drive, ProjectOrigin.Local -> "owner"
                 }
                 val id = withDriveAccess(activity) { token ->
-                    driveSync.pullProject(
+                    val localId = driveSync.pullProject(
                         accessToken = token,
                         folderId = folderId,
                         projectName = item.name,
                         role = role,
                         ownerEmail = item.ownerEmail,
                     )
+                    if (item.origin == ProjectOrigin.Invited) {
+                        runCatching {
+                            driveSync.rememberInvitedProject(
+                                accessToken = token,
+                                folderId = folderId,
+                                projectName = item.name,
+                                ownerEmail = item.ownerEmail,
+                            )
+                        }
+                    }
+                    localId
                 }
                 openProject(id)
                 refreshCloudProjects(activity)

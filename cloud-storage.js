@@ -1882,6 +1882,17 @@
     project.role = role;
     project.currentProject = project.projectName || meta.name;
     clearPendingInvite();
+    if (role !== "owner") {
+      try {
+        await rememberInvitedProject(
+          id,
+          project.projectName || meta.name,
+          ownerEmailFromMeta(meta) || cachedOwnerEmail
+        );
+      } catch (_error) {
+        // Listing still works via sharedWithMe / map; registry is best-effort.
+      }
+    }
     return project;
   }
 
@@ -1946,10 +1957,14 @@
     return projects;
   }
 
-  /** True when folderMeta has a parent folder named Undertwig that is not owned by me. */
+  /** True for invited project folders; keep shares whose parent Undertwig is unreadable. */
   async function isUnderForeignUndertwig(folderMeta, me) {
     const want = String(me || "").toLowerCase();
     const parents = Array.isArray(folderMeta && folderMeta.parents) ? folderMeta.parents : [];
+    if (!parents.length) {
+      return true;
+    }
+    let readableParents = 0;
     for (let i = 0; i < parents.length; i += 1) {
       const parentId = String(parents[i] || "").trim();
       if (!parentId) {
@@ -1960,8 +1975,10 @@
         "id,name,mimeType,trashed,owners"
       );
       if (!isDriveFolderMeta(parent)) {
-        continue;
+        // Invitees often cannot read the owner's Undertwig parent folder.
+        return true;
       }
+      readableParents += 1;
       if (String(parent.name || "").toLowerCase() !== String(CLOUD_FOLDER_NAME).toLowerCase()) {
         continue;
       }
@@ -1970,7 +1987,7 @@
         return true;
       }
     }
-    return false;
+    return readableParents === 0;
   }
 
   /**
@@ -2005,7 +2022,11 @@
     const invited = [];
     const invitedIds = {};
     const shared = await driveSearch(
-      "sharedWithMe = true and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+      "(" +
+        "sharedWithMe = true or " +
+        "('me' in writers and not 'me' in owners) or " +
+        "('me' in readers and not 'me' in owners)" +
+        ") and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
       100
     );
 
@@ -2084,10 +2105,212 @@
       }
     }
 
+    // Invites accepted via link (anyone-with-link) often never appear in sharedWithMe.
+    const remembered = await listRememberedInvitedProjects();
+    for (let r = 0; r < remembered.length; r += 1) {
+      const entry = remembered[r];
+      if (!entry || !entry.id || invitedIds[entry.id] || ownedIds[entry.id] || entry.id === rootId) {
+        continue;
+      }
+      invitedIds[entry.id] = true;
+      invited.push(entry);
+      if (entry.name && !getMappedFolderId(entry.name)) {
+        setMappedProject(entry.name, entry.id, "writer");
+      }
+    }
+
+    // Local invite map (from this browser) → ensure Drive appData registry so Android can list them.
+    const mappedInvites = listInvitedProjects();
+    const registrySeed = [];
+    for (let m = 0; m < mappedInvites.length; m += 1) {
+      const mapped = mappedInvites[m];
+      if (!mapped || !mapped.id) {
+        continue;
+      }
+      const mappedId = String(mapped.id);
+      if (ownedIds[mappedId] || mappedId === rootId) {
+        continue;
+      }
+      if (!invitedIds[mappedId]) {
+        const meta = await fetchDriveFileMeta(
+          mappedId,
+          "id,name,mimeType,modifiedTime,owners,trashed"
+        );
+        if (!isDriveFolderMeta(meta)) {
+          continue;
+        }
+        invitedIds[mappedId] = true;
+        invited.push({
+          id: mappedId,
+          name: String(meta.name || mapped.name || "").trim() || "Untitled",
+          modifiedTime: meta.modifiedTime || null,
+          ownerEmail: ownerEmailFromMeta(meta) || null,
+        });
+      }
+      registrySeed.push({
+        id: mappedId,
+        name: String(mapped.name || "").trim() || "Untitled",
+        ownerEmail: "",
+        updatedAt: Date.now(),
+      });
+    }
+    if (registrySeed.length) {
+      try {
+        const existing = await readInvitedRegistry();
+        const byId = {};
+        existing.forEach(function (entry) {
+          if (entry && entry.id) {
+            byId[String(entry.id)] = entry;
+          }
+        });
+        registrySeed.forEach(function (entry) {
+          byId[entry.id] = Object.assign({}, byId[entry.id] || {}, entry);
+        });
+        await writeInvitedRegistry(
+          Object.keys(byId).map(function (key) {
+            return byId[key];
+          })
+        );
+      } catch (_error) {
+        // Best-effort sync for Android.
+      }
+    }
+
     invited.sort(function (a, b) {
       return a.name.localeCompare(b.name);
     });
     return invited;
+  }
+
+  const INVITED_REGISTRY_NAME = "undertwig-invited-projects-v1.json";
+
+  async function findAppDataFileId(fileName) {
+    const response = await driveFetch(
+      DRIVE_API +
+        "/files?spaces=appDataFolder&pageSize=10&fields=files(id,name)&q=" +
+        encodeURIComponent("name = '" + String(fileName || "").replace(/'/g, "\\'") + "' and trashed = false"),
+      { method: "GET" }
+    );
+    if (!response.ok) {
+      return null;
+    }
+    const payload = await response.json();
+    const files = (payload && payload.files) || [];
+    for (let i = 0; i < files.length; i += 1) {
+      if (files[i] && files[i].name === fileName && files[i].id) {
+        return String(files[i].id);
+      }
+    }
+    return null;
+  }
+
+  async function readInvitedRegistry() {
+    const fileId = await findAppDataFileId(INVITED_REGISTRY_NAME);
+    if (!fileId) {
+      return [];
+    }
+    try {
+      const response = await driveFetch(
+        DRIVE_API + "/files/" + encodeURIComponent(fileId) + "?alt=media&spaces=appDataFolder",
+        { method: "GET" }
+      );
+      if (!response.ok) {
+        return [];
+      }
+      const payload = await response.json();
+      return Array.isArray(payload && payload.projects) ? payload.projects : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  async function writeInvitedRegistry(projects) {
+    const body = JSON.stringify({ projects: projects || [] });
+    const existingId = await findAppDataFileId(INVITED_REGISTRY_NAME);
+    const metadata = {
+      name: INVITED_REGISTRY_NAME,
+      mimeType: "application/json",
+    };
+    if (!existingId) {
+      metadata.parents = ["appDataFolder"];
+    }
+    const boundary = "undertwig_" + Date.now();
+    const multipart =
+      "--" +
+      boundary +
+      "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" +
+      JSON.stringify(metadata) +
+      "\r\n--" +
+      boundary +
+      "\r\nContent-Type: application/json\r\n\r\n" +
+      body +
+      "\r\n--" +
+      boundary +
+      "--\r\n";
+    const url = existingId
+      ? DRIVE_UPLOAD +
+        "/files/" +
+        encodeURIComponent(existingId) +
+        "?uploadType=multipart&fields=id"
+      : DRIVE_UPLOAD + "/files?uploadType=multipart&spaces=appDataFolder&fields=id";
+    const response = await driveFetch(url, {
+      method: existingId ? "PATCH" : "POST",
+      headers: {
+        "Content-Type": "multipart/related; boundary=" + boundary,
+      },
+      body: multipart,
+    });
+    if (!response.ok) {
+      throw new Error(await readDriveError(response, "Could not save invited project list."));
+    }
+  }
+
+  /** Remember an accepted invite in Drive appData so Android home can list it. */
+  async function rememberInvitedProject(folderId, projectName, ownerEmail) {
+    const id = String(folderId || "").trim();
+    if (!id) {
+      return;
+    }
+    await connect();
+    const projects = (await readInvitedRegistry()).filter(function (entry) {
+      return entry && String(entry.id || "") !== id;
+    });
+    projects.unshift({
+      id: id,
+      name: String(projectName || "").trim() || "Untitled",
+      ownerEmail: String(ownerEmail || "").trim() || "",
+      updatedAt: Date.now(),
+    });
+    while (projects.length > 50) {
+      projects.pop();
+    }
+    await writeInvitedRegistry(projects);
+  }
+
+  async function listRememberedInvitedProjects() {
+    const entries = await readInvitedRegistry();
+    const out = [];
+    for (let i = 0; i < entries.length; i += 1) {
+      const entry = entries[i];
+      const id = entry && String(entry.id || "").trim();
+      if (!id) {
+        continue;
+      }
+      const meta = await fetchDriveFileMeta(
+        id,
+        "id,name,mimeType,modifiedTime,owners,trashed"
+      );
+      if (!isDriveFolderMeta(meta)) {
+        continue;
+      }
+      out.push({
+        id: id,
+        name: String(meta.name || entry.name || "").trim() || "Untitled",
+        modifiedTime: meta.modifiedTime || null,
+        ownerEmail: ownerEmailFromMeta(meta) || entry.ownerEmail || null,
+      });
+    }
+    return out;
   }
 
   /**
@@ -2844,6 +3067,7 @@
     shareProjectWithEmail,
     ensureInviteLinkAccess,
     ensureProjectFolder,
+    rememberInvitedProject,
     refreshProjectMeta,
     probeConnection,
     previewSaveDeletions,

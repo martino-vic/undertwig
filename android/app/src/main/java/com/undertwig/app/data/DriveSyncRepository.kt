@@ -170,7 +170,12 @@ class DriveSyncRepository(
 
         val shared = driveSearch(
             accessToken,
-            "sharedWithMe = true and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+            // Email/user shares show up in sharedWithMe. Writer ACLs catch some link opens.
+            "(" +
+                "sharedWithMe = true or " +
+                "('me' in writers and not 'me' in owners) or " +
+                "('me' in readers and not 'me' in owners)" +
+                ") and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
             pageSize = 100,
         )
         for (i in 0 until shared.length()) {
@@ -200,9 +205,10 @@ class DriveSyncRepository(
                 continue
             }
 
-            // Project folder shared directly → only keep if parent is someone else's Undertwig.
+            // Project folder shared directly. Invitees often cannot read the parent
+            // Undertwig folder metadata — still treat those shares as invited.
             val meta = folderMetaWithParents(accessToken, id) ?: child
-            if (!isUnderForeignUndertwig(accessToken, meta, me)) continue
+            if (!isInvitedSharedProjectFolder(accessToken, meta, me)) continue
             invitedIds += id
             invited += DriveRemoteProject(
                 folderId = id,
@@ -215,17 +221,34 @@ class DriveSyncRepository(
             )
         }
 
+        // Invites opened via link on desktop may not appear in sharedWithMe; merge the
+        // cross-device registry written when the invite was accepted.
+        for (remembered in loadRememberedInvitedProjects(accessToken)) {
+            val id = remembered.folderId
+            if (id in ownedIds || id == rootId || id in invitedIds) continue
+            invitedIds += id
+            invited += remembered
+        }
+
         owned.sortedByDescending { it.modifiedTimeMs } to
             invited.sortedByDescending { it.modifiedTimeMs }
     }
 
-    /** True when [folderMeta] has a parent folder named Undertwig that is not owned by [me]. */
-    private fun isUnderForeignUndertwig(
+    /**
+     * True for a shared project folder under someone else's Undertwig, or when the parent
+     * cannot be read (typical for invitees who only received the project folder).
+     * False only when every readable parent is confirmed not to be a foreign Undertwig.
+     */
+    private fun isInvitedSharedProjectFolder(
         accessToken: String,
         folderMeta: JSONObject,
         me: String,
     ): Boolean {
-        val parents = folderMeta.optJSONArray("parents") ?: return false
+        val parents = folderMeta.optJSONArray("parents")
+        if (parents == null || parents.length() == 0) {
+            return true
+        }
+        var readableParents = 0
         for (i in 0 until parents.length()) {
             val parentId = parents.optString(i).takeIf { it.isNotBlank() } ?: continue
             val parent = runCatching {
@@ -234,7 +257,12 @@ class DriveSyncRepository(
                     "$DRIVE_API/files/${Uri.encode(parentId)}" +
                         "?supportsAllDrives=true&fields=id,name,mimeType,trashed,owners",
                 )
-            }.getOrNull() ?: continue
+            }.getOrNull()
+            if (parent == null) {
+                // No access to parent metadata — keep the shared project.
+                return true
+            }
+            readableParents += 1
             if (parent.optBoolean("trashed", false)) continue
             if (parent.optString("mimeType") != "application/vnd.google-apps.folder") continue
             if (!parent.optString("name").equals(CLOUD_FOLDER_NAME, ignoreCase = true)) continue
@@ -243,7 +271,8 @@ class DriveSyncRepository(
                 return true
             }
         }
-        return false
+        // All parents readable and none were a foreign Undertwig → skip unrelated shares.
+        return readableParents == 0
     }
 
     private fun folderMetaWithParents(accessToken: String, folderId: String): JSONObject? {
@@ -254,6 +283,144 @@ class DriveSyncRepository(
                     "?supportsAllDrives=true&fields=id,name,mimeType,modifiedTime,owners,parents,trashed",
             )
         }.getOrNull()?.takeUnless { it.optBoolean("trashed", false) }
+    }
+
+    /**
+     * Persist an accepted invite so the Android home screen can list it even when Drive
+     * does not put link-shared folders into sharedWithMe.
+     */
+    suspend fun rememberInvitedProject(
+        accessToken: String,
+        folderId: String,
+        projectName: String,
+        ownerEmail: String?,
+    ) = withContext(Dispatchers.IO) {
+        val id = folderId.trim()
+        if (id.isEmpty()) return@withContext
+        val name = projectName.trim().ifEmpty { "Untitled" }
+        val existing = readInvitedRegistry(accessToken).toMutableList()
+        existing.removeAll { it.optString("id") == id }
+        existing.add(
+            0,
+            JSONObject()
+                .put("id", id)
+                .put("name", name)
+                .put("ownerEmail", ownerEmail?.trim().orEmpty())
+                .put("updatedAt", System.currentTimeMillis()),
+        )
+        while (existing.size > 50) {
+            existing.removeAt(existing.lastIndex)
+        }
+        writeInvitedRegistry(accessToken, existing)
+    }
+
+    private fun loadRememberedInvitedProjects(accessToken: String): List<DriveRemoteProject> {
+        val out = mutableListOf<DriveRemoteProject>()
+        for (entry in readInvitedRegistry(accessToken)) {
+            val id = entry.optString("id").takeIf { it.isNotBlank() } ?: continue
+            val meta = folderMetaWithParents(accessToken, id) ?: continue
+            if (meta.optString("mimeType") != "application/vnd.google-apps.folder") continue
+            out += DriveRemoteProject(
+                folderId = id,
+                name = meta.optString("name").ifBlank {
+                    entry.optString("name").ifBlank { "Untitled" }
+                },
+                modifiedTimeMs = parseDriveTime(meta.optString("modifiedTime")).takeIf { it > 0 }
+                    ?: entry.optLong("updatedAt", 0L),
+                ownerEmail = firstOwnerEmail(meta)
+                    ?: entry.optString("ownerEmail").takeIf { it.isNotBlank() },
+                ownedByMe = false,
+            )
+        }
+        return out
+    }
+
+    private fun readInvitedRegistry(accessToken: String): List<JSONObject> {
+        val fileId = findAppDataFileId(accessToken, INVITED_REGISTRY_NAME) ?: return emptyList()
+        return runCatching {
+            val bytes = downloadDriveFile(accessToken, fileId)
+            val payload = JSONObject(String(bytes, StandardCharsets.UTF_8))
+            val arr = payload.optJSONArray("projects") ?: return emptyList()
+            buildList {
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)?.let { add(it) }
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun writeInvitedRegistry(accessToken: String, projects: List<JSONObject>) {
+        val payload = JSONObject().put(
+            "projects",
+            JSONArray().also { arr -> projects.forEach { arr.put(it) } },
+        )
+        val bytes = payload.toString().toByteArray(StandardCharsets.UTF_8)
+        val existingId = findAppDataFileId(accessToken, INVITED_REGISTRY_NAME)
+        uploadAppDataJson(accessToken, INVITED_REGISTRY_NAME, bytes, existingId)
+    }
+
+    private fun findAppDataFileId(accessToken: String, fileName: String): String? {
+        val url =
+            "$DRIVE_API/files?spaces=appDataFolder&pageSize=10" +
+                "&fields=files(id,name)" +
+                "&q=" + URLEncoder.encode(
+                    "name = '${escapeQuery(fileName)}' and trashed = false",
+                    "UTF-8",
+                )
+        val payload = runCatching { getJson(accessToken, url) }.getOrNull() ?: return null
+        val files = payload.optJSONArray("files") ?: return null
+        for (i in 0 until files.length()) {
+            val file = files.optJSONObject(i) ?: continue
+            if (file.optString("name") == fileName) {
+                return file.optString("id").takeIf { it.isNotBlank() }
+            }
+        }
+        return null
+    }
+
+    private fun uploadAppDataJson(
+        accessToken: String,
+        fileName: String,
+        bytes: ByteArray,
+        existingId: String?,
+    ) {
+        val metadata = JSONObject()
+            .put("name", fileName)
+            .put("mimeType", "application/json")
+        if (existingId.isNullOrBlank()) {
+            metadata.put("parents", JSONArray().put("appDataFolder"))
+        }
+        val boundary = "undertwig_${System.currentTimeMillis()}"
+        val body = ByteArrayOutputStream()
+        DataOutputStream(body).use { out ->
+            out.writeBytes("--$boundary\r\n")
+            out.writeBytes("Content-Type: application/json; charset=UTF-8\r\n\r\n")
+            out.write(metadata.toString().toByteArray(StandardCharsets.UTF_8))
+            out.writeBytes("\r\n--$boundary\r\n")
+            out.writeBytes("Content-Type: application/json\r\n\r\n")
+            out.write(bytes)
+            out.writeBytes("\r\n--$boundary--\r\n")
+        }
+        val url = if (existingId.isNullOrBlank()) {
+            "$DRIVE_UPLOAD/files?uploadType=multipart&spaces=appDataFolder&fields=id"
+        } else {
+            "$DRIVE_UPLOAD/files/${Uri.encode(existingId)}?uploadType=multipart&fields=id"
+        }
+        val method = if (existingId.isNullOrBlank()) "POST" else "PATCH"
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $accessToken")
+            setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
+            connectTimeout = 30_000
+            readTimeout = 60_000
+        }
+        connection.outputStream.use { it.write(body.toByteArray()) }
+        val code = connection.responseCode
+        if (code !in 200..299) {
+            throwDriveHttpError(code, connection, "Could not save invited project list.")
+        }
+        connection.disconnect()
     }
 
     /**
@@ -705,6 +872,7 @@ class DriveSyncRepository(
 
     companion object {
         private const val CLOUD_FOLDER_NAME = "Undertwig"
+        private const val INVITED_REGISTRY_NAME = "undertwig-invited-projects-v1.json"
         private const val DRIVE_API = "https://www.googleapis.com/drive/v3"
         private const val DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3"
         private const val PREFS = "undertwig_drive"
