@@ -321,11 +321,22 @@ class DriveSyncRepository(
     }
 
     private fun loadRememberedInvitedProjects(accessToken: String): List<DriveRemoteProject> {
+        val me = ""
+        val registry = readInvitedRegistry(accessToken)
         val out = mutableListOf<DriveRemoteProject>()
-        for (entry in readInvitedRegistry(accessToken)) {
+        val kept = mutableListOf<JSONObject>()
+        for (entry in registry) {
             val id = entry.optString("id").takeIf { it.isNotBlank() } ?: continue
             val meta = folderMetaWithParents(accessToken, id) ?: continue
             if (meta.optString("mimeType") != "application/vnd.google-apps.folder") continue
+            val under = isUnderForeignUndertwig(accessToken, meta, me)
+            val parents = meta.optJSONArray("parents")
+            val hasParents = parents != null && parents.length() > 0
+            // Drop only when we can read parents and confirm this is not under Undertwig.
+            if (hasParents && !under && parentsAreReadable(accessToken, parents)) {
+                continue
+            }
+            kept += entry
             out += DriveRemoteProject(
                 folderId = id,
                 name = meta.optString("name").ifBlank {
@@ -338,7 +349,27 @@ class DriveSyncRepository(
                 ownedByMe = false,
             )
         }
+        if (kept.size != registry.size) {
+            runCatching { writeInvitedRegistry(accessToken, kept) }
+        }
         return out
+    }
+
+    private fun parentsAreReadable(accessToken: String, parents: JSONArray): Boolean {
+        var readable = 0
+        for (i in 0 until parents.length()) {
+            val parentId = parents.optString(i).takeIf { it.isNotBlank() } ?: continue
+            val parent = runCatching {
+                getJson(
+                    accessToken,
+                    "$DRIVE_API/files/${Uri.encode(parentId)}" +
+                        "?supportsAllDrives=true&fields=id,name,mimeType,trashed",
+                )
+            }.getOrNull()
+            if (parent == null) return false
+            readable += 1
+        }
+        return readable > 0
     }
 
     private fun readInvitedRegistry(accessToken: String): List<JSONObject> {

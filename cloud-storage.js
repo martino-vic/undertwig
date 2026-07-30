@@ -1958,12 +1958,18 @@
   }
 
   /**
-   * True only when a parent folder is named Undertwig and is not owned by me.
-   * Unrelated shared Drive folders are excluded from Cloud (invited).
+   * Classify a shared folder for Cloud (invited):
+   * - "foreign-undertwig": parent is Undertwig not owned by me
+   * - "not-undertwig": readable parents exist and none is a foreign Undertwig
+   * - "unknown": parents missing or unreadable (typical for link invites)
    */
-  async function isUnderForeignUndertwig(folderMeta, me) {
+  async function undertwigInviteStatus(folderMeta, me) {
     const want = String(me || "").toLowerCase();
     const parents = Array.isArray(folderMeta && folderMeta.parents) ? folderMeta.parents : [];
+    if (!parents.length) {
+      return "unknown";
+    }
+    let readableParents = 0;
     for (let i = 0; i < parents.length; i += 1) {
       const parentId = String(parents[i] || "").trim();
       if (!parentId) {
@@ -1974,17 +1980,23 @@
         "id,name,mimeType,trashed,owners"
       );
       if (!isDriveFolderMeta(parent)) {
-        continue;
+        return "unknown";
       }
+      readableParents += 1;
       if (String(parent.name || "").toLowerCase() !== String(CLOUD_FOLDER_NAME).toLowerCase()) {
         continue;
       }
       const parentOwner = ownerEmailFromMeta(parent);
       if (!parentOwner || !want || String(parentOwner).toLowerCase() !== want) {
-        return true;
+        return "foreign-undertwig";
       }
     }
-    return false;
+    return readableParents > 0 ? "not-undertwig" : "unknown";
+  }
+
+  /** True only when a parent folder is named Undertwig and is not owned by me. */
+  async function isUnderForeignUndertwig(folderMeta, me) {
+    return (await undertwigInviteStatus(folderMeta, me)) === "foreign-undertwig";
   }
 
   /**
@@ -2098,23 +2110,46 @@
       }
     }
 
-    // Invites accepted via link (anyone-with-link) often never appear in sharedWithMe.
-    const remembered = await listRememberedInvitedProjects();
+    // Invites accepted via Undertwig (link/email). Keep unknown parents; drop confirmed non-Undertwig.
+    const remembered = await listRememberedInvitedProjects(me);
+    const cleanRegistry = [];
     for (let r = 0; r < remembered.length; r += 1) {
       const entry = remembered[r];
-      if (!entry || !entry.id || invitedIds[entry.id] || ownedIds[entry.id] || entry.id === rootId) {
+      if (!entry || !entry.id || ownedIds[entry.id] || entry.id === rootId) {
+        continue;
+      }
+      if (entry._inviteStatus === "not-undertwig") {
+        continue;
+      }
+      cleanRegistry.push({
+        id: entry.id,
+        name: entry.name,
+        ownerEmail: entry.ownerEmail || "",
+        updatedAt: entry.updatedAt || Date.now(),
+      });
+      if (invitedIds[entry.id]) {
         continue;
       }
       invitedIds[entry.id] = true;
-      invited.push(entry);
+      invited.push({
+        id: entry.id,
+        name: entry.name,
+        modifiedTime: entry.modifiedTime || null,
+        ownerEmail: entry.ownerEmail || null,
+      });
       if (entry.name && !getMappedFolderId(entry.name)) {
         setMappedProject(entry.name, entry.id, "writer");
       }
     }
+    try {
+      await writeInvitedRegistry(cleanRegistry);
+    } catch (_error) {
+      // Best-effort prune of non-Undertwig registry entries.
+    }
 
-    // Local invite map (from this browser) → ensure Drive appData registry so Android can list them.
+    // Local invite map → only Undertwig (or unknown) projects; drop stale non-Undertwig maps.
     const mappedInvites = listInvitedProjects();
-    const registrySeed = [];
+    const registrySeed = cleanRegistry.slice();
     for (let m = 0; m < mappedInvites.length; m += 1) {
       const mapped = mappedInvites[m];
       if (!mapped || !mapped.id) {
@@ -2124,14 +2159,20 @@
       if (ownedIds[mappedId] || mappedId === rootId) {
         continue;
       }
+      const meta = await fetchDriveFileMeta(
+        mappedId,
+        "id,name,mimeType,modifiedTime,owners,parents,trashed"
+      );
+      if (!isDriveFolderMeta(meta)) {
+        removeMappedProject(mapped.name);
+        continue;
+      }
+      const status = await undertwigInviteStatus(meta, me);
+      if (status === "not-undertwig") {
+        removeMappedProject(mapped.name);
+        continue;
+      }
       if (!invitedIds[mappedId]) {
-        const meta = await fetchDriveFileMeta(
-          mappedId,
-          "id,name,mimeType,modifiedTime,owners,trashed"
-        );
-        if (!isDriveFolderMeta(meta)) {
-          continue;
-        }
         invitedIds[mappedId] = true;
         invited.push({
           id: mappedId,
@@ -2142,22 +2183,18 @@
       }
       registrySeed.push({
         id: mappedId,
-        name: String(mapped.name || "").trim() || "Untitled",
-        ownerEmail: "",
+        name: String(mapped.name || meta.name || "").trim() || "Untitled",
+        ownerEmail: ownerEmailFromMeta(meta) || "",
         updatedAt: Date.now(),
       });
     }
     if (registrySeed.length) {
       try {
-        const existing = await readInvitedRegistry();
         const byId = {};
-        existing.forEach(function (entry) {
+        registrySeed.forEach(function (entry) {
           if (entry && entry.id) {
             byId[String(entry.id)] = entry;
           }
-        });
-        registrySeed.forEach(function (entry) {
-          byId[entry.id] = Object.assign({}, byId[entry.id] || {}, entry);
         });
         await writeInvitedRegistry(
           Object.keys(byId).map(function (key) {
@@ -2280,7 +2317,8 @@
     await writeInvitedRegistry(projects);
   }
 
-  async function listRememberedInvitedProjects() {
+  async function listRememberedInvitedProjects(userEmail) {
+    const me = String(userEmail || currentSessionEmail() || "").toLowerCase();
     const entries = await readInvitedRegistry();
     const out = [];
     for (let i = 0; i < entries.length; i += 1) {
@@ -2291,16 +2329,19 @@
       }
       const meta = await fetchDriveFileMeta(
         id,
-        "id,name,mimeType,modifiedTime,owners,trashed"
+        "id,name,mimeType,modifiedTime,owners,parents,trashed"
       );
       if (!isDriveFolderMeta(meta)) {
         continue;
       }
+      const status = await undertwigInviteStatus(meta, me);
       out.push({
         id: id,
         name: String(meta.name || entry.name || "").trim() || "Untitled",
         modifiedTime: meta.modifiedTime || null,
         ownerEmail: ownerEmailFromMeta(meta) || entry.ownerEmail || null,
+        updatedAt: entry.updatedAt || Date.now(),
+        _inviteStatus: status,
       });
     }
     return out;

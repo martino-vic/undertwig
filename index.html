@@ -3081,7 +3081,7 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260729e"></script>
-    <script src="cloud-storage.js?v=20260730e"></script>
+    <script src="cloud-storage.js?v=20260730f"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -6585,20 +6585,18 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       function invitedProjectNames() {
         const names = new Set();
-        if (UndertwigCloud.listInvitedProjects) {
-          UndertwigCloud.listInvitedProjects().forEach(function (project) {
-            if (project && project.name) {
-              names.add(project.name);
-            }
-          });
-        }
+        // Drive-filtered invited list is the source of truth (Undertwig parent only).
         (cloudInvitedRemoteCache || []).forEach(function (project) {
           if (project && project.name) {
             names.add(project.name);
           }
         });
+        // Keep the currently open shared project labeled invited even before refresh finishes.
         listLocalRootProjects(state).forEach(function (name) {
-          if (isInvitedProjectName(name)) {
+          if (
+            UndertwigCloud.isCurrentProjectShared &&
+            UndertwigCloud.isCurrentProjectShared(name)
+          ) {
             names.add(name);
           }
         });
