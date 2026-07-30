@@ -17,8 +17,10 @@
   const LOCK_DIR_NAME = ".undertwig-locks";
   const PROJECT_LOCK_FILE = "project.json";
   const DEVICE_ID_KEY = "undertwig-device-id-v1";
-  // Abandoned rooms free quickly so a closed tab / crashed client does not brick collaborators.
-  const LOCK_HEARTBEAT_STALE_MS = 45 * 1000;
+  // Abandoned rooms free after this long without a heartbeat. Must stay above
+  // typical browser background-tab timer throttling (~1 min) so phone clients
+  // do not steal a live desktop writing room.
+  const LOCK_HEARTBEAT_STALE_MS = 2 * 60 * 1000;
 
   const TOKEN_REQUEST_TIMEOUT_MS = 8000;
   const SILENT_TOKEN_TIMEOUT_MS = 4000;
@@ -3315,8 +3317,9 @@
       return true;
     }
     const ms = Date.parse(lock.heartbeat);
+    // Unparseable heartbeat: do NOT treat as stale — stealing a live room is worse.
     if (!Number.isFinite(ms)) {
-      return true;
+      return false;
     }
     return Date.now() - ms > LOCK_HEARTBEAT_STALE_MS;
   }

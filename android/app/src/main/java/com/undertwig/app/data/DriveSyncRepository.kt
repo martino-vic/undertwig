@@ -3,6 +3,7 @@ package com.undertwig.app.data
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -127,9 +128,10 @@ class DriveSyncRepository(
         }
 
         fun isStale(nowMs: Long = System.currentTimeMillis()): Boolean {
-            val hb = heartbeat ?: return true
-            val ms = runCatching { java.time.Instant.parse(hb).toEpochMilli() }.getOrNull()
-                ?: return true
+            val hb = heartbeat?.trim().orEmpty()
+            if (hb.isEmpty()) return true
+            // Unparseable heartbeat: do NOT treat as stale — stealing a live room is worse.
+            val ms = parseLockTimestampMs(hb) ?: return false
             return nowMs - ms > LOCK_STALE_MS
         }
     }
@@ -195,30 +197,51 @@ class DriveSyncRepository(
                 ok = false,
                 message = "Project is not linked to Google Drive yet. Save once first.",
             )
-        val existing = readProjectLockFile(accessToken, folderId)
-        if (existing != null && !existing.isStale() && !isHeldByMe(existing, holderEmail)) {
-            return@withContext FileLockResult(
-                ok = false,
-                lock = existing,
-                message = "${existing.holderLabel()} is currently in the writing room. The writing room has space for one person only at the time.",
-            )
+        var existing = readProjectLockFile(accessToken, folderId)
+        if (existing != null && !isHeldByMe(existing, holderEmail)) {
+            if (!existing.isStale()) {
+                return@withContext occupiedResult(existing)
+            }
+            // Appears abandoned — re-check so a throttled desktop heartbeat can land first.
+            delay(LOCK_STEAL_RECHECK_MS)
+            existing = readProjectLockFile(accessToken, folderId)
+            if (existing != null && !isHeldByMe(existing, holderEmail) && !existing.isStale()) {
+                return@withContext occupiedResult(existing)
+            }
         }
         val payload = buildLockJson(
             holderEmail,
             holderName,
             since = if (existing != null && isHeldByMe(existing, holderEmail)) existing.since else null,
         )
-        writeProjectLockFile(accessToken, folderId, payload)
+        if (!writeProjectLockFile(accessToken, folderId, payload)) {
+            val blocker = readProjectLockFile(accessToken, folderId)
+            return@withContext if (blocker != null) {
+                occupiedResult(blocker)
+            } else {
+                FileLockResult(
+                    ok = false,
+                    message = "Someone is currently in the writing room. The writing room has space for one person only at the time.",
+                )
+            }
+        }
         val again = readProjectLockFile(accessToken, folderId)
-        if (again != null && !again.isStale() && !isHeldByMe(again, holderEmail)) {
-            return@withContext FileLockResult(
+            ?: return@withContext FileLockResult(
                 ok = false,
-                lock = again,
-                message = "${again.holderLabel()} is currently in the writing room. The writing room has space for one person only at the time.",
+                message = "Could not verify the writing room lock on Google Drive.",
             )
+        if (!isHeldByMe(again, holderEmail)) {
+            return@withContext occupiedResult(again)
         }
         FileLockResult(ok = true, lock = again)
     }
+
+    private fun occupiedResult(lock: FileEditLock): FileLockResult =
+        FileLockResult(
+            ok = false,
+            lock = lock,
+            message = "${lock.holderLabel()} is currently in the writing room. The writing room has space for one person only at the time.",
+        )
 
     suspend fun heartbeatFileLock(
         accessToken: String,
@@ -237,18 +260,25 @@ class DriveSyncRepository(
         }
         if (!isHeldByMe(existing, holderEmail)) {
             if (!existing.isStale()) {
-                return@withContext FileLockResult(
-                    ok = false,
-                    lock = existing,
-                    message = "${existing.holderLabel()} is currently in the writing room. The writing room has space for one person only at the time.",
-                )
+                return@withContext occupiedResult(existing)
+            }
+            delay(LOCK_STEAL_RECHECK_MS)
+            val retry = readProjectLockFile(accessToken, folderId)
+            if (retry != null && !isHeldByMe(retry, holderEmail) && !retry.isStale()) {
+                return@withContext occupiedResult(retry)
             }
             return@withContext acquireFileLock(
                 accessToken, projectId, projectName, holderEmail, holderName,
             )
         }
         val payload = buildLockJson(holderEmail, holderName, since = existing.since)
-        writeProjectLockFile(accessToken, folderId, payload)
+        if (!writeProjectLockFile(accessToken, folderId, payload)) {
+            val blocker = readProjectLockFile(accessToken, folderId)
+            return@withContext if (blocker != null) occupiedResult(blocker) else FileLockResult(
+                ok = false,
+                message = "Someone is currently in the writing room. The writing room has space for one person only at the time.",
+            )
+        }
         FileLockResult(ok = true, lock = readProjectLockFile(accessToken, folderId))
     }
 
@@ -334,71 +364,96 @@ class DriveSyncRepository(
             .put("heartbeat", now)
     }
 
+    /**
+     * Read the project writing-room lock. Scans every `.undertwig-locks` folder in case
+     * Drive has duplicates, and prefers a live (non-stale) lock from another device.
+     */
     private fun readProjectLockFile(
         accessToken: String,
         projectFolderId: String,
     ): FileEditLock? {
-        val lockRel = "$LOCK_DIR_NAME/$PROJECT_LOCK_FILE"
-        val parts = lockRel.split('/').filter { it.isNotEmpty() }
-        if (parts.isEmpty()) return null
-        var parentId = projectFolderId
-        for (i in 0 until parts.lastIndex) {
-            val child = findNamedChild(
-                accessToken,
-                parentId,
-                parts[i],
-                mimeType = "application/vnd.google-apps.folder",
-            ) ?: return null
-            parentId = child.getString("id")
-        }
-        val remote = findNamedChild(accessToken, parentId, parts.last(), mimeType = null)
-            ?: return null
-        val mime = remote.optString("mimeType")
-        if (mime == "application/vnd.google-apps.folder") return null
-        val fileId = remote.optString("id").takeIf { it.isNotBlank() } ?: return null
-        val bytes = runCatching { downloadDriveFile(accessToken, fileId) }.getOrNull() ?: return null
-        val json = runCatching { JSONObject(String(bytes, StandardCharsets.UTF_8)) }.getOrNull()
-            ?: return null
-        return FileEditLock(
-            path = json.optString("path").ifBlank { "." },
-            holderEmail = json.optString("holderEmail").takeIf { it.isNotBlank() },
-            holderName = json.optString("holderName").takeIf { it.isNotBlank() },
-            deviceId = json.optString("deviceId").takeIf { it.isNotBlank() },
-            since = json.optString("since").takeIf { it.isNotBlank() },
-            heartbeat = json.optString("heartbeat").takeIf { it.isNotBlank() },
-            fileId = fileId,
-            parentId = parentId,
+        val lockDirs = findNamedChildren(
+            accessToken,
+            projectFolderId,
+            LOCK_DIR_NAME,
+            mimeType = "application/vnd.google-apps.folder",
         )
+        if (lockDirs.isEmpty()) return null
+
+        val locks = mutableListOf<FileEditLock>()
+        for (dir in lockDirs) {
+            val parentId = dir.optString("id").takeIf { it.isNotBlank() } ?: continue
+            val remotes = findNamedChildren(accessToken, parentId, PROJECT_LOCK_FILE, mimeType = null)
+            for (remote in remotes) {
+                val mime = remote.optString("mimeType")
+                if (mime == "application/vnd.google-apps.folder") continue
+                val fileId = remote.optString("id").takeIf { it.isNotBlank() } ?: continue
+                val bytes = runCatching { downloadDriveFile(accessToken, fileId) }.getOrNull()
+                    ?: continue
+                val json = runCatching { JSONObject(String(bytes, StandardCharsets.UTF_8)) }.getOrNull()
+                    ?: continue
+                locks += FileEditLock(
+                    path = json.optString("path").ifBlank { "." },
+                    holderEmail = json.optString("holderEmail").takeIf { it.isNotBlank() },
+                    holderName = json.optString("holderName").takeIf { it.isNotBlank() },
+                    deviceId = json.optString("deviceId").takeIf { it.isNotBlank() },
+                    since = json.optString("since").takeIf { it.isNotBlank() },
+                    heartbeat = json.optString("heartbeat").takeIf { it.isNotBlank() },
+                    fileId = fileId,
+                    parentId = parentId,
+                )
+            }
+        }
+        if (locks.isEmpty()) return null
+
+        // Prefer a live lock held by someone else — that is the exclusivity signal.
+        locks.firstOrNull { !it.isStale() && !isHeldByThisDevice(it) }?.let { return it }
+        // Else our own live lock (resume).
+        locks.firstOrNull { !it.isStale() && isHeldByThisDevice(it) }?.let { return it }
+        // Else newest by heartbeat / since.
+        return locks.maxByOrNull { lock ->
+            parseLockTimestampMs(lock.heartbeat)
+                ?: parseLockTimestampMs(lock.since)
+                ?: 0L
+        }
     }
 
     private fun writeProjectLockFile(
         accessToken: String,
         projectFolderId: String,
         payload: JSONObject,
-    ) {
-        val lockRel = "$LOCK_DIR_NAME/$PROJECT_LOCK_FILE"
-        val parts = lockRel.split('/').filter { it.isNotEmpty() }
-        val fileName = parts.last()
-        val parentRel = parts.dropLast(1).joinToString("/")
-        val parentId = if (parentRel.isEmpty()) {
-            projectFolderId
-        } else {
-            ensurePathFolders(accessToken, projectFolderId, parentRel)
+    ): Boolean {
+        // Reuse an existing lock file/folder when present so we never create a parallel room.
+        val existingLock = readProjectLockFile(accessToken, projectFolderId)
+        if (existingLock != null && !isHeldByThisDevice(existingLock) && !existingLock.isStale()) {
+            // Someone else still holds the room — never overwrite.
+            return false
         }
-        val existing = findNamedChild(accessToken, parentId, fileName, mimeType = null)
+        val parentId: String
+        val existingId: String?
+        if (existingLock?.fileId != null && existingLock.parentId != null) {
+            parentId = existingLock.parentId
+            existingId = existingLock.fileId
+        } else {
+            parentId = ensureChildFolder(accessToken, projectFolderId, LOCK_DIR_NAME)
+            existingId = findNamedChild(accessToken, parentId, PROJECT_LOCK_FILE, mimeType = null)
+                ?.optString("id")
+                ?.takeIf { it.isNotBlank() }
+        }
         val tmp = File.createTempFile("undertwig-lock-", ".json")
         try {
             tmp.writeText(payload.toString(2))
             uploadFile(
                 accessToken = accessToken,
                 parentId = parentId,
-                fileName = fileName,
+                fileName = PROJECT_LOCK_FILE,
                 file = tmp,
-                existingId = existing?.optString("id")?.takeIf { it.isNotBlank() },
+                existingId = existingId,
             )
         } finally {
             tmp.delete()
         }
+        return true
     }
 
     private fun trashDriveFile(accessToken: String, fileId: String) {
@@ -1071,6 +1126,29 @@ class DriveSyncRepository(
         name: String,
         mimeType: String?,
     ): JSONObject? {
+        val files = findNamedChildren(accessToken, parentId, name, mimeType)
+        if (files.isEmpty()) return null
+        if (files.size == 1) return files[0]
+        // Prefer the newest when Drive has duplicate names (common for lock folders).
+        var best = files[0]
+        var bestMs = parseDriveTime(best.optString("modifiedTime"))
+        for (i in 1 until files.size) {
+            val candidate = files[i]
+            val ms = parseDriveTime(candidate.optString("modifiedTime"))
+            if (ms >= bestMs) {
+                best = candidate
+                bestMs = ms
+            }
+        }
+        return best
+    }
+
+    private fun findNamedChildren(
+        accessToken: String,
+        parentId: String,
+        name: String,
+        mimeType: String?,
+    ): List<JSONObject> {
         val mimeClause = if (mimeType.isNullOrBlank()) {
             ""
         } else {
@@ -1080,9 +1158,13 @@ class DriveSyncRepository(
             accessToken,
             "name = '${escapeQuery(name)}' and '${escapeQuery(parentId)}' in parents " +
                 "and trashed = false$mimeClause",
-            pageSize = 10,
+            pageSize = 25,
         )
-        return if (files.length() > 0) files.getJSONObject(0) else null
+        val out = ArrayList<JSONObject>(files.length())
+        for (i in 0 until files.length()) {
+            out += files.getJSONObject(i)
+        }
+        return out
     }
 
     private fun isLiveFolder(accessToken: String, fileId: String): Boolean {
@@ -1284,11 +1366,28 @@ class DriveSyncRepository(
         private const val LEGACY_APPDATA_REGISTRY_NAME = "undertwig-invited-projects-v1.json"
         private const val LOCK_DIR_NAME = ".undertwig-locks"
         private const val PROJECT_LOCK_FILE = "project.json"
-        private const val LOCK_STALE_MS = 45 * 1000L
+        // Must outlast browser background-tab timer throttling (~1 min) or Android
+        // will steal a live desktop writing room. Heartbeat is every 20s.
+        private const val LOCK_STALE_MS = 2 * 60 * 1000L
+        private const val LOCK_STEAL_RECHECK_MS = 1_500L
         private const val DRIVE_API = "https://www.googleapis.com/drive/v3"
         private const val DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3"
         private const val PREFS = "undertwig_drive"
         private const val KEY_UNDERTWIG_FOLDER = "undertwig_folder_id"
         private const val KEY_DEVICE_ID = "undertwig_device_id"
+
+        private fun parseLockTimestampMs(raw: String?): Long? {
+            val value = raw?.trim().orEmpty()
+            if (value.isEmpty()) return null
+            runCatching { java.time.Instant.parse(value).toEpochMilli() }.getOrNull()?.let { return it }
+            runCatching { java.time.OffsetDateTime.parse(value).toInstant().toEpochMilli() }
+                .getOrNull()
+                ?.let { return it }
+            runCatching { java.time.ZonedDateTime.parse(value).toInstant().toEpochMilli() }
+                .getOrNull()
+                ?.let { return it }
+            value.toLongOrNull()?.takeIf { it > 1_000_000_000_000L }?.let { return it }
+            return null
+        }
     }
 }
