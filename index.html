@@ -7446,8 +7446,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (!UndertwigCloud.hasAccessToken || !UndertwigCloud.hasAccessToken()) {
           return false;
         }
-        // Load keeps a flush for conflict tooling; Discard must not seed the dirty buffer
-        // into local state before Drive bytes replace the project.
+        // After a drawer copy or Discard, do not seed the dirty buffer into local
+        // state before Drive bytes replace the work-desk project.
         if (!discardLocalEdits) {
           const active = state.files[state.activeFile];
           if (active && !active.binary && UndertwigEditor && UndertwigEditor.getValue) {
@@ -7532,12 +7532,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           } else if (choice === "local") {
             try {
               const copyName = copyCurrentProjectToDrawer(projectName);
+              writingRoomSessionDirty = false;
               setStatus(
                 "Saved a local drawer copy as “" +
                   copyName +
-                  "”. Reloading the work desk from Drive…"
+                  "”. Loading from Google Drive…"
               );
-              await reloadCurrentProjectFromDrive(projectName);
+              // Same as Discard: Load restores the work desk; edits live only in the copy.
+              await reloadCurrentProjectFromDrive(projectName, { discardLocalEdits: true });
             } catch (error) {
               setStatus(
                 "Could not save a local copy: " +

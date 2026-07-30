@@ -914,6 +914,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                     UnsavedExitChoice.SaveLocalCopy -> {
                         val state = _editor.value
+                        // Persist buffer so the drawer copy includes unsaved edits.
                         if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
                             runCatching {
                                 repo.writeFile(projectId, state.activePath, state.editorText)
@@ -922,12 +923,14 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         val copyName = repo.allocateCopyName(projectName)
                         repo.duplicateProjectLocally(projectId, copyName)
                         refreshProjects()
+                        // Work desk + editor: same as Discard — Load latest from Drive.
                         _editor.update {
                             it.copy(
-                                status = "Saved a local drawer copy as “$copyName”. Reloading from Drive…",
+                                dirty = false,
+                                status =
+                                    "Saved a local drawer copy as “$copyName”. Loading from Google Drive…",
                             )
                         }
-                        // Same as Load: replace work desk + editor from Drive.
                         loadCurrentProjectFromDriveSuspending(
                             activity = activity,
                             projectId = projectId,
