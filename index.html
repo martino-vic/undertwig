@@ -283,27 +283,32 @@
         min-width: 0;
       }
 
-      .tree-section-other {
+      .tree-section-other,
+      .tree-section-cloud {
         margin: 0 4px 6px;
         padding: 2px 0 4px;
+      }
+
+      .tree-project-card {
+        margin: 4px 6px;
+        padding: 2px 0;
         border-radius: 8px;
+        border: 1px solid transparent;
+      }
+
+      .tree-project-card-local {
         background: color-mix(in srgb, var(--panel-soft) 55%, transparent);
+        border-color: color-mix(in srgb, var(--border) 70%, transparent);
       }
 
-      .tree-section-cloud-own {
-        margin: 0 4px 6px;
-        padding: 2px 0 4px;
-        border-radius: 8px;
+      .tree-project-card-own {
         background: color-mix(in srgb, #3d7a8c 16%, transparent);
-        border: 1px solid color-mix(in srgb, #5b8fa3 28%, transparent);
+        border-color: color-mix(in srgb, #5b8fa3 40%, transparent);
       }
 
-      .tree-section-cloud-invited {
-        margin: 0 4px 6px;
-        padding: 2px 0 4px;
-        border-radius: 8px;
+      .tree-project-card-invited {
         background: color-mix(in srgb, #c4923a 14%, transparent);
-        border: 1px solid color-mix(in srgb, #c4923a 32%, transparent);
+        border-color: color-mix(in srgb, #c4923a 42%, transparent);
       }
 
       .tree-section-label {
@@ -6671,10 +6676,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       function appendCloudSectionLabel(labelEl, title, affix) {
         labelEl.textContent = "";
+        const affixText = String(affix || "").trim();
+        if (!affixText) {
+          labelEl.appendChild(document.createTextNode(title));
+          return;
+        }
         labelEl.appendChild(document.createTextNode(title + " "));
         const affixEl = document.createElement("span");
         affixEl.className = "tree-section-label-affix";
-        affixEl.textContent = affix;
+        affixEl.textContent = affixText;
         labelEl.appendChild(affixEl);
       }
 
@@ -6704,6 +6714,33 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return row;
       }
 
+      function cloudProjectModifiedMs(projectName, invited) {
+        const name = String(projectName || "").trim();
+        if (!name) {
+          return 0;
+        }
+        const cache = invited ? cloudInvitedRemoteCache : cloudProjectsCache;
+        for (let i = 0; i < (cache || []).length; i += 1) {
+          const project = cache[i];
+          if (!project || project.name !== name) {
+            continue;
+          }
+          if (!project.modifiedTime) {
+            return 0;
+          }
+          const ms = Date.parse(project.modifiedTime);
+          return Number.isFinite(ms) ? ms : 0;
+        }
+        return 0;
+      }
+
+      function wrapProjectCard(nodeEl, kind) {
+        const card = document.createElement("div");
+        card.className = "tree-project-card tree-project-card-" + kind;
+        card.appendChild(nodeEl);
+        return card;
+      }
+
       function renderTree() {
         // Rebuilding the DOM mid-drag cancels the browser drag session and drops "randomly" fail.
         if (dragSourceProject || dragSourcePath) {
@@ -6725,7 +6762,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const currentNode = currentName
           ? root.children.find((node) => node.type === "folder" && node.path === currentName)
           : null;
-        // Drive-owned and invited locals live under their Cloud sections, not Other.
+        // Drive-owned and invited locals live under Cloud, not Other.
         const otherNodes = root.children.filter(
           (node) =>
             node.type === "folder" &&
@@ -6756,14 +6793,22 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const currentHint = document.createElement("div");
         currentHint.className = "tree-section-hint";
         currentHint.textContent = showCloudSection
-          ? "Drag a project here from Other or Cloud"
+          ? "Drag a project here from Cloud or Other"
           : "Drag a project here from Other";
         currentSection.appendChild(currentHint);
 
         const currentBody = document.createElement("div");
         currentBody.className = "tree-section-body";
         if (currentNode) {
-          currentBody.appendChild(renderNode(currentNode, 0, { section: "current" }));
+          const currentKind =
+            sharedCurrent || role === "writer" || role === "reader"
+              ? "invited"
+              : showCloudSection && cloudOwnNames.has(currentName)
+                ? "own"
+                : "local";
+          currentBody.appendChild(
+            wrapProjectCard(renderNode(currentNode, 0, { section: "current" }), currentKind)
+          );
         } else {
           currentBody.classList.add("is-empty");
           currentBody.textContent = "No current project";
@@ -6813,57 +6858,40 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         tree.appendChild(currentSection);
 
-        const divider = document.createElement("hr");
-        divider.className = "tree-section-divider";
-        divider.setAttribute("aria-hidden", "true");
-        tree.appendChild(divider);
-
-        const otherSection = document.createElement("div");
-        otherSection.className = "tree-section tree-section-other";
-        const otherLabel = document.createElement("div");
-        otherLabel.className = "tree-section-label";
-        otherLabel.textContent = "Other";
-        otherSection.appendChild(otherLabel);
-
-        const otherBody = document.createElement("div");
-        otherBody.className = "tree-section-body";
-        if (otherNodes.length) {
-          otherNodes.forEach((node) => {
-            otherBody.appendChild(renderNode(node, 0, { section: "other", projectDraggable: true }));
-          });
-        } else {
-          otherBody.classList.add("is-empty");
-          otherBody.textContent = "No other projects yet";
-        }
-        otherSection.appendChild(otherBody);
-        tree.appendChild(otherSection);
-
         if (showCloudSection) {
-          const cloudOwnDivider = document.createElement("hr");
-          cloudOwnDivider.className = "tree-section-divider";
-          cloudOwnDivider.setAttribute("aria-hidden", "true");
-          tree.appendChild(cloudOwnDivider);
+          const cloudDivider = document.createElement("hr");
+          cloudDivider.className = "tree-section-divider";
+          cloudDivider.setAttribute("aria-hidden", "true");
+          tree.appendChild(cloudDivider);
 
-          const cloudOwnSection = document.createElement("div");
-          cloudOwnSection.className = "tree-section tree-section-cloud tree-section-cloud-own";
-          cloudOwnSection.appendChild(
-            createCloudSectionHeader("Cloud", "(own)", "Refresh your Undertwig projects from Google Drive")
+          const cloudSection = document.createElement("div");
+          cloudSection.className = "tree-section tree-section-cloud";
+          cloudSection.appendChild(
+            createCloudSectionHeader(
+              "Cloud",
+              "",
+              "Refresh Undertwig projects from Google Drive"
+            )
           );
 
-          const cloudOwnBody = document.createElement("div");
-          cloudOwnBody.className = "tree-section-body";
+          const cloudBody = document.createElement("div");
+          cloudBody.className = "tree-section-body";
 
-          if (cloudProjectsLoading && !cloudProjectsCache.length) {
-            cloudOwnBody.classList.add("is-empty");
-            cloudOwnBody.textContent = "Loading Google Drive…";
-          } else if (cloudProjectsNeedConnect && !cloudProjectsCache.length) {
-            cloudOwnBody.classList.remove("is-empty");
-            cloudOwnBody.textContent = "";
+          const hasAnyCloudCache =
+            (cloudProjectsCache && cloudProjectsCache.length) ||
+            (cloudInvitedRemoteCache && cloudInvitedRemoteCache.length);
+
+          if (cloudProjectsLoading && !hasAnyCloudCache) {
+            cloudBody.classList.add("is-empty");
+            cloudBody.textContent = "Loading Google Drive…";
+          } else if (cloudProjectsNeedConnect && !hasAnyCloudCache) {
+            cloudBody.classList.remove("is-empty");
+            cloudBody.textContent = "";
             const hint = document.createElement("div");
             hint.className = "tree-section-body is-empty";
             hint.style.paddingBottom = "0";
             hint.textContent = "Connect Google Drive to list your cloud projects.";
-            cloudOwnBody.appendChild(hint);
+            cloudBody.appendChild(hint);
             const connectRow = document.createElement("button");
             connectRow.type = "button";
             connectRow.className = "tree-row";
@@ -6876,10 +6904,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               event.stopPropagation();
               refreshCloudProjectsList({ interactive: true });
             });
-            cloudOwnBody.appendChild(connectRow);
-          } else if (cloudProjectsError && !cloudProjectsCache.length) {
-            cloudOwnBody.classList.add("is-empty");
-            cloudOwnBody.textContent = cloudProjectsError;
+            cloudBody.appendChild(connectRow);
+          } else if (cloudProjectsError && !hasAnyCloudCache) {
+            cloudBody.classList.add("is-empty");
+            cloudBody.textContent = cloudProjectsError;
           } else {
             const ownedFolderIds = {};
             (cloudProjectsCache || []).forEach(function (project) {
@@ -6887,43 +6915,72 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 ownedFolderIds[project.name] = project.id;
               }
             });
-            const cloudOwnNodes = Array.from(cloudOwnNames)
+            const invitedFolderIds = {};
+            (cloudInvitedRemoteCache || []).forEach(function (project) {
+              if (project && project.name && project.id) {
+                invitedFolderIds[project.name] = project.id;
+              }
+            });
+
+            const cloudEntries = [];
+            Array.from(cloudOwnNames)
               .filter(function (name) {
                 return name && name !== currentName && !invitedNames.has(name);
               })
-              .sort(function (a, b) {
-                return a.localeCompare(b);
-              })
-              .map(function (name) {
-                const localNode = root.children.find(
-                  (node) => node.type === "folder" && node.path === name
-                );
-                if (localNode) {
-                  return localNode;
-                }
-                return {
+              .forEach(function (name) {
+                cloudEntries.push({
                   name: name,
-                  path: name,
+                  invited: false,
+                  modifiedMs: cloudProjectModifiedMs(name, false),
+                  driveFolderId: ownedFolderIds[name] || null,
+                });
+              });
+            Array.from(invitedNames)
+              .filter(function (name) {
+                return name && name !== currentName;
+              })
+              .forEach(function (name) {
+                cloudEntries.push({
+                  name: name,
+                  invited: true,
+                  modifiedMs: cloudProjectModifiedMs(name, true),
+                  driveFolderId: invitedFolderIds[name] || null,
+                });
+              });
+            cloudEntries.sort(function (a, b) {
+              if (b.modifiedMs !== a.modifiedMs) {
+                return b.modifiedMs - a.modifiedMs;
+              }
+              return a.name.localeCompare(b.name);
+            });
+
+            if (!cloudEntries.length) {
+              cloudBody.classList.add("is-empty");
+              cloudBody.textContent = cloudProjectsLoading
+                ? "Refreshing…"
+                : "No cloud projects yet";
+            } else {
+              cloudEntries.forEach(function (entry) {
+                const localNode = root.children.find(
+                  (node) => node.type === "folder" && node.path === entry.name
+                );
+                const node = localNode || {
+                  name: entry.name,
+                  path: entry.name,
                   type: "folder",
                   children: [],
                   cloudOnly: true,
-                  driveFolderId: ownedFolderIds[name] || null,
+                  invited: entry.invited,
+                  driveFolderId: entry.driveFolderId,
                 };
-              });
-
-            if (!cloudOwnNodes.length) {
-              cloudOwnBody.classList.add("is-empty");
-              cloudOwnBody.textContent = cloudProjectsLoading
-                ? "Refreshing…"
-                : "No projects in your Google Drive yet";
-            } else {
-              cloudOwnNodes.forEach(function (node) {
-                cloudOwnBody.appendChild(
-                  renderNode(node, 0, {
-                    section: "cloud",
-                    projectDraggable: true,
-                    cloudOnly: Boolean(node.cloudOnly),
-                  })
+                const rendered = renderNode(node, 0, {
+                  section: "cloud",
+                  projectDraggable: true,
+                  cloudOnly: Boolean(node.cloudOnly) || !localNode,
+                  invited: Boolean(entry.invited),
+                });
+                cloudBody.appendChild(
+                  wrapProjectCard(rendered, entry.invited ? "invited" : "own")
                 );
               });
               if (cloudProjectsLoading) {
@@ -6931,89 +6988,48 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 loading.className = "tree-section-body is-empty";
                 loading.style.paddingTop = "2px";
                 loading.textContent = "Refreshing…";
-                cloudOwnBody.appendChild(loading);
+                cloudBody.appendChild(loading);
               }
             }
           }
-          cloudOwnSection.appendChild(cloudOwnBody);
-          tree.appendChild(cloudOwnSection);
-
-          const cloudInvitedDivider = document.createElement("hr");
-          cloudInvitedDivider.className = "tree-section-divider";
-          cloudInvitedDivider.setAttribute("aria-hidden", "true");
-          tree.appendChild(cloudInvitedDivider);
-
-          const cloudInvitedSection = document.createElement("div");
-          cloudInvitedSection.className =
-            "tree-section tree-section-cloud tree-section-cloud-invited";
-          cloudInvitedSection.appendChild(
-            createCloudSectionHeader(
-              "Cloud",
-              "(invited)",
-              "Refresh invited Undertwig projects from Google Drive"
-            )
-          );
-
-          const cloudInvitedBody = document.createElement("div");
-          cloudInvitedBody.className = "tree-section-body";
-          const invitedFolderIds = {};
-          (cloudInvitedRemoteCache || []).forEach(function (project) {
-            if (project && project.name && project.id) {
-              invitedFolderIds[project.name] = project.id;
-            }
-          });
-          const invitedNodes = Array.from(invitedNames)
-            .filter(function (name) {
-              return name && name !== currentName;
-            })
-            .sort(function (a, b) {
-              return a.localeCompare(b);
-            })
-            .map(function (name) {
-              const localNode = root.children.find(
-                (node) => node.type === "folder" && node.path === name
-              );
-              if (localNode) {
-                return localNode;
-              }
-              return {
-                name: name,
-                path: name,
-                type: "folder",
-                children: [],
-                cloudOnly: true,
-                invited: true,
-                driveFolderId: invitedFolderIds[name] || null,
-              };
-            });
-
-          if (!invitedNodes.length) {
-            cloudInvitedBody.classList.add("is-empty");
-            cloudInvitedBody.textContent = cloudProjectsLoading
-              ? "Refreshing…"
-              : "No invited projects yet";
-          } else {
-            invitedNodes.forEach(function (node) {
-              cloudInvitedBody.appendChild(
-                renderNode(node, 0, {
-                  section: "cloud",
-                  projectDraggable: true,
-                  cloudOnly: Boolean(node.cloudOnly),
-                  invited: Boolean(node.invited) || isInvitedProjectName(node.path),
-                })
-              );
-            });
-            if (cloudProjectsLoading) {
-              const loading = document.createElement("div");
-              loading.className = "tree-section-body is-empty";
-              loading.style.paddingTop = "2px";
-              loading.textContent = "Refreshing…";
-              cloudInvitedBody.appendChild(loading);
-            }
-          }
-          cloudInvitedSection.appendChild(cloudInvitedBody);
-          tree.appendChild(cloudInvitedSection);
+          cloudSection.appendChild(cloudBody);
+          tree.appendChild(cloudSection);
         }
+
+        const divider = document.createElement("hr");
+        divider.className = "tree-section-divider";
+        divider.setAttribute("aria-hidden", "true");
+        tree.appendChild(divider);
+
+        const otherSection = document.createElement("div");
+        otherSection.className = "tree-section tree-section-other";
+        const otherLabel = document.createElement("div");
+        otherLabel.className = "tree-section-label";
+        otherLabel.textContent = showCloudSection ? "Other (on this device)" : "Other";
+        otherSection.appendChild(otherLabel);
+
+        const otherBody = document.createElement("div");
+        otherBody.className = "tree-section-body";
+        if (otherNodes.length) {
+          otherNodes
+            .slice()
+            .sort(function (a, b) {
+              return String(a.name || "").localeCompare(String(b.name || ""));
+            })
+            .forEach((node) => {
+              otherBody.appendChild(
+                wrapProjectCard(
+                  renderNode(node, 0, { section: "other", projectDraggable: true }),
+                  "local"
+                )
+              );
+            });
+        } else {
+          otherBody.classList.add("is-empty");
+          otherBody.textContent = "No other projects yet";
+        }
+        otherSection.appendChild(otherBody);
+        tree.appendChild(otherSection);
       }
 
       function promoteProjectToCurrent(projectName) {
