@@ -3,6 +3,7 @@ package com.undertwig.app.data
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -15,6 +16,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import kotlin.coroutines.coroutineContext
 
 /**
  * Mirrors the website's Undertwig Drive layout:
@@ -255,6 +257,34 @@ class DriveSyncRepository(
     }
 
     /**
+     * Pull the local project's Drive folder into the on-device mirror (desktop "Load").
+     * Resolves the folder via linked id or `Undertwig/<name>`, then refreshes all files.
+     * @return number of files downloaded
+     */
+    suspend fun syncProjectFromDrive(
+        accessToken: String,
+        projectId: String,
+        projectName: String,
+    ): Int = withContext(Dispatchers.IO) {
+        val summary = projects.listProjects().firstOrNull { it.id == projectId }
+            ?: error("Open a project first.")
+        val name = projectName.trim().ifEmpty { summary.name }
+        val folderId = resolveProjectFolderId(accessToken, projectId, name)
+            ?: error(
+                "“$name” was not found on Google Drive. Save it once from this device, or open it from Cloud first.",
+            )
+        val role = summary.driveRole?.takeIf { it.isNotBlank() } ?: "owner"
+        pullProject(
+            accessToken = accessToken,
+            folderId = folderId,
+            projectName = name,
+            role = role,
+            ownerEmail = summary.ownerEmail,
+        )
+        projects.listFiles(projectId).size
+    }
+
+    /**
      * Download a Drive project folder into a local mirror and return the local project id.
      */
     suspend fun pullProject(
@@ -275,6 +305,7 @@ class DriveSyncRepository(
         val name = projectName.trim().ifEmpty { meta.optString("name").ifBlank { "Untitled" } }
         val owner = ownerEmail ?: firstOwnerEmail(meta)
 
+        coroutineContext.ensureActive()
         val entries = listFolderTree(accessToken, folderId, "")
         val folders = entries.filter { it.isFolder }.map { it.path }
         val fileEntries = entries.filter { !it.isFolder }
@@ -286,6 +317,7 @@ class DriveSyncRepository(
 
         val files = linkedMapOf<String, ByteArray>()
         for (entry in fileEntries) {
+            coroutineContext.ensureActive()
             files[entry.path] = downloadDriveFile(accessToken, entry.id)
         }
 

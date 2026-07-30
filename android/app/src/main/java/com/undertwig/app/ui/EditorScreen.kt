@@ -1,5 +1,10 @@
 package com.undertwig.app.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -15,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -24,10 +30,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -88,7 +94,8 @@ fun EditorScreen(
     onSelectFile: (String) -> Unit,
     onEditorChange: (String) -> Unit,
     onSave: () -> Unit,
-    onLoadFile: (String?) -> Unit,
+    onLoadFromDrive: () -> Unit,
+    onCancelLoadFromDrive: () -> Unit,
     onConvert: () -> Unit,
     onBibliography: () -> Unit,
     onCancelBusy: () -> Unit,
@@ -117,6 +124,15 @@ fun EditorScreen(
     var renameTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
     var renameValue by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
+    val loadSpin = rememberInfiniteTransition(label = "loadSpin")
+    val loadAngle by loadSpin.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+        ),
+        label = "loadAngle",
+    )
 
     fun runProjectDownload() {
         val export = onExportZip()
@@ -210,19 +226,23 @@ fun EditorScreen(
                         Icon(Icons.Default.Save, contentDescription = "Save")
                     }
                     if (authUser != null) {
-                        IconButton(
-                            onClick = { onLoadFile(null) },
-                            enabled = !state.loadingFile && state.activePath.isNotBlank(),
-                        ) {
-                            if (state.loadingFile) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                )
-                            } else {
+                        if (state.loadingFile) {
+                            TextButton(onClick = onCancelLoadFromDrive) {
                                 Icon(
-                                    Icons.Default.CloudDownload,
-                                    contentDescription = "Load active file from Google Drive",
+                                    Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .rotate(loadAngle),
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text("Cancel")
+                            }
+                        } else {
+                            IconButton(onClick = onLoadFromDrive) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Load current project from Google Drive",
                                 )
                             }
                         }
@@ -507,7 +527,7 @@ fun EditorScreen(
                     if (target.isFolder) {
                         "Delete or rename this folder?"
                     } else {
-                        "Load this file from Google Drive, or delete / rename it?"
+                        "Delete or rename this file?"
                     },
                 )
             },
@@ -522,16 +542,6 @@ fun EditorScreen(
             },
             dismissButton = {
                 Row {
-                    if (!target.isFolder && authUser != null) {
-                        TextButton(
-                            onClick = {
-                                val path = target.path
-                                actionTarget = null
-                                onLoadFile(path)
-                            },
-                            enabled = !state.loadingFile,
-                        ) { Text("Load") }
-                    }
                     TextButton(
                         onClick = {
                             actionTarget = null

@@ -519,8 +519,15 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
-    /** Pull one file from Google Drive into the local project (active file by default). */
-    fun loadFileFromDrive(activity: Activity, relativePath: String? = null) {
+    /**
+     * Load the current project from Google Drive into the local tree (desktop "Load").
+     * While in flight, call again or [cancelLoadFromDrive] to abort.
+     */
+    fun loadProjectFromDrive(activity: Activity) {
+        if (loadFileJob?.isActive == true) {
+            cancelLoadFromDrive()
+            return
+        }
         val state = _editor.value
         if (state.projectId.isEmpty()) {
             _editor.update {
@@ -531,63 +538,65 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         if (_auth.value.user == null) {
             Toast.makeText(
                 getApplication(),
-                "Log in to load files from Google Drive.",
+                "Log in to load from Google Drive.",
                 Toast.LENGTH_SHORT,
             ).show()
             return
         }
-        val path = (relativePath ?: state.activePath).trim().trimStart('/')
-        if (path.isEmpty()) {
-            _editor.update {
-                it.copy(status = "Nothing to load", error = "Select a file first.")
+
+        val projectId = state.projectId
+        val projectName = state.projectName
+        val previousActive = state.activePath
+
+        // Flush unsaved text before replacing local files (same as desktop).
+        if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
+            runCatching {
+                repo.writeFile(projectId, state.activePath, state.editorText)
             }
-            return
         }
-        if (loadFileJob?.isActive == true) return
 
         loadFileJob = viewModelScope.launch {
             _editor.update {
                 it.copy(
                     loadingFile = true,
-                    status = "Loading “$path” from Drive…",
+                    status = "Loading “$projectName” from Google Drive…",
                     error = null,
                 )
             }
             try {
-                withDriveAccess(activity) { token ->
-                    driveSync.pullFile(token, state.projectId, state.projectName, path)
+                val fileCount = withDriveAccess(activity) { token ->
+                    driveSync.syncProjectFromDrive(token, projectId, projectName)
                 }
-                val files = repo.listFiles(state.projectId)
-                val folders = repo.listFolders(state.projectId)
-                val active = _editor.value.activePath
-                if (active == path && path in files) {
-                    val file = repo.readFile(state.projectId, path)
-                    _editor.update {
-                        it.copy(
-                            files = files,
-                            folders = folders,
-                            editorText = editorDisplayText(file),
-                            dirty = false,
-                            loadingFile = false,
-                            error = null,
-                        )
-                    }
+                val files = repo.listFiles(projectId)
+                val folders = repo.listFolders(projectId)
+                val active = when {
+                    previousActive.isNotBlank() && previousActive in files -> previousActive
+                    "main.tex" in files -> "main.tex"
+                    else -> files.firstOrNull().orEmpty()
+                }
+                val file = if (active.isNotEmpty()) {
+                    repo.readFile(projectId, active)
                 } else {
-                    _editor.update {
-                        it.copy(
-                            files = files,
-                            folders = folders,
-                            loadingFile = false,
-                            error = null,
-                        )
-                    }
+                    null
                 }
-                flashStatus("Loaded “$path” from Drive")
-                Toast.makeText(
-                    getApplication(),
-                    "Loaded $path from Google Drive",
-                    Toast.LENGTH_SHORT,
-                ).show()
+                _editor.update {
+                    it.copy(
+                        projectName = repo.projectName(projectId),
+                        files = files,
+                        folders = folders,
+                        activePath = active,
+                        editorText = file?.let { f -> editorDisplayText(f) }.orEmpty(),
+                        dirty = false,
+                        loadingFile = false,
+                        error = null,
+                        pdfPath = repo.existingFile(projectId, "main.pdf")?.absolutePath,
+                    )
+                }
+                refreshProjects()
+                flashStatus(
+                    "Loaded “$projectName” from Google Drive (" +
+                        "$fileCount file${if (fileCount == 1) "" else "s"}).",
+                )
             } catch (e: AuthRepository.SignInCancelledException) {
                 _editor.update { it.copy(loadingFile = false) }
                 Toast.makeText(
@@ -597,8 +606,14 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 ).show()
                 restoreEditingStatus()
             } catch (e: CancellationException) {
-                _editor.update { it.copy(loadingFile = false) }
-                throw e
+                _editor.update {
+                    it.copy(
+                        loadingFile = false,
+                        status = "Load cancelled.",
+                        error = null,
+                    )
+                }
+                // Job is already cancelling — don't delay (it would throw again).
             } catch (e: Exception) {
                 if (isInvalidDriveCredentials(e)) {
                     authRepo.clearDriveToken()
@@ -607,12 +622,12 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     it.copy(
                         loadingFile = false,
                         status = "Load failed",
-                        error = e.message ?: "Could not load file from Google Drive.",
+                        error = e.message ?: "Could not load from Google Drive.",
                     )
                 }
                 Toast.makeText(
                     getApplication(),
-                    e.message ?: "Could not load file from Google Drive.",
+                    e.message ?: "Could not load from Google Drive.",
                     Toast.LENGTH_LONG,
                 ).show()
                 delay(STATUS_FLASH_MS)
@@ -621,6 +636,15 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             }
         }
+    }
+
+    fun cancelLoadFromDrive() {
+        val job = loadFileJob ?: return
+        if (!job.isActive) return
+        _editor.update {
+            it.copy(status = "Cancelling…", error = null)
+        }
+        job.cancel()
     }
 
     private fun flashStatus(message: String) {
