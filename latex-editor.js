@@ -325,6 +325,19 @@
           folding: true,
           readOnly: pendingReadOnly,
           ariaLabel: "LaTeX source editor",
+          // No predictive / ghost / word-based suggestions while typing.
+          quickSuggestions: false,
+          suggestOnTriggerCharacters: false,
+          wordBasedSuggestions: "off",
+          parameterHints: { enabled: false },
+          snippetSuggestions: "none",
+          tabCompletion: "off",
+          inlineSuggest: { enabled: false },
+          suggest: {
+            showWords: false,
+            showSnippets: false,
+            preview: false,
+          },
         });
 
         editor.onDidChangeModelContent(function () {

@@ -3123,7 +3123,7 @@
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260729a"></script>
-    <script src="latex-editor.js?v=20260729h"></script>
+    <script src="latex-editor.js?v=20260730a"></script>
     <script>
 
       const DEMO_FIGURE_PNG_BASE64 =
@@ -4020,6 +4020,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let writingRoomDialogMode = null;
       let writingRoomGateDismissedKey = null; // project or "occupied:project" after view-only / OK
       let writingRoomGatePromise = null;
+      /** After an explicit Exit, do not auto-resume a leftover held-by-me lock. */
+      let writingRoomSuppressResumeKey = null;
       let writingRoomIdleTimer = null;
       let writingRoomIdlePromptOpen = false;
       let cloudStatusMode = "logged-out";
@@ -7196,6 +7198,26 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
           if (lock && !UndertwigCloud.isLockStale(lock) && UndertwigCloud.isLockHeldByMe(lock)) {
+            // User just exited — finish releasing instead of reclaiming the room.
+            if (writingRoomSuppressResumeKey === projectName) {
+              try {
+                if (UndertwigCloud.releaseFileLock) {
+                  await UndertwigCloud.releaseFileLock(projectName, undefined, {
+                    fileId: lock._fileId || lock.id || null,
+                  });
+                }
+              } catch (_releaseError) {
+                // Best-effort second trash.
+              }
+              fileLockHeldProject = null;
+              fileLockHeldFileId = null;
+              fileLockOccupied = null;
+              stopFileLockHeartbeat();
+              writingRoomGateDismissedKey = "enter:" + projectName;
+              updateWritingRoomUi();
+              maybePresentWritingRoomGate();
+              return;
+            }
             // Resume after reload / another tab of the same account.
             fileLockHeldProject = projectName;
             fileLockHeldFileId = lock._fileId || null;
@@ -7244,6 +7266,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
         }
         writingRoomGateDismissedKey = null;
+        writingRoomSuppressResumeKey = null;
         setWritingRoomBusy(true, "enter");
         setStatus("Entering the writing room for “" + projectName + "”…");
         try {
@@ -7253,6 +7276,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             fileLockHeldFileId =
               (result.lock && (result.lock._fileId || result.lock.id)) || null;
             fileLockOccupied = null;
+            writingRoomSuppressResumeKey = null;
             startFileLockHeartbeat(projectName);
             setStatus("You are in the writing room for “" + projectName + "”. Exit when you are done.");
           } else {
@@ -7298,8 +7322,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
         }
         setWritingRoomBusy(true, "exit");
+        // Prevent refresh from reclaiming a still-visible lock / reopening the door.
+        writingRoomSuppressResumeKey = projectName;
+        writingRoomGateDismissedKey = projectName
+          ? "enter:" + projectName
+          : null;
         await releaseHeldFileLock();
-        writingRoomGateDismissedKey = null;
         setWritingRoomBusy(false);
         await refreshWritingRoomStatus();
         if (projectName) {
