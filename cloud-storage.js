@@ -1254,6 +1254,38 @@
     return response.ok;
   }
 
+  async function tryDeleteDriveFile(fileId) {
+    const response = await driveFetch(
+      DRIVE_API + "/files/" + encodeURIComponent(fileId) + "?supportsAllDrives=true",
+      { method: "DELETE" }
+    );
+    return response.ok || response.status === 404;
+  }
+
+  /**
+   * Remove a writing-room lock file for real: trash → detach → DELETE.
+   * Does not trust ownership metadata (lock release used to pass owners:[] and skip trash).
+   */
+  async function forceRemoveLockFile(fileId, parentId) {
+    const id = String(fileId || "").trim();
+    if (!id) {
+      return false;
+    }
+    if (await tryTrashDriveFile(id)) {
+      return true;
+    }
+    const parent = String(parentId || "").trim();
+    if (parent) {
+      try {
+        await removeDriveParents(id, parent);
+        return true;
+      } catch (_error) {
+        // Fall through to DELETE.
+      }
+    }
+    return tryDeleteDriveFile(id);
+  }
+
   /**
    * Best-effort trash without awaiting token refresh — for page unload.
    */
@@ -1464,7 +1496,8 @@
     }
   }
 
-  async function uploadFileToFolder(parentId, fileName, fileEntry, existingId) {
+  async function uploadFileToFolder(parentId, fileName, fileEntry, existingId, options) {
+    const opts = options || {};
     const mime = mimeForPath(fileName);
     const bodyBlob = fileEntry.binary
       ? base64ToBlob(fileEntry.content, mime)
@@ -1495,12 +1528,13 @@
     });
     if (!response.ok) {
       if (existingId && response.status === 404) {
-        return uploadFileToFolder(parentId, fileName, fileEntry, null);
+        return uploadFileToFolder(parentId, fileName, fileEntry, null, opts);
       }
       throw new Error(await readDriveError(response, "Could not upload " + fileName + " to Google Drive."));
     }
     const saved = await response.json();
-    if (!existingId && saved && saved.id) {
+    // Writing-room locks must stay owned by the creating session so Exit can trash them.
+    if (!existingId && saved && saved.id && !opts.skipOwnerTransfer) {
       await maybeTransferToProjectOwner(saved.id);
     }
     return saved;
@@ -3426,7 +3460,8 @@
       parentId,
       fileName,
       entry,
-      existingMeta && existingMeta.id
+      existingMeta && existingMeta.id,
+      { skipOwnerTransfer: true }
     );
   }
 
@@ -3522,35 +3557,43 @@
     let existing = null;
     if (name) {
       existing = await readFileLock(name);
-      if (!existing && !opts.fileId) {
-        return true;
-      }
-      if (existing && !isLockHeldByMe(existing) && !isLockStale(existing)) {
-        return false;
-      }
     }
-    const fileId = (existing && existing._fileId) || opts.fileId;
-    if (!fileId) {
+
+    // Only release our lock (or an abandoned one). Session fileId is a fallback
+    // when the listing lags right after heartbeats.
+    if (
+      existing &&
+      !isLockHeldByMe(existing) &&
+      !isLockStale(existing) &&
+      !(opts.fileId && existing._fileId && String(existing._fileId) === String(opts.fileId))
+    ) {
       return false;
     }
-    try {
-      await removeDriveItemFromProject({
-        id: fileId,
-        parentId: (existing && existing._parentId) || null,
-        owners: [],
-      });
-      return true;
-    } catch (_error) {
-      try {
-        await tryTrashDriveFile(fileId, { keepalive: Boolean(opts.keepalive) });
-        return true;
-      } catch (_error2) {
-        if (opts.keepalive) {
-          trashDriveFileKeepaliveSync(fileId);
-        }
+
+    const fileId = (existing && existing._fileId) || opts.fileId;
+    const parentId = (existing && existing._parentId) || null;
+    if (!fileId) {
+      // Nothing to remove — treat as already free.
+      return !existing;
+    }
+
+    let removed = await forceRemoveLockFile(fileId, parentId);
+    if (!removed && parentId) {
+      removed = await forceRemoveLockFile(fileId, parentId);
+    }
+
+    // Verify Drive no longer lists a live lock held by this device.
+    if (name) {
+      let again = await readFileLock(name);
+      if (again && isLockHeldByMe(again)) {
+        await forceRemoveLockFile(again._fileId, again._parentId);
+        again = await readFileLock(name);
+      }
+      if (again && isLockHeldByMe(again) && !isLockStale(again)) {
         return false;
       }
     }
+    return true;
   }
 
   loadProjectMap();

@@ -6822,22 +6822,43 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         stopFileLockHeartbeat();
         const projectName = fileLockHeldProject;
         const fileId = fileLockHeldFileId;
-        fileLockHeldProject = null;
-        fileLockHeldFileId = null;
+        // Keep ids until Drive confirms release — otherwise we can't retry / verify.
         if (!projectName && !fileId) {
-          return;
+          return true;
         }
         if (!UndertwigCloud.releaseFileLock) {
-          return;
+          fileLockHeldProject = null;
+          fileLockHeldFileId = null;
+          return false;
         }
+        let released = false;
         try {
-          await UndertwigCloud.releaseFileLock(projectName, undefined, {
+          released = await UndertwigCloud.releaseFileLock(projectName, undefined, {
             keepalive: Boolean(opts.keepalive),
             fileId: fileId,
           });
         } catch (_error) {
-          // Best-effort.
+          released = false;
         }
+        if (!released && !opts.keepalive && projectName && UndertwigCloud.readFileLock) {
+          try {
+            const again = await UndertwigCloud.readFileLock(projectName);
+            if (!again || !UndertwigCloud.isLockHeldByMe(again)) {
+              released = true;
+            } else {
+              released = await UndertwigCloud.releaseFileLock(projectName, undefined, {
+                fileId: again._fileId || fileId || null,
+              });
+            }
+          } catch (_error2) {
+            released = false;
+          }
+        }
+        if (released || opts.keepalive) {
+          fileLockHeldProject = null;
+          fileLockHeldFileId = null;
+        }
+        return Boolean(released);
       }
 
       function setWritingRoomBusy(busy, mode) {
@@ -7278,14 +7299,26 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           if (lock && !UndertwigCloud.isLockStale(lock) && UndertwigCloud.isLockHeldByMe(lock)) {
             // User just exited — finish releasing instead of reclaiming the room.
             if (writingRoomSuppressResumeKey === projectName) {
+              let released = false;
               try {
                 if (UndertwigCloud.releaseFileLock) {
-                  await UndertwigCloud.releaseFileLock(projectName, undefined, {
+                  released = await UndertwigCloud.releaseFileLock(projectName, undefined, {
                     fileId: lock._fileId || lock.id || null,
                   });
                 }
               } catch (_releaseError) {
-                // Best-effort second trash.
+                released = false;
+              }
+              if (!released) {
+                // Lock still ours — stay inside rather than fake an exit.
+                writingRoomSuppressResumeKey = null;
+                fileLockHeldProject = projectName;
+                fileLockHeldFileId = lock._fileId || null;
+                fileLockOccupied = null;
+                startFileLockHeartbeat(projectName);
+                updateWritingRoomUi();
+                maybePresentWritingRoomGate();
+                return;
               }
               fileLockHeldProject = null;
               fileLockHeldFileId = null;
@@ -7692,14 +7725,31 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
 
         setWritingRoomBusy(true, "exit");
-        // Prevent refresh from reclaiming a still-visible lock / reopening the door.
+        writingRoomSessionDirty = false;
+        suppressCloudAutosave = false;
+        const released = await releaseHeldFileLock();
+        if (!released) {
+          // Stay in the room — do not pretend we left while Drive still holds our lock.
+          writingRoomSuppressResumeKey = null;
+          if (projectName && !fileLockHeldProject) {
+            fileLockHeldProject = projectName;
+          }
+          if (fileLockHeldProject) {
+            startFileLockHeartbeat(fileLockHeldProject);
+          }
+          setWritingRoomBusy(false);
+          setStatus(
+            "Could not release the writing room on Google Drive. You are still inside — try Exit again.",
+            true
+          );
+          updateWritingRoomUi();
+          return;
+        }
+        // Only suppress resume after Drive confirms the lock is gone.
         writingRoomSuppressResumeKey = projectName;
         writingRoomGateDismissedKey = projectName
           ? "enter:" + projectName
           : null;
-        await releaseHeldFileLock();
-        writingRoomSessionDirty = false;
-        suppressCloudAutosave = false;
         setWritingRoomBusy(false);
         await refreshWritingRoomStatus();
         if (projectName) {
