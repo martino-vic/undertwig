@@ -494,9 +494,16 @@ class DriveSyncRepository(
                 continue
             }
 
-            // Only Undertwig projects: parent folder named "Undertwig" (not owned by me).
+            // Project folder shared directly. Invitees often cannot read the parent
+            // Undertwig folder — keep those when the folder looks like a LaTeX project.
             val meta = folderMetaWithParents(accessToken, id) ?: child
-            if (!isUnderForeignUndertwig(accessToken, meta, me)) continue
+            when (undertwigInviteStatus(accessToken, meta, me)) {
+                InviteStatus.FOREIGN_UNDERTWIG -> Unit
+                InviteStatus.UNKNOWN -> {
+                    if (!looksLikeUndertwigProject(accessToken, id)) continue
+                }
+                InviteStatus.NOT_UNDERTWIG -> continue
+            }
             invitedIds += id
             invited += DriveRemoteProject(
                 folderId = id,
@@ -510,7 +517,7 @@ class DriveSyncRepository(
         }
 
         // Invites opened via Undertwig (link/email) — confirmed even if parent isn't readable.
-        for (remembered in loadRememberedInvitedProjects(accessToken)) {
+        for (remembered in loadRememberedInvitedProjects(accessToken, me)) {
             val id = remembered.folderId
             if (id in ownedIds || id == rootId || id in invitedIds) continue
             invitedIds += id
@@ -521,16 +528,28 @@ class DriveSyncRepository(
             invited.sortedByDescending { it.modifiedTimeMs }
     }
 
+    private enum class InviteStatus {
+        FOREIGN_UNDERTWIG,
+        NOT_UNDERTWIG,
+        UNKNOWN,
+    }
+
     /**
-     * True only when a parent folder is named Undertwig and is not owned by [me].
-     * Unrelated shared Drive folders are excluded.
+     * Classify a shared folder for Cloud (invited):
+     * - FOREIGN_UNDERTWIG: parent is Undertwig not owned by me
+     * - NOT_UNDERTWIG: readable parents exist and none is a foreign Undertwig
+     * - UNKNOWN: parents missing or unreadable (typical for project-only invites)
      */
-    private fun isUnderForeignUndertwig(
+    private fun undertwigInviteStatus(
         accessToken: String,
         folderMeta: JSONObject,
         me: String,
-    ): Boolean {
-        val parents = folderMeta.optJSONArray("parents") ?: return false
+    ): InviteStatus {
+        val parents = folderMeta.optJSONArray("parents")
+        if (parents == null || parents.length() == 0) {
+            return InviteStatus.UNKNOWN
+        }
+        var readableParents = 0
         for (i in 0 until parents.length()) {
             val parentId = parents.optString(i).takeIf { it.isNotBlank() } ?: continue
             val parent = runCatching {
@@ -539,16 +558,40 @@ class DriveSyncRepository(
                     "$DRIVE_API/files/${Uri.encode(parentId)}" +
                         "?supportsAllDrives=true&fields=id,name,mimeType,trashed,owners",
                 )
-            }.getOrNull() ?: continue
+            }.getOrNull()
+            if (parent == null) {
+                return InviteStatus.UNKNOWN
+            }
+            readableParents += 1
             if (parent.optBoolean("trashed", false)) continue
             if (parent.optString("mimeType") != "application/vnd.google-apps.folder") continue
             if (!parent.optString("name").equals(CLOUD_FOLDER_NAME, ignoreCase = true)) continue
             val parentOwner = firstOwnerEmail(parent)?.lowercase().orEmpty()
             if (parentOwner.isEmpty() || parentOwner != me) {
-                return true
+                return InviteStatus.FOREIGN_UNDERTWIG
             }
         }
-        return false
+        return if (readableParents > 0) InviteStatus.NOT_UNDERTWIG else InviteStatus.UNKNOWN
+    }
+
+    /** Soft check when the Undertwig parent cannot be read (invitee ACL). */
+    private fun looksLikeUndertwigProject(accessToken: String, folderId: String): Boolean {
+        return runCatching {
+            for (child in listChildren(accessToken, folderId)) {
+                val name = child.optString("name").lowercase()
+                if (name.isBlank()) continue
+                if (name == "main.tex" ||
+                    name.endsWith(".tex") ||
+                    name.endsWith(".bib") ||
+                    name.endsWith(".sty") ||
+                    name.endsWith(".cls") ||
+                    name.endsWith(".bst")
+                ) {
+                    return true
+                }
+            }
+            false
+        }.getOrDefault(false)
     }
 
     private fun folderMetaWithParents(accessToken: String, folderId: String): JSONObject? {
@@ -590,8 +633,10 @@ class DriveSyncRepository(
         writeInvitedRegistry(accessToken, existing)
     }
 
-    private fun loadRememberedInvitedProjects(accessToken: String): List<DriveRemoteProject> {
-        val me = ""
+    private fun loadRememberedInvitedProjects(
+        accessToken: String,
+        me: String,
+    ): List<DriveRemoteProject> {
         val registry = readInvitedRegistry(accessToken)
         val out = mutableListOf<DriveRemoteProject>()
         val kept = mutableListOf<JSONObject>()
@@ -599,12 +644,13 @@ class DriveSyncRepository(
             val id = entry.optString("id").takeIf { it.isNotBlank() } ?: continue
             val meta = folderMetaWithParents(accessToken, id) ?: continue
             if (meta.optString("mimeType") != "application/vnd.google-apps.folder") continue
-            val under = isUnderForeignUndertwig(accessToken, meta, me)
-            val parents = meta.optJSONArray("parents")
-            val hasParents = parents != null && parents.length() > 0
-            // Drop only when we can read parents and confirm this is not under Undertwig.
-            if (hasParents && !under && parentsAreReadable(accessToken, parents)) {
-                continue
+            when (undertwigInviteStatus(accessToken, meta, me)) {
+                InviteStatus.NOT_UNDERTWIG -> continue
+                InviteStatus.UNKNOWN -> {
+                    // Avoid re-listing random Shared-with-me folders that older builds stored.
+                    if (!looksLikeUndertwigProject(accessToken, id)) continue
+                }
+                InviteStatus.FOREIGN_UNDERTWIG -> Unit
             }
             kept += entry
             out += DriveRemoteProject(
@@ -625,27 +671,10 @@ class DriveSyncRepository(
         return out
     }
 
-    private fun parentsAreReadable(accessToken: String, parents: JSONArray): Boolean {
-        var readable = 0
-        for (i in 0 until parents.length()) {
-            val parentId = parents.optString(i).takeIf { it.isNotBlank() } ?: continue
-            val parent = runCatching {
-                getJson(
-                    accessToken,
-                    "$DRIVE_API/files/${Uri.encode(parentId)}" +
-                        "?supportsAllDrives=true&fields=id,name,mimeType,trashed",
-                )
-            }.getOrNull()
-            if (parent == null) return false
-            readable += 1
-        }
-        return readable > 0
-    }
-
     private fun readInvitedRegistry(accessToken: String): List<JSONObject> {
         val fileId = findAppDataFileId(accessToken, INVITED_REGISTRY_NAME) ?: return emptyList()
         return runCatching {
-            val bytes = downloadDriveFile(accessToken, fileId)
+            val bytes = downloadAppDataFile(accessToken, fileId)
             val payload = JSONObject(String(bytes, StandardCharsets.UTF_8))
             val arr = payload.optJSONArray("projects") ?: return emptyList()
             buildList {
@@ -654,6 +683,26 @@ class DriveSyncRepository(
                 }
             }
         }.getOrDefault(emptyList())
+    }
+
+    private fun downloadAppDataFile(accessToken: String, fileId: String): ByteArray {
+        val url =
+            "$DRIVE_API/files/${Uri.encode(fileId)}?alt=media&spaces=appDataFolder"
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 30_000
+            readTimeout = 60_000
+            setRequestProperty("Authorization", "Bearer $accessToken")
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                throwDriveHttpError(code, connection, "Could not download invited project list.")
+            }
+            return connection.inputStream.use { it.readBytes() }
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun writeInvitedRegistry(accessToken: String, projects: List<JSONObject>) {

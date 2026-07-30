@@ -2159,7 +2159,8 @@
         continue;
       }
 
-      // Project folder shared directly → only keep if parent is someone else's Undertwig.
+      // Project folder shared directly. Invitees often cannot read the parent
+      // Undertwig folder — keep those when the folder looks like a LaTeX project.
       const meta =
         (await fetchDriveFileMeta(
           id,
@@ -2168,7 +2169,11 @@
       if (!isDriveFolderMeta(meta)) {
         continue;
       }
-      if (!(await isUnderForeignUndertwig(meta, me))) {
+      const inviteStatus = await undertwigInviteStatus(meta, me);
+      if (inviteStatus === "not-undertwig") {
+        continue;
+      }
+      if (inviteStatus === "unknown" && !(await looksLikeUndertwigProject(id))) {
         continue;
       }
       invitedIds[id] = true;
