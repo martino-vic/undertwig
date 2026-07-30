@@ -92,11 +92,7 @@
         display: grid;
         grid-template-columns: 286px minmax(360px, 1fr) minmax(360px, 1fr);
         height: 100vh;
-        transition: grid-template-columns 220ms ease, height 160ms ease;
-      }
-
-      html.local-console-open .app {
-        height: calc(100vh - var(--local-console-offset, 0px));
+        transition: grid-template-columns 220ms ease;
       }
 
       .app.explorer-collapsed {
@@ -1288,169 +1284,6 @@
 
       .log.is-collapsed pre {
         display: none;
-      }
-
-      .local-console {
-        position: fixed;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        z-index: 40;
-        display: flex;
-        flex-direction: column;
-        max-height: min(34vh, 280px);
-        border-top: 1px solid var(--border);
-        background: #0d1319;
-        box-shadow: 0 -10px 36px rgba(0, 0, 0, 0.28);
-        transform: translateY(0);
-        transition: max-height 160ms ease, transform 160ms ease;
-      }
-
-      .local-console.is-collapsed {
-        max-height: 40px;
-      }
-
-      .local-console-head {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        min-height: 40px;
-        padding: 0 10px 0 14px;
-        border-bottom: 1px solid transparent;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .local-console:not(.is-collapsed) .local-console-head {
-        border-bottom-color: var(--border);
-      }
-
-      .local-console-head strong {
-        color: #d7e0ea;
-        font-size: 12px;
-        font-weight: 600;
-        flex: 0 0 auto;
-      }
-
-      .local-console-cwd-wrap {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        min-width: 0;
-        flex: 1 1 auto;
-      }
-
-      .local-console-cwd-wrap label {
-        flex: 0 0 auto;
-        color: var(--muted);
-      }
-
-      .local-console-cwd-wrap input {
-        min-width: 0;
-        width: 100%;
-        max-width: 520px;
-        height: 28px;
-        padding: 0 8px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: #121a22;
-        color: var(--text);
-        font: 12px/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-      }
-
-      .local-console-actions {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex: 0 0 auto;
-        margin-left: auto;
-      }
-
-      .local-console-actions button {
-        min-height: 28px;
-        padding: 0 10px;
-        font-size: 12px;
-      }
-
-      .local-console-body {
-        display: flex;
-        min-height: 0;
-        flex: 1 1 auto;
-        flex-direction: column;
-      }
-
-      .local-console.is-collapsed .local-console-body {
-        display: none;
-      }
-
-      .local-console-body pre {
-        margin: 0;
-        padding: 10px 14px 8px;
-        overflow: auto;
-        flex: 1 1 auto;
-        color: #c7d1dc;
-        font: 12px/1.45 "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-        white-space: pre-wrap;
-      }
-
-      .local-console-body pre .local-console-meta {
-        color: var(--muted);
-      }
-
-      .local-console-body pre .local-console-cmd {
-        color: #d7e0ea;
-        font-weight: 600;
-      }
-
-      .local-console-body pre .local-console-ok {
-        color: #8dcca8;
-      }
-
-      .local-console-body pre .local-console-warn {
-        color: #e0c07a;
-      }
-
-      .local-console-body pre .local-console-error,
-      .local-console-body pre .local-console-stderr {
-        color: #e18484;
-      }
-
-      .local-console-body pre .local-console-stdout {
-        color: #c7d1dc;
-      }
-
-      .local-console-input-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-height: 36px;
-        padding: 0 12px 8px;
-        border-top: 1px solid rgba(51, 68, 85, 0.55);
-      }
-
-      .local-console-prompt {
-        color: var(--brand-strong);
-        font: 12px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-        flex: 0 0 auto;
-      }
-
-      .local-console-input-row input {
-        min-width: 0;
-        flex: 1 1 auto;
-        height: 28px;
-        padding: 0;
-        border: 0;
-        background: transparent;
-        color: var(--text);
-        font: 12px/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-        outline: none;
-      }
-
-      @media (max-width: 1180px) {
-        .local-console,
-        #localConsoleButton {
-          display: none !important;
-        }
       }
 
       .hidden {
@@ -3051,9 +2884,6 @@
               </svg>
               Save
             </button>
-            <button class="toolbar-button console-button hidden" id="localConsoleButton" type="button" hidden title="Open local console" aria-expanded="false" aria-controls="localConsole">
-              Console
-            </button>
             </div>
             <div class="topbar-convert-cluster">
               <button class="convert-button" id="convert" type="button">Convert</button>
@@ -3151,28 +2981,6 @@
       <input class="hidden" id="folderInput" type="file" multiple webkitdirectory directory>
       <input class="hidden" id="projectFolderInput" type="file" multiple webkitdirectory directory>
     </main>
-
-    <div class="local-console hidden" id="localConsole" hidden aria-hidden="true" role="region" aria-label="Local console">
-      <div class="local-console-head">
-        <strong>Console</strong>
-        <span class="local-console-cwd-wrap">
-          <label for="localConsoleCwd">cwd</label>
-          <input id="localConsoleCwd" type="text" spellcheck="false" autocomplete="off" placeholder="/full/path/to/project">
-        </span>
-        <div class="local-console-actions">
-          <button type="button" id="localConsoleLinkFolder" title="Grant Undertwig write access to the project folder for Save">Link folder</button>
-          <button type="button" id="localConsoleCollapse" aria-expanded="true">Collapse</button>
-          <button type="button" id="localConsoleClose">Close</button>
-        </div>
-      </div>
-      <div class="local-console-body">
-        <pre id="localConsoleOutput"></pre>
-        <div class="local-console-input-row">
-          <span class="local-console-prompt" aria-hidden="true">$</span>
-          <input id="localConsoleInput" type="text" spellcheck="false" autocomplete="off" aria-label="Console command">
-        </div>
-      </div>
-    </div>
 
     <script>
       (function initMobileAppGate() {
@@ -3330,8 +3138,6 @@
     <script src="auth.js?v=20260729e"></script>
     <script src="cloud-storage.js?v=20260730q"></script>
     <script src="invite.js?v=20260728q"></script>
-    <script src="local-project-fs.js?v=20260730a"></script>
-    <script src="local-console.js?v=20260730a"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260729a"></script>
@@ -3702,7 +3508,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
       }
 
-      async function restoreSaveButtonTitle() {
+      function restoreSaveButtonTitle() {
         const saveButton = document.getElementById("saveProject");
         if (!saveButton || saveButton.getAttribute("aria-busy") === "true") {
           return;
@@ -3714,19 +3520,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           saveButton.title = shared
             ? "Save locally and sync to the owner's shared Google Drive folder"
             : "Save locally and sync to Google Drive";
-          return;
+        } else {
+          saveButton.title = "Save in this browser";
         }
-        let bound = false;
-        try {
-          bound =
-            window.UndertwigLocalFs &&
-            (await UndertwigLocalFs.hasBoundDirectory(getActiveProjectName()));
-        } catch (_error) {
-          bound = false;
-        }
-        saveButton.title = bound
-          ? "Save in this browser and the linked local folder"
-          : "Save in this browser";
       }
 
       function setSaveButtonBusy(busy) {
@@ -4539,45 +4335,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
 
-          // Offline / local project: also write back to the linked OS folder when present.
-          let diskNote = "";
-          const projectName = getActiveProjectName();
-          if (
-            projectName &&
-            window.UndertwigLocalFs &&
-            UndertwigLocalFs.supportsDirectoryPicker() &&
-            window.UndertwigLocalConsole &&
-            UndertwigLocalConsole.isFeatureAllowed &&
-            UndertwigLocalConsole.isFeatureAllowed()
-          ) {
-            const bound = await UndertwigLocalFs.hasBoundDirectory(projectName);
-            if (bound) {
-              setStatus("Saving “" + projectName + "” to the local folder…");
-              const diskResult = await UndertwigLocalFs.saveProjectToDirectory(
-                projectName,
-                state,
-                { base64ToBytes: base64ToBytes }
-              );
-              if (abortController.signal.aborted) {
-                setStatus("Save cancelled.");
-                return;
-              }
-              if (diskResult && diskResult.saved) {
-                diskNote =
-                  " and local folder" +
-                  (diskResult.folderName ? " “" + diskResult.folderName + "”" : "") +
-                  " (" +
-                  diskResult.written +
-                  " file" +
-                  (diskResult.written === 1 ? "" : "s") +
-                  ")";
-              }
-            }
-          }
-
           if (localOk) {
-            setStatus("Saved in this browser" + diskNote + ".");
-            restoreSaveButtonTitle();
+            setStatus("Saved in this browser.");
           } else {
             setStatusStorageFull({ force: true });
           }
@@ -5236,7 +4995,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           collaborateLoginLink.href = cloudLoginUrl();
           inviteForm.classList.add("hidden");
           if (saveButton && saveButton.getAttribute("aria-busy") !== "true") {
-            restoreSaveButtonTitle();
+            saveButton.title = "Save in this browser";
           }
         }
         closeHoverBoxes();
@@ -5247,9 +5006,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         if (typeof refreshCloudProjectsList === "function") {
           refreshCloudProjectsList();
-        }
-        if (window.UndertwigLocalConsole && UndertwigLocalConsole.refreshVisibility) {
-          UndertwigLocalConsole.refreshVisibility();
         }
       }
 
@@ -5601,17 +5357,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       document.getElementById("newProject").addEventListener("click", createProject);
       document.getElementById("importProject").addEventListener("click", () => {
-        // Desktop offline: prefer File System Access so Save can write back to the folder.
-        if (
-          window.UndertwigLocalFs &&
-          UndertwigLocalFs.supportsDirectoryPicker() &&
-          window.UndertwigLocalConsole &&
-          UndertwigLocalConsole.isFeatureAllowed &&
-          UndertwigLocalConsole.isFeatureAllowed()
-        ) {
-          importNewProjectFromDirectoryPicker();
-          return;
-        }
         if (!supportsFolderUpload()) {
           setStatus(
             "Importing a project folder is not supported in this browser. Try Chrome, Edge, Firefox, or Safari.",
@@ -6314,25 +6059,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
         });
         persistCollapsedFolders();
-        if (window.UndertwigLocalFs) {
-          UndertwigLocalFs.getHandle(from)
-            .then(function (handle) {
-              if (!handle) {
-                return null;
-              }
-              return UndertwigLocalFs.putHandle(to, handle).then(function () {
-                return UndertwigLocalFs.deleteHandle(from);
-              });
-            })
-            .catch(function () {
-              // Ignore handle migration failures.
-            });
-          const cwd = UndertwigLocalFs.getConsoleCwd(from);
-          if (cwd) {
-            UndertwigLocalFs.setConsoleCwd(to, cwd);
-            UndertwigLocalFs.setConsoleCwd(from, "");
-          }
-        }
       }
 
       function removeRootProjectPaths(projectName) {
@@ -6351,14 +6077,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         );
         if (state.activeFile === name || (state.activeFile || "").startsWith(prefix)) {
           state.activeFile = "";
-        }
-        if (window.UndertwigLocalFs) {
-          try {
-            UndertwigLocalFs.deleteHandle(name);
-            UndertwigLocalFs.setConsoleCwd(name, "");
-          } catch (_error) {
-            // Ignore cleanup failures.
-          }
         }
       }
 
@@ -6503,10 +6221,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (cloudStatusMode === "connected") {
           renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
         }
-        if (window.UndertwigLocalConsole && UndertwigLocalConsole.syncCwdInput) {
-          UndertwigLocalConsole.syncCwdInput();
-        }
-        restoreSaveButtonTitle();
         if (previous && previous !== name) {
           setStatus(
             "Work desk is now “" +
@@ -9692,137 +9406,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return candidate;
       }
 
-      async function finishImportedLocalProject(projectName, imported, failures, firstImportedPath, options) {
-        if (!imported) {
-          removeRootProjectPaths(projectName);
-          setStatus(
-            "Project could not be imported. " +
-              (failures[0] || "No readable files were found in the selected folder."),
-            true
-          );
-          render();
-          return;
-        }
-
-        if (UndertwigCloud.clearCollaboratorState) {
-          UndertwigCloud.clearCollaboratorState();
-        }
-
-        const mainPath = projectName + "/main.tex";
-        state.activeFile = state.files[mainPath] ? mainPath : firstImportedPath;
-        setCurrentProject(projectName, { keepActiveFile: true });
-
-        if (options && options.directoryHandle && window.UndertwigLocalFs) {
-          try {
-            await UndertwigLocalFs.putHandle(projectName, options.directoryHandle);
-          } catch (_error) {
-            // Import still succeeded in the browser.
-          }
-        }
-
-        if (window.UndertwigLocalConsole && UndertwigLocalConsole.syncCwdInput) {
-          UndertwigLocalConsole.syncCwdInput();
-        }
-        restoreSaveButtonTitle();
-
-        const linkedNote =
-          options && options.directoryHandle
-            ? " Linked for Save to disk. Set Console cwd to the full folder path for git."
-            : "";
-
-        if (failures.length) {
-          setStatus(
-            "Imported “" +
-              projectName +
-              "” as Current (owner) with " +
-              imported +
-              " file" +
-              (imported === 1 ? "" : "s") +
-              ", but " +
-              failures.length +
-              " could not be added. " +
-              failures[0] +
-              linkedNote,
-            true
-          );
-          return;
-        }
-
-        setStatus(
-          "Imported “" +
-            projectName +
-            "” as Current (owner) (" +
-            imported +
-            " file" +
-            (imported === 1 ? "" : "s") +
-            ")." +
-            linkedNote
-        );
-      }
-
-      async function importNewProjectFromDirectoryPicker() {
-        try {
-          setStatus("Choose the local project folder…");
-          const dirHandle = await UndertwigLocalFs.pickProjectDirectory();
-          const allowed = await UndertwigLocalFs.ensureReadWritePermission(dirHandle);
-          if (!allowed) {
-            setStatus("Permission to open that folder was denied.", true);
-            return;
-          }
-
-          const active = state.files[state.activeFile];
-          if (active && !active.binary) {
-            active.content = UndertwigEditor.getValue();
-          }
-
-          const preferredRoot = dirHandle.name || "Project";
-          const projectName = uniqueImportedProjectName(preferredRoot);
-          const entries = await UndertwigLocalFs.collectFiles(dirHandle, "");
-          let imported = 0;
-          const failures = [];
-          let firstImportedPath = "";
-
-          addFolder(projectName);
-
-          for (let i = 0; i < entries.length; i += 1) {
-            const entry = entries[i];
-            const label = entry.relativePath || entry.name || "file";
-            try {
-              const path = normalizePath(projectName + "/" + entry.relativePath);
-              if (!path || path === projectName) {
-                continue;
-              }
-              ensureFoldersForPath(path);
-              const binary = !isTextFile(path);
-              const content = binary
-                ? bytesToBase64(new Uint8Array(await entry.file.arrayBuffer()))
-                : await entry.file.text();
-              state.files[path] = { name: entry.name, content: content, binary: binary };
-              imported += 1;
-              if (!firstImportedPath) {
-                firstImportedPath = path;
-              }
-            } catch (error) {
-              failures.push(label + ": " + explainUploadError(error));
-            }
-          }
-
-          await finishImportedLocalProject(projectName, imported, failures, firstImportedPath, {
-            directoryHandle: dirHandle,
-          });
-          render();
-        } catch (error) {
-          if (error && error.name === "AbortError") {
-            setStatus("Project import cancelled.");
-            return;
-          }
-          setStatus(
-            (error && error.message) || "Could not import the local project folder.",
-            true
-          );
-        }
-      }
-
       async function handleImportNewProject(fileList) {
         const files = [...(fileList || [])];
         if (!files.length) {
@@ -9904,7 +9487,52 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
 
         resetUploadInputs();
-        await finishImportedLocalProject(projectName, imported, failures, firstImportedPath, null);
+
+        if (!imported) {
+          removeRootProjectPaths(projectName);
+          setStatus(
+            "Project could not be imported. " +
+              (failures[0] || "No readable files were found in the selected folder."),
+            true
+          );
+          render();
+          return;
+        }
+
+        if (UndertwigCloud.clearCollaboratorState) {
+          UndertwigCloud.clearCollaboratorState();
+        }
+
+        const mainPath = projectName + "/main.tex";
+        state.activeFile = state.files[mainPath] ? mainPath : firstImportedPath;
+        setCurrentProject(projectName, { keepActiveFile: true });
+
+        if (failures.length) {
+          setStatus(
+            "Imported “" +
+              projectName +
+              "” as Current (owner) with " +
+              imported +
+              " file" +
+              (imported === 1 ? "" : "s") +
+              ", but " +
+              failures.length +
+              " could not be added. " +
+              failures[0],
+            true
+          );
+          return;
+        }
+
+        setStatus(
+          "Imported “" +
+            projectName +
+            "” as Current (owner) (" +
+            imported +
+            " file" +
+            (imported === 1 ? "" : "s") +
+            ")."
+        );
       }
 
       async function syncCurrentProjectFromDrive() {
@@ -10657,19 +10285,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
 
         status.textContent = short;
-      }
-
-      if (window.UndertwigLocalConsole) {
-        UndertwigLocalConsole.init({
-          isLoggedIn: function () {
-            return UndertwigAuth.isLoggedIn();
-          },
-          getActiveProjectName: getActiveProjectName,
-          onFolderLinked: function () {
-            restoreSaveButtonTitle();
-            setStatus("Local folder linked. Save will write here and to this browser.");
-          },
-        });
       }
 
       // Boot after all declarations so invite sync can run (see cloudInitPromise TDZ note).
