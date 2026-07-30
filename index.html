@@ -6269,6 +6269,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       function persistProject(options) {
         const immediateCloud = Boolean(options && options.immediateCloud);
+        const skipCloud = Boolean(options && options.skipCloud);
         let localSaved = true;
 
         try {
@@ -6282,7 +6283,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
         }
 
-        if (UndertwigCloud.isAvailable() && (cloudStatusMode === "connected" || UndertwigCloud.hasAccessToken())) {
+        if (
+          !skipCloud &&
+          UndertwigCloud.isAvailable() &&
+          (cloudStatusMode === "connected" || UndertwigCloud.hasAccessToken())
+        ) {
           scheduleCloudSave(immediateCloud);
           if (!localSaved) {
             setStatus(
