@@ -6859,10 +6859,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         if (isFolder) {
           row.addEventListener("click", () => {
-            if (cloudOnly) {
-              promoteProjectToCurrent(node.path);
-              return;
-            }
+            // Match Other: click only expands/collapses. Never pull from Drive here —
+            // drag the project onto Current (or use Load) to download/open.
             if (collapsedFolders.has(node.path)) {
               collapsedFolders.delete(node.path);
             } else {
@@ -6889,13 +6887,37 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             });
           }
         } else {
-          row.draggable = true;
+          row.draggable = opts.section !== "cloud" || !cloudOnly;
           row.addEventListener("click", () => {
+            // Cloud section: open local files only — never start Load / Drive pull.
+            if (opts.section === "cloud") {
+              const rootName = String(node.path || "").split("/")[0];
+              if (!rootName || !listLocalRootProjects(state).includes(rootName)) {
+                setStatus(
+                  "Drag “" +
+                    (rootName || "this project") +
+                    "” to Current to download it from Google Drive first.",
+                  true
+                );
+                return;
+              }
+              state.activeFile = node.path;
+              persistProject();
+              render();
+              return;
+            }
             state.activeFile = node.path;
             persistProject({ immediateCloud: true });
             render();
           });
           row.addEventListener("dragstart", (event) => {
+            if (opts.section === "cloud") {
+              const rootName = String(node.path || "").split("/")[0];
+              if (!rootName || !listLocalRootProjects(state).includes(rootName)) {
+                event.preventDefault();
+                return;
+              }
+            }
             dragSourcePath = node.path;
             dragSourceProject = null;
             event.dataTransfer.setData("text/plain", node.path);
