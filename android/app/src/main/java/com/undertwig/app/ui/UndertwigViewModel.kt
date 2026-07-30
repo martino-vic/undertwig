@@ -697,16 +697,53 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     heldWritingRoomProjectId = projectId
                     writingRoomGateDismissedKey = null
                     startFileLockHeartbeat(activity, projectId, projectName)
-                    setWritingRoomBusy(false)
                     _editor.update {
                         it.copy(
                             inWritingRoom = true,
                             writingRoomOccupiedMessage = null,
                             writingRoomPrompt = null,
-                            status = "You are in the writing room for “$projectName”. Exit when you are done.",
+                            status = "Loading latest changes for “$projectName” from Google Drive…",
                             error = null,
+                            loadingFile = true,
                         )
                     }
+                    try {
+                        val previousActive = _editor.value.activePath
+                        // Flush unsaved text before replacing local files.
+                        val snap = _editor.value
+                        if (snap.dirty && !ProjectRepository.isBinaryPath(snap.activePath)) {
+                            runCatching {
+                                repo.writeFile(projectId, snap.activePath, snap.editorText)
+                            }
+                        }
+                        val fileCount = withDriveAccess(activity) { token ->
+                            driveSync.syncProjectFromDrive(token, projectId, projectName)
+                        }
+                        applyLoadedProjectContents(
+                            projectId = projectId,
+                            projectName = projectName,
+                            previousActive = previousActive,
+                            fileCount = fileCount,
+                            statusMessage =
+                                "You are in the writing room for “$projectName”. " +
+                                    "Latest Drive changes are loaded. Exit when you are done.",
+                        )
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        if (isInvalidDriveCredentials(e)) {
+                            authRepo.clearDriveToken()
+                        }
+                        _editor.update {
+                            it.copy(
+                                loadingFile = false,
+                                status = "You are in the writing room for “$projectName”.",
+                                error = e.message
+                                    ?: "Could not load latest changes from Google Drive. Use Load to retry.",
+                            )
+                        }
+                    }
+                    setWritingRoomBusy(false)
                 } else {
                     heldWritingRoomProjectId = null
                     stopFileLockHeartbeat()
@@ -1107,37 +1144,15 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 val fileCount = withDriveAccess(activity) { token ->
                     driveSync.syncProjectFromDrive(token, projectId, projectName)
                 }
-                val files = repo.listFiles(projectId)
-                val folders = repo.listFolders(projectId)
-                val active = when {
-                    previousActive.isNotBlank() && previousActive in files -> previousActive
-                    "main.tex" in files -> "main.tex"
-                    else -> files.firstOrNull().orEmpty()
-                }
-                val loadedText = if (active.isNotEmpty()) {
-                    editorDisplayText(repo.readFile(projectId, active))
-                } else {
-                    ""
-                }
-                val loadedMessage =
-                    "Loaded “$projectName” from Google Drive (" +
-                        "$fileCount file${if (fileCount == 1) "" else "s"})."
-                statusFlashJob?.cancel()
-                _editor.update {
-                    it.copy(
-                        projectName = repo.projectName(projectId),
-                        files = files,
-                        folders = folders,
-                        activePath = active,
-                        editorText = loadedText,
-                        dirty = false,
-                        loadingFile = false,
-                        error = null,
-                        status = loadedMessage,
-                        editorRevision = it.editorRevision + 1L,
-                        pdfPath = repo.existingFile(projectId, "main.pdf")?.absolutePath,
-                    )
-                }
+                applyLoadedProjectContents(
+                    projectId = projectId,
+                    projectName = projectName,
+                    previousActive = previousActive,
+                    fileCount = fileCount,
+                    statusMessage =
+                        "Loaded “$projectName” from Google Drive (" +
+                            "$fileCount file${if (fileCount == 1) "" else "s"}).",
+                )
                 refreshProjects()
             } catch (e: AuthRepository.SignInCancelledException) {
                 _editor.update { it.copy(loadingFile = false) }
@@ -1177,6 +1192,43 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     restoreEditingStatus()
                 }
             }
+        }
+    }
+
+    private fun applyLoadedProjectContents(
+        projectId: String,
+        projectName: String,
+        previousActive: String,
+        fileCount: Int,
+        statusMessage: String,
+    ) {
+        val files = repo.listFiles(projectId)
+        val folders = repo.listFolders(projectId)
+        val active = when {
+            previousActive.isNotBlank() && previousActive in files -> previousActive
+            "main.tex" in files -> "main.tex"
+            else -> files.firstOrNull().orEmpty()
+        }
+        val loadedText = if (active.isNotEmpty()) {
+            editorDisplayText(repo.readFile(projectId, active))
+        } else {
+            ""
+        }
+        statusFlashJob?.cancel()
+        _editor.update {
+            it.copy(
+                projectName = repo.projectName(projectId).ifBlank { projectName },
+                files = files,
+                folders = folders,
+                activePath = active,
+                editorText = loadedText,
+                dirty = false,
+                loadingFile = false,
+                error = null,
+                status = statusMessage,
+                editorRevision = it.editorRevision + 1L,
+                pdfPath = repo.existingFile(projectId, "main.pdf")?.absolutePath,
+            )
         }
     }
 

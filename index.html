@@ -7274,7 +7274,57 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             fileLockOccupied = null;
             writingRoomSuppressResumeKey = null;
             startFileLockHeartbeat(projectName);
-            setStatus("You are in the writing room for “" + projectName + "”. Exit when you are done.");
+            updateWritingRoomUi();
+
+            // Match Load: pull the latest Drive tree before editing.
+            if (UndertwigCloud.pullProjectFromDrive && UndertwigCloud.hasAccessToken()) {
+              setStatus(
+                "Loading latest changes for “" + projectName + "” from Google Drive…"
+              );
+              try {
+                const active = state.files[state.activeFile];
+                if (active && !active.binary) {
+                  active.content = UndertwigEditor.getValue();
+                }
+                const pulled = await UndertwigCloud.pullProjectFromDrive(projectName, {
+                  onProgress: function (message) {
+                    setStatus(message || "Loading from Google Drive…");
+                  },
+                });
+                applyPulledProject(pulled);
+                try {
+                  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+                } catch (_error) {
+                  // Local cache is optional.
+                }
+                collapsedFolders.delete(projectName);
+                persistCollapsedFolders();
+                render();
+                if (cloudStatusMode === "connected") {
+                  renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+                }
+                setStatus(
+                  "You are in the writing room for “" +
+                    projectName +
+                    "”. Latest Drive changes are loaded. Exit when you are done."
+                );
+              } catch (loadError) {
+                setStatus(
+                  "You are in the writing room for “" +
+                    projectName +
+                    "”, but loading from Drive failed: " +
+                    ((loadError && loadError.message) || "unknown error") +
+                    ". Use Load to retry.",
+                  true
+                );
+              }
+            } else {
+              setStatus(
+                "You are in the writing room for “" +
+                  projectName +
+                  "”. Exit when you are done."
+              );
+            }
           } else {
             fileLockHeldProject = null;
             fileLockHeldFileId = null;
