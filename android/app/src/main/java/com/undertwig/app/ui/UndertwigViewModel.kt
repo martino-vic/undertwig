@@ -106,7 +106,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 val user = authRepo.signInWithGoogle(activity)
                 _auth.update { AuthUiState(user = user, signingIn = false) }
-                _editor.update { it.copy(status = "Signed in as ${user.email}") }
+                _editor.update { it.copy(status = "Logged in") }
                 Toast.makeText(
                     getApplication(),
                     "Signed in as ${user.email}",
