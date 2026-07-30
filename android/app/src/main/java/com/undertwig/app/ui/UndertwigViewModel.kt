@@ -354,7 +354,15 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             )
         }
 
-        return items.sortedByDescending { it.updatedAt }
+        return items.sortedWith(
+            compareBy<HomeProjectItem> {
+                when (it.origin) {
+                    ProjectOrigin.Local -> 0
+                    ProjectOrigin.Drive -> 1
+                    ProjectOrigin.Invited -> 2
+                }
+            }.thenByDescending { it.updatedAt },
+        )
     }
 
     fun createProject(name: String) {

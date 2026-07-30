@@ -283,6 +283,29 @@
         min-width: 0;
       }
 
+      .tree-section-other {
+        margin: 0 4px 6px;
+        padding: 2px 0 4px;
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--panel-soft) 55%, transparent);
+      }
+
+      .tree-section-cloud-own {
+        margin: 0 4px 6px;
+        padding: 2px 0 4px;
+        border-radius: 8px;
+        background: color-mix(in srgb, #3d7a8c 16%, transparent);
+        border: 1px solid color-mix(in srgb, #5b8fa3 28%, transparent);
+      }
+
+      .tree-section-cloud-invited {
+        margin: 0 4px 6px;
+        padding: 2px 0 4px;
+        border-radius: 8px;
+        background: color-mix(in srgb, #c4923a 14%, transparent);
+        border: 1px solid color-mix(in srgb, #c4923a 32%, transparent);
+      }
+
       .tree-section-label {
         padding: 10px 12px 4px;
         color: var(--muted);
@@ -6120,6 +6143,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                     (fileCount === 1 ? "" : "s") +
                     "). It is now Current (invitee); your previous local project stays under Other."
                 );
+                if (typeof refreshCloudProjectsList === "function") {
+                  refreshCloudProjectsList();
+                }
                 return;
               } catch (joinError) {
                 if (!isCurrentInit()) {

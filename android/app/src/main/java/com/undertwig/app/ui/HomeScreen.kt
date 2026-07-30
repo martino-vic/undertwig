@@ -1,5 +1,6 @@
 package com.undertwig.app.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -171,6 +172,15 @@ fun HomeScreen(
                 }
             }
             else -> {
+                val localProjects = remember(projects) {
+                    projects.filter { it.origin == ProjectOrigin.Local }
+                }
+                val driveProjects = remember(projects) {
+                    projects.filter { it.origin == ProjectOrigin.Drive }
+                }
+                val invitedProjects = remember(projects) {
+                    projects.filter { it.origin == ProjectOrigin.Invited }
+                }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -201,16 +211,64 @@ fun HomeScreen(
                             }
                         }
                     }
-                    items(projects, key = { it.key }) { project ->
-                        ProjectCard(
-                            project = project,
-                            opening = openingKey == project.key,
-                            onOpen = { onOpen(project) },
-                            onDelete = {
-                                val id = project.localId
-                                if (id != null) onDelete(id)
-                            },
-                        )
+                    if (localProjects.isNotEmpty()) {
+                        item(key = "header-local") {
+                            HomeSectionHeader("On this device")
+                        }
+                        items(localProjects, key = { it.key }) { project ->
+                            ProjectCard(
+                                project = project,
+                                opening = openingKey == project.key,
+                                onOpen = { onOpen(project) },
+                                onDelete = {
+                                    val id = project.localId
+                                    if (id != null) onDelete(id)
+                                },
+                            )
+                        }
+                    }
+                    if (driveProjects.isNotEmpty()) {
+                        item(key = "header-drive") {
+                            HomeSectionHeader("Google Drive (yours)")
+                        }
+                        items(driveProjects, key = { it.key }) { project ->
+                            ProjectCard(
+                                project = project,
+                                opening = openingKey == project.key,
+                                onOpen = { onOpen(project) },
+                                onDelete = {
+                                    val id = project.localId
+                                    if (id != null) onDelete(id)
+                                },
+                            )
+                        }
+                    }
+                    if (invitedProjects.isNotEmpty() || (authUser != null && !cloudLoading)) {
+                        item(key = "header-invited") {
+                            HomeSectionHeader("Invited projects")
+                        }
+                        if (invitedProjects.isEmpty()) {
+                            item(key = "invited-empty") {
+                                Text(
+                                    "Projects shared with you appear here after you open an invitation link or are invited by email.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                )
+                            }
+                        } else {
+                            items(invitedProjects, key = { it.key }) { project ->
+                                ProjectCard(
+                                    project = project,
+                                    opening = openingKey == project.key,
+                                    onOpen = { onOpen(project) },
+                                    onDelete = {
+                                        val id = project.localId
+                                        if (id != null) onDelete(id)
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -268,6 +326,17 @@ fun HomeScreen(
 }
 
 @Composable
+private fun HomeSectionHeader(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp, start = 2.dp),
+    )
+}
+
+@Composable
 private fun ProjectCard(
     project: HomeProjectItem,
     opening: Boolean,
@@ -275,10 +344,16 @@ private fun ProjectCard(
     onDelete: () -> Unit,
 ) {
     val dark = isSystemInDarkTheme()
+    // Three distinct hues: neutral local, cool Drive-owned, warm invited.
     val container = when (project.origin) {
         ProjectOrigin.Local -> MaterialTheme.colorScheme.surface
         ProjectOrigin.Drive -> if (dark) Color(0xFF1A2C33) else Color(0xFFE4F0F4)
-        ProjectOrigin.Invited -> if (dark) Color(0xFF2C241C) else Color(0xFFF4E9DF)
+        ProjectOrigin.Invited -> if (dark) Color(0xFF2A2418) else Color(0xFFF3E6D4)
+    }
+    val accent = when (project.origin) {
+        ProjectOrigin.Local -> Color.Transparent
+        ProjectOrigin.Drive -> if (dark) Color(0xFF3D7A8C) else Color(0xFF5B8FA3)
+        ProjectOrigin.Invited -> if (dark) Color(0xFFB08A4A) else Color(0xFFC4923A)
     }
     val date = remember(project.updatedAt) {
         if (project.updatedAt <= 0L) {
@@ -293,6 +368,11 @@ private fun ProjectCard(
             .fillMaxWidth()
             .clickable(enabled = !opening, onClick = onOpen),
         colors = CardDefaults.cardColors(containerColor = container),
+        border = if (accent == Color.Transparent) {
+            null
+        } else {
+            BorderStroke(1.dp, accent.copy(alpha = 0.45f))
+        },
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
