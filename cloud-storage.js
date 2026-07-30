@@ -1175,16 +1175,53 @@
     );
   }
 
-  async function tryTrashDriveFile(fileId) {
+  async function tryTrashDriveFile(fileId, options) {
+    const opts = options || {};
     const response = await driveFetch(
       DRIVE_API + "/files/" + encodeURIComponent(fileId) + "?supportsAllDrives=true",
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ trashed: true }),
+        keepalive: Boolean(opts.keepalive),
       }
     );
     return response.ok;
+  }
+
+  /**
+   * Best-effort trash without awaiting token refresh — for page unload.
+   */
+  function trashDriveFileKeepaliveSync(fileId) {
+    const id = String(fileId || "").trim();
+    if (!id) {
+      return;
+    }
+    let token = memoryAccessToken;
+    if (!token) {
+      const stored = readStoredToken();
+      token = stored && stored.accessToken;
+    }
+    if (!token) {
+      return;
+    }
+    try {
+      fetch(
+        DRIVE_API + "/files/" + encodeURIComponent(id) + "?supportsAllDrives=true",
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: "Bearer " + token,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ trashed: true }),
+          credentials: "omit",
+          keepalive: true,
+        }
+      );
+    } catch (_error) {
+      // Ignore unload failures.
+    }
   }
 
   async function removeDriveParents(fileId, parentId) {
@@ -3272,7 +3309,7 @@
    * Try to take the exclusive edit lock for one project-relative file.
    * @returns {Promise<{ok:true,lock:object}|{ok:false,lock:object|null,message:string}>}
    */
-  async function acquireFileLock(projectName, fileRelPath) {
+      async function acquireFileLock(projectName, fileRelPath) {
     const rel = String(fileRelPath || "")
       .replace(/\\/g, "/")
       .replace(/^\/+|\/+$/g, "");
@@ -3286,13 +3323,13 @@
         lock: existing,
         message:
           lockHolderLabel(existing) +
-          " is currently working on “" +
+          " is in the writing room for “" +
           rel +
-          "”. Simultaneous collaboration is not supported at the moment.",
+          "”. Live collaboration is not supported yet — the writing room has space for only one person at a time.",
       };
     }
     const payload = buildLockPayload(rel, isLockHeldByMe(existing) ? existing : null);
-    await writeFileLock(projectName, rel, payload);
+    const saved = await writeFileLock(projectName, rel, payload);
     // Re-read to detect a lost race.
     const again = await readFileLock(projectName, rel);
     if (again && !isLockHeldByMe(again) && !isLockStale(again)) {
@@ -3301,12 +3338,18 @@
         lock: again,
         message:
           lockHolderLabel(again) +
-          " is currently working on “" +
+          " is in the writing room for “" +
           rel +
-          "”. Simultaneous collaboration is not supported at the moment.",
+          "”. Live collaboration is not supported yet — the writing room has space for only one person at a time.",
       };
     }
-    return { ok: true, lock: again || payload };
+    const lock = again || Object.assign({}, payload, {
+      _fileId: saved && saved.id,
+    });
+    if (lock && !lock._fileId && saved && saved.id) {
+      lock._fileId = saved.id;
+    }
+    return { ok: true, lock: lock };
   }
 
   async function heartbeatFileLock(projectName, fileRelPath) {
@@ -3327,9 +3370,9 @@
           lock: existing,
           message:
             lockHolderLabel(existing) +
-            " is currently working on “" +
+            " is in the writing room for “" +
             rel +
-            "”. Simultaneous collaboration is not supported at the moment.",
+            "”. Live collaboration is not supported yet — the writing room has space for only one person at a time.",
         };
       }
       return acquireFileLock(projectName, rel);
@@ -3339,10 +3382,20 @@
     return { ok: true, lock: payload };
   }
 
-  async function releaseFileLock(projectName, fileRelPath) {
+  async function releaseFileLock(projectName, fileRelPath, options) {
+    const opts = options || {};
     const rel = String(fileRelPath || "")
       .replace(/\\/g, "/")
       .replace(/^\/+|\/+$/g, "");
+    if (!rel && !opts.fileId) {
+      return false;
+    }
+
+    if (opts.keepalive && opts.fileId) {
+      trashDriveFileKeepaliveSync(opts.fileId);
+      return true;
+    }
+
     if (!rel) {
       return false;
     }
@@ -3353,7 +3406,7 @@
     if (!isLockHeldByMe(existing) && !isLockStale(existing)) {
       return false;
     }
-    const fileId = existing._fileId;
+    const fileId = existing._fileId || opts.fileId;
     if (!fileId) {
       return false;
     }
@@ -3366,9 +3419,12 @@
       return true;
     } catch (_error) {
       try {
-        await tryTrashDriveFile(fileId);
+        await tryTrashDriveFile(fileId, { keepalive: Boolean(opts.keepalive) });
         return true;
       } catch (_error2) {
+        if (opts.keepalive) {
+          trashDriveFileKeepaliveSync(fileId);
+        }
         return false;
       }
     }

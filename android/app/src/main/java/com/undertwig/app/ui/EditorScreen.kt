@@ -112,7 +112,10 @@ fun EditorScreen(
     onAddFolder: (String) -> Unit,
     onDeletePath: (path: String, isFolder: Boolean) -> Unit,
     onRenamePath: (from: String, to: String, isFolder: Boolean) -> Unit,
-    onSyncFileLock: () -> Unit = {},
+    onRefreshWritingRoom: () -> Unit = {},
+    onWritingRoomClick: () -> Unit = {},
+    onConfirmWritingRoomPrompt: () -> Unit = {},
+    onDismissWritingRoomPrompt: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var showAdd by remember { mutableStateOf(false) }
@@ -138,7 +141,7 @@ fun EditorScreen(
     )
 
     LaunchedEffect(state.projectId, state.activePath, authUser?.email) {
-        onSyncFileLock()
+        onRefreshWritingRoom()
     }
 
     fun runProjectDownload() {
@@ -231,6 +234,21 @@ fun EditorScreen(
                     }
                     IconButton(onClick = onSave) {
                         Icon(Icons.Default.Save, contentDescription = "Save")
+                    }
+                    if (state.writingRoomAvailable) {
+                        TextButton(
+                            onClick = onWritingRoomClick,
+                            enabled = !state.writingRoomBusy,
+                        ) {
+                            Text(
+                                when {
+                                    state.inWritingRoom -> "Exit room"
+                                    state.writingRoomOccupiedMessage != null -> "Room occupied"
+                                    else -> "Enter room"
+                                },
+                                maxLines = 1,
+                            )
+                        }
                     }
                     if (authUser != null) {
                         if (state.loadingFile) {
@@ -344,11 +362,19 @@ fun EditorScreen(
                 }
             }
 
-            state.fileLockBlockedMessage?.let { lockMessage ->
+            state.writingRoomOccupiedMessage?.let { lockMessage ->
                 Text(
                     lockMessage,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+            if (state.writingRoomAvailable && !state.inWritingRoom && state.writingRoomOccupiedMessage == null) {
+                Text(
+                    "Enter the writing room to edit. Live collaboration is not supported yet — one person at a time.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 )
             }
@@ -701,6 +727,58 @@ fun EditorScreen(
                 TextButton(onClick = { downloadInfo = null }) { Text("Cancel") }
             },
         )
+    }
+
+    when (val prompt = state.writingRoomPrompt) {
+        is WritingRoomPrompt.Enter -> {
+            AlertDialog(
+                onDismissRequest = onDismissWritingRoomPrompt,
+                title = { Text("Enter writing room") },
+                text = {
+                    Text(
+                        "Live collaboration is not supported yet. The writing room has space for only one person at a time — while you are inside, collaborators see “${prompt.path}” as read-only. Exit the writing room when you are done.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = onConfirmWritingRoomPrompt) { Text("Enter writing room") }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismissWritingRoomPrompt) { Text("Cancel") }
+                },
+            )
+        }
+        is WritingRoomPrompt.Exit -> {
+            AlertDialog(
+                onDismissRequest = onDismissWritingRoomPrompt,
+                title = { Text("Exit writing room?") },
+                text = {
+                    Text(
+                        "Leave the writing room for “${prompt.path}”? Others will be able to enter and edit this file.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = onConfirmWritingRoomPrompt) { Text("Exit writing room") }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismissWritingRoomPrompt) { Text("Stay") }
+                },
+            )
+        }
+        is WritingRoomPrompt.Occupied -> {
+            AlertDialog(
+                onDismissRequest = onDismissWritingRoomPrompt,
+                title = { Text("Writing room occupied") },
+                text = {
+                    Text(
+                        "${prompt.message} You can read the file now, and enter when it is free.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = onConfirmWritingRoomPrompt) { Text("OK") }
+                },
+            )
+        }
+        null -> Unit
     }
 }
 

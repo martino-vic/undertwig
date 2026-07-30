@@ -19,6 +19,7 @@ import com.undertwig.app.data.ProjectRepository
 import com.undertwig.app.data.ProjectSummary
 import com.undertwig.app.engine.LatexEngine
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.coroutines.coroutineContext
 
@@ -70,13 +72,26 @@ data class EditorUiState(
     val latexEngine: LatexEngineId = LatexEngineId.PdfLaTeX,
     val bibTool: BibToolId = BibToolId.BibTeX,
     val error: String? = null,
-    /** When set, the active text file is locked by another collaborator. */
-    val fileLockBlockedMessage: String? = null,
-    val fileLockHeld: Boolean = false,
+    /** Drive-linked text file: show Enter/Exit writing room controls. */
+    val writingRoomAvailable: Boolean = false,
+    /** When set, someone else is in the writing room for this file. */
+    val writingRoomOccupiedMessage: String? = null,
+    /** True when this device has entered the writing room for the active file. */
+    val inWritingRoom: Boolean = false,
+    val writingRoomBusy: Boolean = false,
+    val writingRoomPrompt: WritingRoomPrompt? = null,
 ) {
     val converting: Boolean get() = busy != EditorBusy.Idle
     val editorReadOnly: Boolean
-        get() = ProjectRepository.isBinaryPath(activePath) || fileLockBlockedMessage != null
+        get() = ProjectRepository.isBinaryPath(activePath) ||
+            writingRoomOccupiedMessage != null ||
+            (writingRoomAvailable && !inWritingRoom)
+}
+
+sealed class WritingRoomPrompt {
+    data class Enter(val path: String) : WritingRoomPrompt()
+    data class Exit(val path: String) : WritingRoomPrompt()
+    data class Occupied(val message: String) : WritingRoomPrompt()
 }
 
 class UndertwigViewModel(application: Application) : AndroidViewModel(application) {
@@ -156,12 +171,21 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun signOut() {
         viewModelScope.launch {
+            releaseHeldWritingRoomBestEffort()
             authRepo.signOut()
             _auth.value = AuthUiState()
             cachedDriveOwned = emptyList()
             cachedDriveInvited = emptyList()
             refreshProjects()
-            _editor.update { it.copy(status = "Signed out") }
+            _editor.update {
+                it.copy(
+                    status = "Signed out",
+                    writingRoomAvailable = false,
+                    writingRoomOccupiedMessage = null,
+                    inWritingRoom = false,
+                    writingRoomPrompt = null,
+                )
+            }
             Toast.makeText(getApplication(), "Signed out", Toast.LENGTH_SHORT).show()
         }
     }
@@ -400,8 +424,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun openProject(id: String, activity: Activity? = null) {
-        // Release previous project's file lock before switching.
-        activity?.let { releaseHeldFileLock(it) }
+        // Leave previous writing room before switching projects.
+        scheduleReleaseHeldWritingRoom()
         val files = repo.listFiles(id)
         val active = when {
             "main.tex" in files -> "main.tex"
@@ -425,16 +449,21 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             pdfPath = pdf,
             latexEngine = enginePrefs.latexEngine(),
             bibTool = enginePrefs.bibTool(),
-            fileLockBlockedMessage = null,
-            fileLockHeld = false,
+            writingRoomAvailable = false,
+            writingRoomOccupiedMessage = null,
+            inWritingRoom = false,
         )
-        activity?.let { syncFileEditLock(it) }
+        activity?.let { refreshWritingRoomStatus(it) }
     }
 
     fun selectFile(path: String, activity: Activity? = null) {
         val state = _editor.value
         if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
             repo.writeFile(state.projectId, state.activePath, state.editorText)
+        }
+        // Switching files leaves the previous writing room.
+        if (heldFileLockPath != null && heldFileLockPath != path) {
+            scheduleReleaseHeldWritingRoom()
         }
         val file = repo.readFile(state.projectId, path)
         _editor.update {
@@ -445,12 +474,13 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 files = repo.listFiles(state.projectId),
                 folders = repo.listFolders(state.projectId),
                 status = "Editing $path",
-                fileLockBlockedMessage = null,
-                fileLockHeld = false,
+                writingRoomOccupiedMessage = null,
+                inWritingRoom = false,
+                writingRoomAvailable = false,
                 editorRevision = it.editorRevision + 1L,
             )
         }
-        activity?.let { syncFileEditLock(it) }
+        activity?.let { refreshWritingRoomStatus(it) }
     }
 
     fun onEditorChange(text: String) {
@@ -459,21 +489,120 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         _editor.update { it.copy(editorText = text, dirty = true) }
     }
 
-    fun syncFileEditLock(activity: Activity) {
+    fun refreshWritingRoomStatus(activity: Activity) {
         val state = _editor.value
-        if (state.projectId.isEmpty()) return
-        if (_auth.value.user == null) {
-            clearFileLockUi()
+        if (state.projectId.isEmpty() || _auth.value.user == null) {
+            _editor.update {
+                it.copy(
+                    writingRoomAvailable = false,
+                    writingRoomOccupiedMessage = null,
+                    inWritingRoom = false,
+                )
+            }
             return
         }
         if (ProjectRepository.isBinaryPath(state.activePath)) {
-            releaseHeldFileLock(activity)
-            clearFileLockUi()
+            if (heldFileLockPath != null) {
+                scheduleReleaseHeldWritingRoom()
+            }
+            _editor.update {
+                it.copy(
+                    writingRoomAvailable = false,
+                    writingRoomOccupiedMessage = null,
+                    inWritingRoom = false,
+                )
+            }
             return
         }
         val summary = repo.listProjects().firstOrNull { it.id == state.projectId }
-        if (summary?.driveFolderId.isNullOrBlank()) {
-            clearFileLockUi()
+        val linked = !summary?.driveFolderId.isNullOrBlank()
+        if (!linked) {
+            _editor.update {
+                it.copy(
+                    writingRoomAvailable = false,
+                    writingRoomOccupiedMessage = null,
+                    inWritingRoom = heldFileLockPath == state.activePath,
+                )
+            }
+            return
+        }
+
+        val projectId = state.projectId
+        val projectName = state.projectName
+        val path = state.activePath
+
+        fileLockJob?.cancel()
+        fileLockJob = viewModelScope.launch {
+            if (heldFileLockPath == path) {
+                _editor.update {
+                    it.copy(
+                        writingRoomAvailable = true,
+                        writingRoomOccupiedMessage = null,
+                        inWritingRoom = true,
+                    )
+                }
+                return@launch
+            }
+            _editor.update { it.copy(writingRoomAvailable = true, inWritingRoom = false) }
+            try {
+                val occupied = withDriveAccess(activity) { token ->
+                    driveSync.peekFileLock(token, projectId, projectName, path)
+                }
+                if (_editor.value.activePath != path) return@launch
+                if (occupied != null) {
+                    val message =
+                        "${occupied.holderLabel()} is in the writing room for “$path”. " +
+                            "Live collaboration is not supported yet — the writing room has space for only one person at a time."
+                    _editor.update {
+                        it.copy(
+                            writingRoomAvailable = true,
+                            writingRoomOccupiedMessage = message,
+                            inWritingRoom = false,
+                            status = "Read-only",
+                        )
+                    }
+                } else {
+                    _editor.update {
+                        it.copy(
+                            writingRoomAvailable = true,
+                            writingRoomOccupiedMessage = null,
+                            inWritingRoom = false,
+                        )
+                    }
+                }
+            } catch (_: Exception) {
+                _editor.update {
+                    it.copy(
+                        writingRoomAvailable = true,
+                        writingRoomOccupiedMessage = null,
+                        inWritingRoom = false,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * @return true if entered (or already inside); false if cancelled / occupied / failed
+     */
+    fun enterWritingRoom(activity: Activity, confirmed: Boolean = false) {
+        val state = _editor.value
+        if (!state.writingRoomAvailable || state.writingRoomBusy) return
+        if (state.inWritingRoom && heldFileLockPath == state.activePath) return
+        if (state.writingRoomOccupiedMessage != null) {
+            _editor.update {
+                it.copy(
+                    status = "Read-only",
+                    error = state.writingRoomOccupiedMessage,
+                    writingRoomPrompt = WritingRoomPrompt.Occupied(state.writingRoomOccupiedMessage!!),
+                )
+            }
+            return
+        }
+        if (!confirmed) {
+            _editor.update {
+                it.copy(writingRoomPrompt = WritingRoomPrompt.Enter(state.activePath))
+            }
             return
         }
 
@@ -481,26 +610,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         val projectName = state.projectName
         val path = state.activePath
         val user = _auth.value.user
-
+        _editor.update { it.copy(writingRoomBusy = true, writingRoomPrompt = null, error = null) }
         fileLockJob?.cancel()
         fileLockJob = viewModelScope.launch {
-            // Release previous file lock if switching.
-            val previous = heldFileLockPath
-            if (previous != null && previous != path) {
-                runCatching {
-                    withDriveAccess(activity) { token ->
-                        driveSync.releaseFileLock(token, projectId, projectName, previous)
-                    }
-                }
-                heldFileLockPath = null
-                stopFileLockHeartbeat()
-            }
-            if (heldFileLockPath == path) {
-                _editor.update {
-                    it.copy(fileLockBlockedMessage = null, fileLockHeld = true)
-                }
-                return@launch
-            }
             try {
                 val result = withDriveAccess(activity) { token ->
                     driveSync.acquireFileLock(
@@ -512,46 +624,134 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         holderName = user?.name,
                     )
                 }
-                if (_editor.value.activePath != path) return@launch
                 if (result.ok) {
                     heldFileLockPath = path
+                    startFileLockHeartbeat(activity, projectId, projectName, path)
                     _editor.update {
                         it.copy(
-                            fileLockBlockedMessage = null,
-                            fileLockHeld = true,
-                            status = "Editing $path",
+                            writingRoomBusy = false,
+                            inWritingRoom = true,
+                            writingRoomOccupiedMessage = null,
+                            status = "You are in the writing room for “$path”.",
                             error = null,
                         )
                     }
-                    startFileLockHeartbeat(activity, projectId, projectName, path)
                 } else {
                     heldFileLockPath = null
                     stopFileLockHeartbeat()
                     val message = result.message
-                        ?: "Someone is currently working on this file. Simultaneous collaboration is not supported at the moment."
+                        ?: "Someone is already in the writing room for this file."
                     _editor.update {
                         it.copy(
-                            fileLockBlockedMessage = message,
-                            fileLockHeld = false,
+                            writingRoomBusy = false,
+                            inWritingRoom = false,
+                            writingRoomOccupiedMessage = message,
                             status = "Read-only",
                             error = message,
+                            writingRoomPrompt = WritingRoomPrompt.Occupied(message),
                         )
                     }
                 }
-            } catch (e: AuthRepository.SignInCancelledException) {
-                clearFileLockUi()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                // Not linked / network — allow local editing.
-                clearFileLockUi()
+            } catch (e: Exception) {
+                _editor.update {
+                    it.copy(
+                        writingRoomBusy = false,
+                        inWritingRoom = false,
+                        error = e.message ?: "Could not enter the writing room.",
+                        status = "Writing room failed",
+                    )
+                }
             }
         }
     }
 
-    private fun clearFileLockUi() {
+    fun exitWritingRoom(activity: Activity, skipConfirm: Boolean = false) {
+        val path = heldFileLockPath ?: return
+        if (!skipConfirm) {
+            _editor.update {
+                it.copy(writingRoomPrompt = WritingRoomPrompt.Exit(path))
+            }
+            return
+        }
         _editor.update {
-            it.copy(fileLockBlockedMessage = null, fileLockHeld = false)
+            it.copy(
+                inWritingRoom = false,
+                writingRoomBusy = true,
+                writingRoomPrompt = null,
+            )
+        }
+        viewModelScope.launch {
+            releaseHeldWritingRoomBestEffort()
+            _editor.update {
+                it.copy(
+                    writingRoomBusy = false,
+                    inWritingRoom = false,
+                    status = "You left the writing room for “$path”.",
+                )
+            }
+            refreshWritingRoomStatus(activity)
+        }
+    }
+
+    /** Snapshot lock identity immediately, then trash on a coroutine (safe across project switches). */
+    private fun scheduleReleaseHeldWritingRoom() {
+        val snapshot = takeHeldWritingRoomSnapshot() ?: return
+        viewModelScope.launch {
+            trashWritingRoomLock(snapshot)
+        }
+    }
+
+    private data class HeldWritingRoom(
+        val path: String,
+        val projectId: String,
+        val projectName: String,
+    )
+
+    private fun takeHeldWritingRoomSnapshot(): HeldWritingRoom? {
+        stopFileLockHeartbeat()
+        val path = heldFileLockPath ?: return null
+        val projectId = _editor.value.projectId
+        val projectName = _editor.value.projectName
+        heldFileLockPath = null
+        _editor.update { it.copy(inWritingRoom = false) }
+        if (projectId.isEmpty() || path.isBlank()) return null
+        return HeldWritingRoom(path, projectId, projectName)
+    }
+
+    /**
+     * Trash our lock file without needing an Activity (cached Drive token).
+     * Stale heartbeat (~2 min) is the fallback if this fails (force-kill, offline, expired token).
+     */
+    private suspend fun releaseHeldWritingRoomBestEffort() {
+        val snapshot = takeHeldWritingRoomSnapshot() ?: return
+        trashWritingRoomLock(snapshot)
+    }
+
+    private suspend fun trashWritingRoomLock(held: HeldWritingRoom) {
+        val token = authRepo.cachedDriveAccessTokenOrNull() ?: return
+        runCatching {
+            driveSync.releaseFileLock(token, held.projectId, held.projectName, held.path)
+        }
+    }
+
+    fun dismissWritingRoomPrompt() {
+        _editor.update { it.copy(writingRoomPrompt = null) }
+    }
+
+    fun confirmWritingRoomPrompt(activity: Activity) {
+        when (val prompt = _editor.value.writingRoomPrompt) {
+            is WritingRoomPrompt.Enter -> {
+                _editor.update { it.copy(writingRoomPrompt = null) }
+                enterWritingRoom(activity, confirmed = true)
+            }
+            is WritingRoomPrompt.Exit -> {
+                _editor.update { it.copy(writingRoomPrompt = null) }
+                exitWritingRoom(activity, skipConfirm = true)
+            }
+            is WritingRoomPrompt.Occupied -> {
+                dismissWritingRoomPrompt()
+            }
+            null -> Unit
         }
     }
 
@@ -586,39 +786,20 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     if (!result.ok) {
                         heldFileLockPath = null
                         val message = result.message
-                            ?: "Someone else took over editing this file."
+                            ?: "Someone else entered the writing room for this file."
                         _editor.update {
                             it.copy(
-                                fileLockBlockedMessage = message,
-                                fileLockHeld = false,
+                                inWritingRoom = false,
+                                writingRoomOccupiedMessage = message,
                                 status = "Read-only",
                                 error = message,
+                                writingRoomPrompt = WritingRoomPrompt.Occupied(message),
                             )
                         }
                         break
                     }
                 } catch (_: Exception) {
                     // Keep trying next beat.
-                }
-            }
-        }
-    }
-
-    private fun releaseHeldFileLock(activity: Activity) {
-        stopFileLockHeartbeat()
-        val path = heldFileLockPath ?: return
-        val state = _editor.value
-        heldFileLockPath = null
-        if (state.projectId.isEmpty()) return
-        viewModelScope.launch {
-            runCatching {
-                withDriveAccess(activity) { token ->
-                    driveSync.releaseFileLock(
-                        token,
-                        state.projectId,
-                        state.projectName,
-                        path,
-                    )
                 }
             }
         }
@@ -641,18 +822,21 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             }
             return
         }
-        if (state.fileLockBlockedMessage != null) {
+        if (state.writingRoomAvailable && !state.inWritingRoom) {
+            val message = state.writingRoomOccupiedMessage
+                ?: "Enter the writing room before saving this file to Google Drive. The writing room has space for only one person at a time."
             _editor.update {
                 it.copy(
                     status = "Read-only",
-                    error = state.fileLockBlockedMessage,
+                    error = message,
+                    writingRoomPrompt = if (state.writingRoomOccupiedMessage != null) {
+                        WritingRoomPrompt.Occupied(state.writingRoomOccupiedMessage)
+                    } else {
+                        WritingRoomPrompt.Enter(state.activePath)
+                    },
                 )
             }
-            Toast.makeText(
-                getApplication(),
-                state.fileLockBlockedMessage,
-                Toast.LENGTH_LONG,
-            ).show()
+            Toast.makeText(getApplication(), message, Toast.LENGTH_LONG).show()
             return
         }
         if (saveJob?.isActive == true) return
@@ -1459,6 +1643,25 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     override fun onCleared() {
+        val snapshot = takeHeldWritingRoomSnapshot()
+        if (snapshot != null) {
+            val token = authRepo.cachedDriveAccessTokenOrNull()
+            if (!token.isNullOrBlank()) {
+                // viewModelScope is cancelled; fire a short-lived thread so lock trash can finish.
+                Thread {
+                    runCatching {
+                        runBlocking(Dispatchers.IO) {
+                            driveSync.releaseFileLock(
+                                token,
+                                snapshot.projectId,
+                                snapshot.projectName,
+                                snapshot.path,
+                            )
+                        }
+                    }
+                }.start()
+            }
+        }
         engine.destroy()
         super.onCleared()
     }

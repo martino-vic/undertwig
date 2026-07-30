@@ -81,7 +81,17 @@ fun UndertwigApp(
                 onAddFolder = viewModel::addFolder,
                 onDeletePath = viewModel::deletePath,
                 onRenamePath = viewModel::renamePath,
-                onSyncFileLock = { viewModel.syncFileEditLock(activity) },
+                onRefreshWritingRoom = { viewModel.refreshWritingRoomStatus(activity) },
+                onWritingRoomClick = {
+                    val s = viewModel.editor.value
+                    if (s.inWritingRoom) {
+                        viewModel.exitWritingRoom(activity, skipConfirm = false)
+                    } else {
+                        viewModel.enterWritingRoom(activity, confirmed = false)
+                    }
+                },
+                onConfirmWritingRoomPrompt = { viewModel.confirmWritingRoomPrompt(activity) },
+                onDismissWritingRoomPrompt = viewModel::dismissWritingRoomPrompt,
             )
         }
         composable("pdf") {

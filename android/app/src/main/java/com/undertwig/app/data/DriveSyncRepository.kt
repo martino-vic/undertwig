@@ -138,6 +138,19 @@ class DriveSyncRepository(
     private fun isHeldByThisDevice(lock: FileEditLock): Boolean =
         !lock.deviceId.isNullOrBlank() && lock.deviceId == deviceId()
 
+    suspend fun peekFileLock(
+        accessToken: String,
+        projectId: String,
+        projectName: String,
+        relativePath: String,
+    ): FileEditLock? = withContext(Dispatchers.IO) {
+        val rel = relativePath.trim().trimStart('/').replace('\\', '/')
+        val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext null
+        val existing = readFileLock(accessToken, folderId, rel) ?: return@withContext null
+        if (existing.isStale() || isHeldByThisDevice(existing)) return@withContext null
+        existing
+    }
+
     suspend fun acquireFileLock(
         accessToken: String,
         projectId: String,
@@ -158,8 +171,8 @@ class DriveSyncRepository(
             return@withContext FileLockResult(
                 ok = false,
                 lock = existing,
-                message = "${existing.holderLabel()} is currently working on “$rel”. " +
-                    "Simultaneous collaboration is not supported at the moment.",
+                message = "${existing.holderLabel()} is in the writing room for “$rel”. " +
+                    "Live collaboration is not supported yet — the writing room has space for only one person at a time.",
             )
         }
         val payload = buildLockJson(
@@ -174,8 +187,8 @@ class DriveSyncRepository(
             return@withContext FileLockResult(
                 ok = false,
                 lock = again,
-                message = "${again.holderLabel()} is currently working on “$rel”. " +
-                    "Simultaneous collaboration is not supported at the moment.",
+                message = "${again.holderLabel()} is in the writing room for “$rel”. " +
+                    "Live collaboration is not supported yet — the writing room has space for only one person at a time.",
             )
         }
         FileLockResult(ok = true, lock = again)
@@ -203,8 +216,8 @@ class DriveSyncRepository(
                 return@withContext FileLockResult(
                     ok = false,
                     lock = existing,
-                    message = "${existing.holderLabel()} is currently working on “$rel”. " +
-                        "Simultaneous collaboration is not supported at the moment.",
+                    message = "${existing.holderLabel()} is in the writing room for “$rel”. " +
+                        "Live collaboration is not supported yet — the writing room has space for only one person at a time.",
                 )
             }
             return@withContext acquireFileLock(

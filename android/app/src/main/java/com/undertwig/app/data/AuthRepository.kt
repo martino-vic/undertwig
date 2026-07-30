@@ -167,6 +167,17 @@ class AuthRepository(context: Context) {
             .apply()
     }
 
+    /** Best-effort cached token for releasing locks without an Activity (sign-out / process teardown). */
+    fun cachedDriveAccessTokenOrNull(): String? {
+        val cached = prefs.getString(KEY_DRIVE_TOKEN, null)?.takeIf { it.isNotBlank() } ?: return null
+        val expiresAt = prefs.getLong(KEY_DRIVE_EXPIRES, 0L)
+        // Allow a short grace past expiry — trash is best-effort and tokens often still work briefly.
+        if (expiresAt > 0L && expiresAt + 5 * 60_000L < System.currentTimeMillis()) {
+            return null
+        }
+        return cached
+    }
+
     suspend fun signOut() {
         runCatching {
             credentialManager.clearCredentialState(ClearCredentialStateRequest())
