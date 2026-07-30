@@ -817,71 +817,6 @@
         opacity: 0.9;
       }
 
-      .writing-room-banner {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px 14px;
-        padding: 10px 14px;
-        border-bottom: 1px solid var(--border);
-        background: #1a2836;
-      }
-
-      .writing-room-banner[hidden],
-      .writing-room-banner.hidden {
-        display: none !important;
-      }
-
-      .writing-room-banner.is-inside {
-        background: #243528;
-        border-bottom-color: #3d5a40;
-      }
-
-      .writing-room-banner.is-occupied {
-        background: #3a2424;
-        border-bottom-color: #6a3a3a;
-      }
-
-      .writing-room-banner p {
-        margin: 0;
-        flex: 1 1 16rem;
-        color: var(--muted);
-        font-size: 13px;
-        line-height: 1.4;
-      }
-
-      .writing-room-banner.is-occupied p {
-        color: #f0c4c4;
-      }
-
-      .writing-room-banner.is-inside p {
-        color: #d5e8d5;
-      }
-
-      .writing-room-banner button {
-        flex: 0 0 auto;
-        min-height: 36px;
-        padding: 0 14px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--panel);
-        color: var(--text);
-        font: inherit;
-        font-size: 13px;
-        font-weight: 650;
-        cursor: pointer;
-      }
-
-      .writing-room-banner button:hover {
-        border-color: var(--brand);
-      }
-
-      .writing-room-banner.is-inside button {
-        background: var(--brand);
-        border-color: transparent;
-      }
-
       .convert-button {
         min-height: var(--btn-height);
         padding: 0 14px;
@@ -2934,10 +2869,6 @@
             </div>
           </div>
         </div>
-        <div class="writing-room-banner hidden" id="writingRoomBanner" hidden role="status">
-          <p id="writingRoomBannerText"></p>
-          <button type="button" id="writingRoomBannerButton">Enter writing room</button>
-        </div>
         <div class="editor-wrap">
           <div id="editor" class="code-editor-host" aria-label="LaTeX source editor"></div>
           <div class="asset-preview" id="assetPreview" aria-live="polite">
@@ -3166,7 +3097,7 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260729e"></script>
-    <script src="cloud-storage.js?v=20260730h"></script>
+    <script src="cloud-storage.js?v=20260730i"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -4042,10 +3973,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let writingRoomBusy = false;
       const FILE_LOCK_HEARTBEAT_MS = 20000;
       const writingRoomButton = document.getElementById("writingRoomButton");
-      const writingRoomBanner = document.getElementById("writingRoomBanner");
-      const writingRoomBannerText = document.getElementById("writingRoomBannerText");
-      const writingRoomBannerButton = document.getElementById("writingRoomBannerButton");
       let writingRoomBusyTimer = null;
+      let writingRoomDialogMode = null;
+      let writingRoomGateDismissedKey = null; // path or "occupied:path" after view-only / OK
+      let writingRoomGatePromise = null;
       let cloudStatusMode = "logged-out";
       // Declared early: boot used to call initCloudProject before this existed (TDZ), so invite sync never ran.
       let cloudInitPromise = null;
@@ -4218,7 +4149,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             "Enter the writing room before saving this file to Google Drive. The writing room has space for only one person at a time.",
             true
           );
-          showWritingRoomDialog("enter");
+          writingRoomGateDismissedKey = null;
+          maybePresentWritingRoomGate({ force: true });
           return;
         }
 
@@ -4231,7 +4163,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               "Someone is in the writing room for this file.",
             true
           );
-          showWritingRoomDialog("occupied");
+          writingRoomGateDismissedKey = null;
+          maybePresentWritingRoomGate({ force: true });
           return;
         }
 
@@ -5363,11 +5296,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       document.getElementById("saveProject").addEventListener("click", saveProjectNow);
       if (writingRoomButton) {
         writingRoomButton.addEventListener("click", function () {
-          onWritingRoomButtonClick();
-        });
-      }
-      if (writingRoomBannerButton) {
-        writingRoomBannerButton.addEventListener("click", function () {
           onWritingRoomButtonClick();
         });
       }
@@ -6740,10 +6668,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             !inside
         );
 
-        // Only block typing when someone else is in the room. An empty room stays
-        // editable; Drive Save still requires Enter (see saveProjectNow).
+        // Logged-in Drive text files stay behind the writing-room door until Enter.
         UndertwigEditor.setReadOnly(
-          !file || Boolean(file.binary) || (locksOn && occupied)
+          !file || Boolean(file.binary) || (locksOn && !inside)
         );
 
         function setControl(el, label, title) {
@@ -6783,45 +6710,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               setControl(
                 writingRoomButton,
                 "Enter writing room",
-                "Enter the writing room before saving this file to Google Drive"
+                "Open the writing room door to edit this file"
               );
-            }
-          }
-        }
-
-        if (writingRoomBanner) {
-          if (!showControls) {
-            writingRoomBanner.hidden = true;
-            writingRoomBanner.classList.add("hidden");
-            writingRoomBanner.classList.remove("is-inside", "is-occupied");
-          } else {
-            writingRoomBanner.hidden = false;
-            writingRoomBanner.classList.remove("hidden");
-            writingRoomBanner.classList.toggle("is-inside", inside);
-            writingRoomBanner.classList.toggle("is-occupied", occupied);
-            if (writingRoomBannerText) {
-              if (inside) {
-                writingRoomBannerText.textContent =
-                  "You are in the writing room for “" +
-                  rel +
-                  "”. Exit when you are done so others can edit.";
-              } else if (occupied) {
-                writingRoomBannerText.textContent =
-                  (fileLockOccupied && fileLockOccupied.message
-                    ? fileLockOccupied.message + " "
-                    : "") +
-                  "This file is read-only until they exit (abandoned rooms free after about 45 seconds).";
-              } else {
-                writingRoomBannerText.textContent =
-                  "Live collaboration is not supported yet — the writing room has space for only one person at a time. Enter before saving this file to Google Drive.";
-              }
-            }
-            if (inside) {
-              setControl(writingRoomBannerButton, "Exit writing room");
-            } else if (occupied) {
-              setControl(writingRoomBannerButton, "What now?");
-            } else {
-              setControl(writingRoomBannerButton, "Enter writing room");
             }
           }
         }
@@ -6835,7 +6725,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             activeFileMeta.textContent = "Read-only — writing room occupied";
           } else {
             activeFileMeta.textContent =
-              "Text file, " + formatBytes(size) + " · enter writing room to save to Drive";
+              "Text file, " + formatBytes(size) + " · enter the writing room to edit";
           }
         }
       }
@@ -6861,7 +6751,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           "</div>";
         writingRoomDialog = overlay;
         overlay.addEventListener("click", function (event) {
-          if (event.target === overlay) {
+          // Enter dialog is a door: clicking the backdrop does not skip it.
+          if (event.target === overlay && writingRoomDialogMode !== "enter") {
             closeWritingRoomDialog("cancel");
           }
         });
@@ -6873,6 +6764,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             !writingRoomDialog.hidden
           ) {
             event.preventDefault();
+            // Escape on the enter door = view only (still read-only).
             closeWritingRoomDialog("cancel");
           }
         });
@@ -6887,11 +6779,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         writingRoomDialog.hidden = true;
         writingRoomDialog.setAttribute("aria-hidden", "true");
         writingRoomDialog.inert = true;
+        writingRoomDialogMode = null;
         if (writingRoomDialog.isConnected) {
           writingRoomDialog.remove();
         }
         const resolve = writingRoomDialogResolver;
         writingRoomDialogResolver = null;
+        writingRoomGatePromise = null;
         if (resolve) {
           resolve(result || "cancel");
         }
@@ -6902,7 +6796,19 @@ writing your own material, or import DummyHippo if you want a tougher compile.
        * @returns {Promise<"cancel"|"confirm">}
        */
       function showWritingRoomDialog(mode) {
+        if (
+          writingRoomGatePromise &&
+          writingRoomDialog &&
+          !writingRoomDialog.hidden &&
+          writingRoomDialogMode === mode
+        ) {
+          return writingRoomGatePromise;
+        }
+        if (writingRoomDialogResolver) {
+          closeWritingRoomDialog("cancel");
+        }
         ensureWritingRoomDialog();
+        writingRoomDialogMode = mode;
         const title = writingRoomDialog.querySelector("#writingRoomTitle");
         const message = writingRoomDialog.querySelector("#writingRoomMessage");
         const actions = writingRoomDialog.querySelector("#writingRoomActions");
@@ -6931,7 +6837,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               : "") +
             "Live collaboration is not supported yet — the writing room has space for only one person at a time. You can read “" +
             rel +
-            "” now, and enter when it is free.";
+            "” now. Abandoned rooms free after about 45 seconds.";
           addButton("OK", "cancel", "modal-confirm");
         } else if (mode === "exit") {
           title.textContent = "Exit writing room?";
@@ -6944,10 +6850,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         } else {
           title.textContent = "Enter writing room";
           message.textContent =
-            "Live collaboration is not supported yet. The writing room has space for only one person at a time — while you are inside, collaborators see “" +
+            "Live collaboration is not supported yet. The writing room has space for only one person at a time — this door keeps the editor locked until you enter. While you are inside, collaborators see “" +
             rel +
-            "” as read-only for Drive saves. Enter before saving this file to Google Drive, and exit when you are done (or close the tab).";
-          addButton("Cancel", "cancel");
+            "” as read-only. Exit when you are done (or close the tab).";
+          addButton("View only", "cancel");
           addButton("Enter writing room", "confirm", "modal-confirm");
         }
 
@@ -6966,8 +6872,63 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           focusBtn.focus();
         }
 
-        return new Promise(function (resolve) {
+        writingRoomGatePromise = new Promise(function (resolve) {
           writingRoomDialogResolver = resolve;
+        });
+        return writingRoomGatePromise;
+      }
+
+      /**
+       * Show the door popup when a Drive-linked file needs Enter (or is occupied).
+       */
+      function maybePresentWritingRoomGate(options) {
+        const opts = options || {};
+        const force = Boolean(opts.force);
+        const file = state.files[state.activeFile];
+        const rel = projectRelativeActivePath();
+        const locksOn = fileLocksEnabled() && file && !file.binary && rel;
+        const inside = Boolean(rel && fileLockHeldPath === rel);
+        const occupied = Boolean(
+          fileLockOccupied &&
+            fileLockOccupied.fullPath === state.activeFile &&
+            !inside
+        );
+
+        if (!locksOn || inside) {
+          if (
+            writingRoomDialogMode === "enter" ||
+            writingRoomDialogMode === "occupied"
+          ) {
+            closeWritingRoomDialog("cancel");
+          }
+          if (inside) {
+            writingRoomGateDismissedKey = null;
+          }
+          return;
+        }
+
+        if (occupied) {
+          const key = "occupied:" + rel;
+          if (!force && writingRoomGateDismissedKey === key) {
+            return;
+          }
+          showWritingRoomDialog("occupied").then(function () {
+            writingRoomGateDismissedKey = key;
+          });
+          return;
+        }
+
+        const key = "enter:" + rel;
+        if (!force && writingRoomGateDismissedKey === key) {
+          return;
+        }
+        showWritingRoomDialog("enter").then(function (choice) {
+          if (choice === "confirm") {
+            writingRoomGateDismissedKey = null;
+            enterWritingRoom({ confirmed: true });
+          } else {
+            writingRoomGateDismissedKey = key;
+          }
         });
       }
 
@@ -6989,6 +6950,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           fileLockOccupied = null;
           if (generation === fileLockStatusGeneration) {
             updateWritingRoomUi();
+            maybePresentWritingRoomGate();
           }
           return;
         }
@@ -6996,6 +6958,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         // Switching files while inside a room: exit the previous room.
         if (fileLockHeldPath && fileLockHeldPath !== rel) {
           await releaseHeldFileLock();
+          writingRoomGateDismissedKey = null;
         }
 
         if (generation !== fileLockStatusGeneration) {
@@ -7004,7 +6967,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         if (fileLockHeldPath === rel) {
           fileLockOccupied = null;
+          writingRoomGateDismissedKey = null;
           updateWritingRoomUi();
+          maybePresentWritingRoomGate();
           return;
         }
 
@@ -7020,8 +6985,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             fileLockHeldPath = rel;
             fileLockHeldFileId = lock._fileId || null;
             fileLockOccupied = null;
+            writingRoomGateDismissedKey = null;
             startFileLockHeartbeat(projectName, rel);
             updateWritingRoomUi();
+            maybePresentWritingRoomGate();
             return;
           }
           if (
@@ -7046,19 +7013,25 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         if (generation === fileLockStatusGeneration) {
           updateWritingRoomUi();
+          maybePresentWritingRoomGate();
         }
       }
 
-      async function enterWritingRoom() {
+      async function enterWritingRoom(options) {
+        const opts = options || {};
         const projectName = getActiveProjectName();
         const rel = projectRelativeActivePath();
         if (!projectName || !rel || writingRoomBusy) {
           return;
         }
-        const choice = await showWritingRoomDialog("enter");
-        if (choice !== "confirm") {
-          return;
+        if (!opts.confirmed) {
+          const choice = await showWritingRoomDialog("enter");
+          if (choice !== "confirm") {
+            writingRoomGateDismissedKey = "enter:" + rel;
+            return;
+          }
         }
+        writingRoomGateDismissedKey = null;
         setWritingRoomBusy(true);
         setStatus("Entering the writing room for “" + rel + "”…");
         try {
@@ -7082,7 +7055,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 "Someone is already in the writing room for this file.",
             };
             setStatus(fileLockOccupied.message, true);
-            showWritingRoomDialog("occupied");
+            writingRoomGateDismissedKey = null;
+            showWritingRoomDialog("occupied").then(function () {
+              writingRoomGateDismissedKey = "occupied:" + rel;
+            });
           }
         } catch (error) {
           setStatus(
@@ -7111,6 +7087,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         setWritingRoomBusy(true);
         await releaseHeldFileLock();
+        writingRoomGateDismissedKey = null;
         setWritingRoomBusy(false);
         await refreshWritingRoomStatus();
         if (rel) {
@@ -7129,10 +7106,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
         if (fileLockOccupied && fileLockOccupied.fullPath === state.activeFile) {
-          showWritingRoomDialog("occupied");
+          writingRoomGateDismissedKey = null;
+          maybePresentWritingRoomGate({ force: true });
           return;
         }
-        await enterWritingRoom();
+        writingRoomGateDismissedKey = null;
+        maybePresentWritingRoomGate({ force: true });
       }
 
       // Back-compat name used by visibility handler.

@@ -84,7 +84,8 @@ data class EditorUiState(
     val converting: Boolean get() = busy != EditorBusy.Idle
     val editorReadOnly: Boolean
         get() = ProjectRepository.isBinaryPath(activePath) ||
-            writingRoomOccupiedMessage != null
+            writingRoomOccupiedMessage != null ||
+            (writingRoomAvailable && !inWritingRoom)
 }
 
 sealed class WritingRoomPrompt {
@@ -109,6 +110,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private var fileLockJob: Job? = null
     private var fileLockHeartbeatJob: Job? = null
     private var heldFileLockPath: String? = null
+    /** After View only / OK, don't re-popup the door until the user asks or the file changes. */
+    private var writingRoomGateDismissedKey: String? = null
     @Volatile private var latestBusyStatus: String? = null
     @Volatile private var busyStatusStartedAtMs: Long = 0L
     private var cachedDriveOwned: List<com.undertwig.app.data.DriveRemoteProject> = emptyList()
@@ -464,6 +467,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         if (heldFileLockPath != null && heldFileLockPath != path) {
             scheduleReleaseHeldWritingRoom()
         }
+        writingRoomGateDismissedKey = null
         val file = repo.readFile(state.projectId, path)
         _editor.update {
             it.copy(
@@ -556,12 +560,14 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                                 lock.holderEmail?.equals(userEmail, ignoreCase = true) == true)
                     if (mine) {
                         heldFileLockPath = path
+                        writingRoomGateDismissedKey = null
                         startFileLockHeartbeat(activity, projectId, projectName, path)
                         _editor.update {
                             it.copy(
                                 writingRoomAvailable = true,
                                 writingRoomOccupiedMessage = null,
                                 inWritingRoom = true,
+                                writingRoomPrompt = null,
                                 status = "You are in the writing room for “$path”.",
                             )
                         }
@@ -570,29 +576,47 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     val message =
                         "${lock.holderLabel()} is in the writing room for “$path”. " +
                             "Live collaboration is not supported yet — the writing room has space for only one person at a time."
+                    val occupiedKey = "occupied:$path"
                     _editor.update {
                         it.copy(
                             writingRoomAvailable = true,
                             writingRoomOccupiedMessage = message,
                             inWritingRoom = false,
                             status = "Read-only — writing room occupied",
+                            writingRoomPrompt = if (writingRoomGateDismissedKey == occupiedKey) {
+                                null
+                            } else {
+                                WritingRoomPrompt.Occupied(message)
+                            },
                         )
                     }
                 } else {
+                    val enterKey = "enter:$path"
                     _editor.update {
                         it.copy(
                             writingRoomAvailable = true,
                             writingRoomOccupiedMessage = null,
                             inWritingRoom = false,
+                            writingRoomPrompt = if (writingRoomGateDismissedKey == enterKey) {
+                                null
+                            } else {
+                                WritingRoomPrompt.Enter(path)
+                            },
                         )
                     }
                 }
             } catch (_: Exception) {
+                val enterKey = "enter:$path"
                 _editor.update {
                     it.copy(
                         writingRoomAvailable = true,
                         writingRoomOccupiedMessage = null,
                         inWritingRoom = false,
+                        writingRoomPrompt = if (writingRoomGateDismissedKey == enterKey) {
+                            null
+                        } else {
+                            WritingRoomPrompt.Enter(path)
+                        },
                     )
                 }
             }
@@ -643,12 +667,14 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 }
                 if (result.ok) {
                     heldFileLockPath = path
+                    writingRoomGateDismissedKey = null
                     startFileLockHeartbeat(activity, projectId, projectName, path)
                     _editor.update {
                         it.copy(
                             writingRoomBusy = false,
                             inWritingRoom = true,
                             writingRoomOccupiedMessage = null,
+                            writingRoomPrompt = null,
                             status = "You are in the writing room for “$path”.",
                             error = null,
                         )
@@ -699,6 +725,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         }
         viewModelScope.launch {
             releaseHeldWritingRoomBestEffort()
+            writingRoomGateDismissedKey = null
             _editor.update {
                 it.copy(
                     writingRoomBusy = false,
@@ -760,12 +787,22 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun dismissWritingRoomPrompt() {
+        when (val prompt = _editor.value.writingRoomPrompt) {
+            is WritingRoomPrompt.Enter -> {
+                writingRoomGateDismissedKey = "enter:${prompt.path}"
+            }
+            is WritingRoomPrompt.Occupied -> {
+                writingRoomGateDismissedKey = "occupied:${_editor.value.activePath}"
+            }
+            else -> Unit
+        }
         _editor.update { it.copy(writingRoomPrompt = null) }
     }
 
     fun confirmWritingRoomPrompt(activity: Activity) {
         when (val prompt = _editor.value.writingRoomPrompt) {
             is WritingRoomPrompt.Enter -> {
+                writingRoomGateDismissedKey = null
                 _editor.update { it.copy(writingRoomPrompt = null) }
                 enterWritingRoom(activity, confirmed = true)
             }
