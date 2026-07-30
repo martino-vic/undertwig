@@ -12,6 +12,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.UNDERTWIG_CONSOLE_PORT || 17834);
@@ -476,6 +477,58 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+async function openTerminalAt(cwd) {
+  if (process.platform === "linux") {
+    await tryOpenLinuxTerminal(cwd);
+  } else {
+    openSystemTerminal(cwd);
+  }
+}
+
+async function ensureServerRunning() {
+  try {
+    const res = await fetch("http://" + HOST + ":" + PORT + "/health");
+    if (res.ok) {
+      return true;
+    }
+  } catch (_error) {
+    // Not running.
+  }
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "serve"], {
+    detached: true,
+    stdio: "ignore",
+    env: process.env,
+    windowsHide: true,
+  });
+  child.unref();
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise((r) => setTimeout(r, 150));
+    try {
+      const res = await fetch("http://" + HOST + ":" + PORT + "/health");
+      if (res.ok) {
+        return true;
+      }
+    } catch (_error) {
+      // keep waiting
+    }
+  }
+  return false;
+}
+
+async function handleProtocolUrl(rawUrl) {
+  const url = new URL(rawUrl);
+  const action = (url.hostname || url.pathname.replace(/^\/+/, "").split("/")[0] || "").toLowerCase();
+  if (action === "open-terminal" || action === "terminal") {
+    const cwd = resolveExistingDir(
+      url.searchParams.get("cwd") || url.searchParams.get("path") || ""
+    );
+    await openTerminalAt(cwd);
+    return;
+  }
+  // start / ensure / empty → make sure the background companion is listening
+  await ensureServerRunning();
+}
+
 async function runCli(argv) {
   const args = argv.slice(2);
   if (!args.length) {
@@ -483,63 +536,43 @@ async function runCli(argv) {
   }
   if (args[0] === "open-terminal" || args[0] === "terminal") {
     const cwd = resolveExistingDir(args[1] || process.cwd());
-    if (process.platform === "linux") {
-      await tryOpenLinuxTerminal(cwd);
-    } else {
-      openSystemTerminal(cwd);
-    }
+    await openTerminalAt(cwd);
     console.log("[undertwig] Opened system terminal in " + cwd);
     return true;
   }
   if (args[0] === "serve" || args[0] === "host") {
-    return false;
+    return false; // fall through to listen()
   }
-  // Protocol-style: undertwig-local://open-terminal?cwd=/path
+  if (args[0] === "handle" && args[1]) {
+    await handleProtocolUrl(args[1]);
+    return true;
+  }
   if (/^undertwig-local:/i.test(args[0])) {
-    try {
-      const url = new URL(args[0]);
-      if (url.hostname === "open-terminal" || url.pathname.indexOf("open-terminal") !== -1) {
-        const cwd = resolveExistingDir(
-          url.searchParams.get("cwd") || url.searchParams.get("path") || ""
-        );
-        if (process.platform === "linux") {
-          await tryOpenLinuxTerminal(cwd);
-        } else {
-          openSystemTerminal(cwd);
-        }
-        console.log("[undertwig] Opened system terminal in " + cwd);
-        return true;
-      }
-    } catch (error) {
-      console.error("[undertwig]", error && error.message ? error.message : error);
-      process.exit(1);
-    }
+    await handleProtocolUrl(args[0]);
+    return true;
   }
   return false;
 }
 
 const cliHandled = await runCli(process.argv);
 if (cliHandled) {
-  // Give spawned terminal a moment to detach, then exit.
-  setTimeout(() => process.exit(0), 150);
+  setTimeout(() => process.exit(0), 200);
 } else {
   server.listen(PORT, HOST, () => {
     console.log(
-      `[undertwig] Local helper on http://${HOST}:${PORT}\n` +
-        `Leave this running for Import project (auto path) and Save-to-disk.\n` +
-        `Console also works without this via a downloaded launcher.\n` +
-        `One-shot: node local-console-host.mjs open-terminal /path/to/project`
+      `[undertwig] Local companion on http://${HOST}:${PORT}\n` +
+        `Running in the background for Import (auto path), Save-to-disk, and Console.`
     );
   });
 
   server.on("error", (error) => {
     if (error && error.code === "EADDRINUSE") {
-      console.error(
-        `[undertwig] Port ${PORT} is already in use. Is the helper already running?`
-      );
+      // Already running — fine for autostart / double-launch.
+      console.log("[undertwig] Companion already running on port " + PORT + ".");
+      process.exit(0);
     } else {
-      console.error("[undertwig] Failed to start helper:", error);
+      console.error("[undertwig] Failed to start companion:", error);
+      process.exit(1);
     }
-    process.exit(1);
   });
 }

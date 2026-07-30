@@ -3204,8 +3204,8 @@
     <script src="auth.js?v=20260729e"></script>
     <script src="cloud-storage.js?v=20260730q"></script>
     <script src="invite.js?v=20260728q"></script>
-    <script src="local-project-fs.js?v=20260730d"></script>
-    <script src="local-desktop.js?v=20260730d"></script>
+    <script src="local-project-fs.js?v=20260730e"></script>
+    <script src="local-desktop.js?v=20260730e"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260729a"></script>
@@ -9640,7 +9640,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           pathNote = " Local path remembered for Console.";
         } else if (options && options.directoryHandle && localDesktopAllowed()) {
           pathNote =
-            " Linked for Save. For Console, start the local helper (node local-console-host.mjs) and Import project again so the full path is stored.";
+            " Linked for Save. For Console / automatic path, install Undertwig Local once (Download installer from Console).";
         }
 
         if (failures.length) {
@@ -9797,15 +9797,17 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       async function importProjectForDesktop() {
         try {
-          if (
-            window.UndertwigLocalDesktop &&
-            (await UndertwigLocalDesktop.hostHealth())
-          ) {
-            await importProjectViaLocalHelper();
-            return;
+          if (window.UndertwigLocalDesktop) {
+            if (!(await UndertwigLocalDesktop.hostHealth())) {
+              await UndertwigLocalDesktop.wakeCompanion();
+            }
+            if (await UndertwigLocalDesktop.hostHealth()) {
+              await importProjectViaLocalHelper();
+              return;
+            }
           }
 
-          // Helper is optional for importing files; required only for automatic absolute paths.
+          // Companion optional for importing files; needed only for automatic absolute paths.
           if (
             window.UndertwigLocalFs &&
             UndertwigLocalFs.supportsDirectoryPicker()

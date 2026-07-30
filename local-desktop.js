@@ -157,17 +157,38 @@
     el.querySelector("#localPathWarningUpdate").addEventListener("click", async function () {
       const project = currentProjectName();
       if (!project) return;
-      const meta =
-        global.UndertwigLocalFs && UndertwigLocalFs.getProjectMeta(project);
-      const next = await promptAbsolutePath({
-        title: "Update local folder path",
-        message:
-          "Enter the full path of the Work desk project folder on this computer.",
-        initial: (meta && meta.absolutePath) || "",
-        folderName: (meta && meta.folderName) || project,
-      });
+      let next = "";
+      if (await hostHealth()) {
+        try {
+          const response = await fetch(HOST_URL + "/pick-directory", {
+            method: "POST",
+            mode: "cors",
+            cache: "no-store",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+          });
+          const data = await response.json();
+          if (response.ok && data && data.ok && data.path) {
+            next = data.path;
+          }
+        } catch (_error) {
+          // Fall through.
+        }
+      }
+      if (!next) {
+        const meta =
+          global.UndertwigLocalFs && UndertwigLocalFs.getProjectMeta(project);
+        next = await promptAbsolutePath({
+          title: "Update local folder path",
+          message:
+            "Choose or enter the full path of the Work desk project folder. Tip: install Undertwig Local to pick it with a normal folder dialog.",
+          initial: (meta && meta.absolutePath) || "",
+          folderName: (meta && meta.folderName) || project,
+        });
+      }
       if (!next) return;
-      await UndertwigLocalFs.bindProject(project, null, next);
+      const handle = await UndertwigLocalFs.getHandle(project);
+      await UndertwigLocalFs.bindProject(project, handle, next);
       if (typeof deps.onBindingChanged === "function") {
         deps.onBindingChanged(project);
       }
@@ -500,6 +521,110 @@
     return data;
   }
 
+  function companionInstallerUrl() {
+    const osName = detectDesktopOs();
+    if (osName === "windows") {
+      return "local-helper/install.ps1";
+    }
+    if (osName === "mac") {
+      return "local-helper/install.command";
+    }
+    return "local-helper/install.sh";
+  }
+
+  function ensureCompanionDialog() {
+    let overlay = $("localCompanionDialog");
+    if (overlay) return overlay;
+    overlay = document.createElement("div");
+    overlay.className = "modal-overlay hidden";
+    overlay.id = "localCompanionDialog";
+    overlay.hidden = true;
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.inert = true;
+    overlay.innerHTML =
+      '<div class="modal-card">' +
+      "<h2>Install Undertwig Local</h2>" +
+      "<p>" +
+      "A tiny companion app runs in the background so Console can open your system terminal " +
+      "and Import can remember the real folder path — without typing commands." +
+      "</p>" +
+      "<p>" +
+      "Install once (requires free Node.js). After that it starts automatically when you log in." +
+      "</p>" +
+      '<div class="modal-actions">' +
+      '<button type="button" id="localCompanionLater">Not now</button>' +
+      '<button type="button" class="modal-confirm" id="localCompanionInstall">Download installer</button>' +
+      "</div>" +
+      "</div>";
+    document.body.appendChild(overlay);
+    overlay.querySelector("#localCompanionLater").addEventListener("click", function () {
+      overlay.classList.add("hidden");
+      overlay.hidden = true;
+      overlay.setAttribute("aria-hidden", "true");
+      overlay.inert = true;
+    });
+    overlay.querySelector("#localCompanionInstall").addEventListener("click", function () {
+      const url = companionInstallerUrl();
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = url.split("/").pop();
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      if (typeof deps.setStatus === "function") {
+        deps.setStatus(
+          "Downloaded the Undertwig Local installer — open it to finish setup. It will run in the background afterwards."
+        );
+      }
+      overlay.classList.add("hidden");
+      overlay.hidden = true;
+      overlay.setAttribute("aria-hidden", "true");
+      overlay.inert = true;
+    });
+    overlay.addEventListener("click", function (event) {
+      if (event.target === overlay) {
+        overlay.querySelector("#localCompanionLater").click();
+      }
+    });
+    return overlay;
+  }
+
+  function offerCompanionInstall() {
+    const overlay = ensureCompanionDialog();
+    overlay.classList.remove("hidden");
+    overlay.hidden = false;
+    overlay.removeAttribute("aria-hidden");
+    overlay.inert = false;
+  }
+
+  async function wakeCompanion() {
+    if (await hostHealth()) {
+      return true;
+    }
+    // If the one-time installer registered the protocol, this starts the companion.
+    try {
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.src = "undertwig-local://start";
+      document.body.appendChild(iframe);
+      setTimeout(function () {
+        iframe.remove();
+      }, 2000);
+    } catch (_error) {
+      // Ignore.
+    }
+    for (let i = 0; i < 12; i += 1) {
+      await new Promise(function (resolve) {
+        setTimeout(resolve, 250);
+      });
+      if (await hostHealth()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   async function openSystemConsole() {
     if (!isFeatureAllowed()) return;
     const project = currentProjectName();
@@ -508,6 +633,14 @@
         deps.setStatus("Set a Work desk project before opening the console.", true);
       }
       return;
+    }
+
+    if (!(await hostHealth())) {
+      const woke = await wakeCompanion();
+      if (!woke) {
+        offerCompanionInstall();
+        // Still allow path + launcher fallback below after install prompt.
+      }
     }
 
     const cwd = await ensureProjectAbsolutePath(project);
@@ -520,7 +653,6 @@
 
     await refreshLocalPathWarning();
 
-    // Best case: local helper is already running → open terminal immediately.
     if (await hostHealth()) {
       try {
         const data = await openTerminalViaHelper(cwd);
@@ -531,12 +663,11 @@
         }
         return;
       } catch (error) {
-        // Fall through to launcher download.
-        console.warn("[undertwig] helper open-terminal failed", error);
+        console.warn("[undertwig] companion open-terminal failed", error);
       }
     }
 
-    // No helper required: download a one-click launcher and copy the open command.
+    // Fallback without companion: download a one-click launcher.
     const launcher = buildTerminalLauncher(cwd);
     downloadTextFile(launcher.filename, launcher.body, launcher.mime);
     const copied = await copyText(launcher.openCommand);
@@ -545,7 +676,7 @@
         copied
           ? "Downloaded " +
               launcher.filename +
-              " — open it to launch the terminal. Command also copied to the clipboard."
+              " — open it to launch the terminal. Or install Undertwig Local for one-click Console."
           : "Downloaded " +
               launcher.filename +
               " — open it to launch the terminal in “" +
@@ -600,6 +731,8 @@
     openSystemConsole: openSystemConsole,
     importProjectViaHost: importProjectViaHost,
     writeProjectViaHost: writeProjectViaHost,
+    offerCompanionInstall: offerCompanionInstall,
+    wakeCompanion: wakeCompanion,
     isFeatureAllowed: isFeatureAllowed,
     hostPathInfo: hostPathInfo,
     hostHealth: hostHealth,
