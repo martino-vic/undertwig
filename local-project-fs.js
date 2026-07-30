@@ -167,6 +167,12 @@
     return file.content == null ? "" : String(file.content);
   }
 
+  function yieldToUi() {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, 0);
+    });
+  }
+
   async function saveProjectToDirectory(projectName, state, helpers) {
     const name = String(projectName || "").trim();
     if (!name) throw new Error("No current project.");
@@ -185,8 +191,31 @@
       return path.startsWith(prefix);
     });
 
+    const onProgress = helpers && typeof helpers.onProgress === "function"
+      ? helpers.onProgress
+      : null;
+    const signal = helpers && helpers.signal;
+
     let written = 0;
+    let planned = 0;
     for (let i = 0; i < paths.length; i += 1) {
+      const rel = paths[i].slice(prefix.length);
+      if (
+        rel &&
+        !rel.split("/").some(function (part) {
+          return SKIP_DIR_NAMES.has(part);
+        })
+      ) {
+        planned += 1;
+      }
+    }
+
+    for (let i = 0; i < paths.length; i += 1) {
+      if (signal && signal.aborted) {
+        const err = new Error("Save cancelled.");
+        err.name = "AbortError";
+        throw err;
+      }
       const path = paths[i];
       const file = files[path];
       if (!file) continue;
@@ -201,6 +230,13 @@
       }
       await writeFileAtPath(handle, rel, filePayload(file, helpers));
       written += 1;
+      if (onProgress) {
+        onProgress(written, planned);
+      }
+      // Keep the tab responsive on large projects.
+      if (written % 8 === 0) {
+        await yieldToUi();
+      }
     }
 
     return {
@@ -286,5 +322,6 @@
     hasBoundDirectory: hasBoundDirectory,
     renameProjectBinding: renameProjectBinding,
     removeProjectBinding: removeProjectBinding,
+    yieldToUi: yieldToUi,
   };
 })(window);

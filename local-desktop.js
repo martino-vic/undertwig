@@ -16,7 +16,17 @@
   }
 
   function isFeatureAllowed() {
-    if (!deps || (typeof deps.isLoggedIn === "function" && deps.isLoggedIn())) {
+    // Offline-only. Prefer injected auth check; fall back to UndertwigAuth.
+    let loggedIn = false;
+    if (deps && typeof deps.isLoggedIn === "function") {
+      loggedIn = Boolean(deps.isLoggedIn());
+    } else if (
+      global.UndertwigAuth &&
+      typeof global.UndertwigAuth.isLoggedIn === "function"
+    ) {
+      loggedIn = Boolean(global.UndertwigAuth.isLoggedIn());
+    }
+    if (loggedIn) {
       return false;
     }
     return isDesktopWebsite();

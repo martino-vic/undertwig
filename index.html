@@ -3147,8 +3147,8 @@
     <script src="auth.js?v=20260729e"></script>
     <script src="cloud-storage.js?v=20260730q"></script>
     <script src="invite.js?v=20260728q"></script>
-    <script src="local-project-fs.js?v=20260730g"></script>
-    <script src="local-desktop.js?v=20260730g"></script>
+    <script src="local-project-fs.js?v=20260730i"></script>
+    <script src="local-desktop.js?v=20260730i"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260729a"></script>
@@ -3550,10 +3550,19 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       function localDesktopAllowed() {
-        return Boolean(
+        if (UndertwigAuth.isLoggedIn()) {
+          return false;
+        }
+        if (
           window.UndertwigLocalDesktop &&
-            UndertwigLocalDesktop.isFeatureAllowed &&
-            UndertwigLocalDesktop.isFeatureAllowed()
+          UndertwigLocalDesktop.isFeatureAllowed
+        ) {
+          return UndertwigLocalDesktop.isFeatureAllowed();
+        }
+        return (
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(min-width: 1181px)").matches &&
+          !document.documentElement.classList.contains("mobile-gate")
         );
       }
 
@@ -3565,6 +3574,19 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const show = localDesktopAllowed();
         button.hidden = !show;
         button.classList.toggle("hidden", !show);
+        if (show) {
+          button.title =
+            "Save only the open file in this browser and the linked local folder";
+        }
+      }
+
+      function yieldToUi() {
+        if (window.UndertwigLocalFs && UndertwigLocalFs.yieldToUi) {
+          return UndertwigLocalFs.yieldToUi();
+        }
+        return new Promise(function (resolve) {
+          setTimeout(resolve, 0);
+        });
       }
 
       function setSaveButtonBusy(busy) {
@@ -3583,7 +3605,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           saveSpinnerFrame = 0;
           saveButton.textContent =
             ABORT_BUTTON_LABEL + " " + CONVERT_SPINNER_FRAMES[0];
-          saveButton.title = "Cancel saving to Google Drive";
+          saveButton.title = UndertwigAuth.isLoggedIn()
+            ? "Cancel saving to Google Drive"
+            : "Cancel saving";
           saveSpinnerTimer = setInterval(function () {
             saveSpinnerFrame = (saveSpinnerFrame + 1) % CONVERT_SPINNER_FRAMES.length;
             saveButton.textContent =
@@ -4257,6 +4281,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       async function saveCurrentFileNow() {
         if (!localDesktopAllowed()) {
+          setStatus("Save file is available when logged out on desktop.", true);
           return;
         }
         const projectName = getActiveProjectName();
@@ -4266,24 +4291,35 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
-        const active = state.files[filePath];
-        if (active && !active.binary) {
-          active.content = UndertwigEditor.getValue();
+        const shortName = filePath.split("/").pop() || filePath;
+        const fileButton = document.getElementById("saveFile");
+        if (fileButton) {
+          fileButton.disabled = true;
         }
+        setStatus("Saving “" + shortName + "”…");
+        await yieldToUi();
 
-        let localOk = true;
         try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        } catch (_error) {
-          localOk = false;
-        }
+          const active = state.files[filePath];
+          if (active && !active.binary) {
+            active.content = UndertwigEditor.getValue();
+          }
 
-        let diskNote = "";
-        try {
-          if (
+          let localOk = true;
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          } catch (_error) {
+            localOk = false;
+          }
+          await yieldToUi();
+
+          let diskNote = "";
+          const bound =
             window.UndertwigLocalFs &&
-            (await UndertwigLocalFs.hasBoundDirectory(projectName))
-          ) {
+            (await UndertwigLocalFs.hasBoundDirectory(projectName));
+          if (bound) {
+            setStatus("Writing “" + shortName + "” to the local folder…");
+            await yieldToUi();
             const diskResult = await UndertwigLocalFs.saveFileToDirectory(
               projectName,
               filePath,
@@ -4296,23 +4332,31 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 (diskResult.folderName ? " “" + diskResult.folderName + "”" : "");
             }
           }
+
+          if (localOk) {
+            setStatus(
+              "Saved “" +
+                shortName +
+                "” in this browser" +
+                diskNote +
+                (bound ? "." : ". Tip: Import project to also write to disk.")
+            );
+          } else if (diskNote) {
+            setStatus(
+              "Saved “" + shortName + "” to the local folder (browser storage is full)."
+            );
+          } else {
+            setStatusStorageFull({ force: true });
+          }
         } catch (error) {
           setStatus(
-            (error && error.message) || "Could not save the file to the local folder.",
+            (error && error.message) || "Could not save the file.",
             true
           );
-          return;
-        }
-
-        const shortName = filePath.split("/").pop() || filePath;
-        if (localOk) {
-          setStatus("Saved “" + shortName + "” in this browser" + diskNote + ".");
-        } else if (diskNote) {
-          setStatus(
-            "Saved “" + shortName + "” to the local folder (browser storage is full)."
-          );
-        } else {
-          setStatusStorageFull({ force: true });
+        } finally {
+          if (fileButton) {
+            fileButton.disabled = false;
+          }
         }
       }
 
@@ -4359,13 +4403,18 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const abortController = new AbortController();
         saveAbortController = abortController;
         setSaveButtonBusy(true);
+        setStatus("Saving…");
+        await yieldToUi();
         try {
           let localOk = true;
           try {
+            setStatus("Saving in this browser…");
+            await yieldToUi();
             localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
           } catch (_error) {
             localOk = false;
           }
+          await yieldToUi();
 
           if (UndertwigAuth.isLoggedIn() && UndertwigCloud.isAvailable()) {
             if (!UndertwigCloud.hasAccessToken()) {
@@ -4441,17 +4490,26 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           // Offline desktop: also write back through the linked folder handle when present.
           let diskNote = "";
           const localProjectName = getActiveProjectName();
-          if (
+          const bound =
             localProjectName &&
             localDesktopAllowed() &&
             window.UndertwigLocalFs &&
-            (await UndertwigLocalFs.hasBoundDirectory(localProjectName))
-          ) {
-            setStatus("Saving “" + localProjectName + "” to the local folder…");
+            (await UndertwigLocalFs.hasBoundDirectory(localProjectName));
+          if (bound) {
+            setStatus("Writing project files to the local folder…");
+            await yieldToUi();
             const diskResult = await UndertwigLocalFs.saveProjectToDirectory(
               localProjectName,
               state,
-              { base64ToBytes: base64ToBytes }
+              {
+                base64ToBytes: base64ToBytes,
+                signal: abortController.signal,
+                onProgress: function (done, total) {
+                  setStatus(
+                    "Writing to local folder… " + done + "/" + total + " files"
+                  );
+                },
+              }
             );
             if (abortController.signal.aborted) {
               setStatus("Save cancelled.");
@@ -4470,7 +4528,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
 
           if (localOk) {
-            setStatus("Saved in this browser" + diskNote + ".");
+            setStatus(
+              "Saved in this browser" +
+                diskNote +
+                (bound ? "." : ". Tip: use Import project to also save to disk.")
+            );
             restoreSaveButtonTitle();
           } else if (diskNote) {
             setStatus(
@@ -9605,6 +9667,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           try {
             await UndertwigLocalFs.putHandle(projectName, options.directoryHandle);
             restoreSaveButtonTitle();
+            refreshSaveFileButtonVisibility();
           } catch (_error) {
             // Import still succeeded in the browser.
           }
@@ -9648,6 +9711,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       async function importNewProjectFromDirectoryPicker() {
         try {
           setStatus("Choose the local project folder…");
+          await yieldToUi();
           const dirHandle = await UndertwigLocalFs.pickProjectDirectory();
           const allowed = await UndertwigLocalFs.ensureReadWritePermission(dirHandle);
           if (!allowed) {
@@ -9662,6 +9726,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
           const preferredRoot = dirHandle.name || "Project";
           const projectName = uniqueImportedProjectName(preferredRoot);
+          setStatus("Reading files from “" + preferredRoot + "”…");
+          await yieldToUi();
           const entries = await UndertwigLocalFs.collectFiles(dirHandle, "");
           let imported = 0;
           const failures = [];
@@ -9679,6 +9745,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               }
               ensureFoldersForPath(path);
               const binary = !isTextFile(path);
+              // Skip very large binaries in the browser copy (still on disk via the handle).
+              if (binary && entry.file && entry.file.size > 8 * 1024 * 1024) {
+                failures.push(
+                  label + " (skipped in browser copy; larger than 8 MB — stays on disk)"
+                );
+                continue;
+              }
               const content = binary
                 ? bytesToBase64(new Uint8Array(await entry.file.arrayBuffer()))
                 : await entry.file.text();
@@ -9694,6 +9767,18 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             } catch (error) {
               failures.push(label + ": " + explainUploadError(error));
             }
+            if ((i + 1) % 12 === 0) {
+              setStatus(
+                "Importing “" +
+                  preferredRoot +
+                  "”… " +
+                  (i + 1) +
+                  "/" +
+                  entries.length +
+                  " items"
+              );
+              await yieldToUi();
+            }
           }
 
           await finishImportedLocalProject(
@@ -9703,6 +9788,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             firstImportedPath,
             { directoryHandle: dirHandle }
           );
+          refreshSaveFileButtonVisibility();
           render();
         } catch (error) {
           if (error && error.name === "AbortError") {
