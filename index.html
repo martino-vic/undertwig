@@ -306,6 +306,17 @@
         line-height: 1.35;
       }
 
+      .tree-section-hint {
+        padding: 0 12px 6px;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.35;
+        font-weight: 450;
+        letter-spacing: 0;
+        text-transform: none;
+        user-select: none;
+      }
+
       .tree-section-current {
         border-radius: 6px;
         transition: background 0.15s ease, box-shadow 0.15s ease;
@@ -6439,6 +6450,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               : " (owner)";
         currentLabel.textContent = "Current" + currentSuffix;
         currentSection.appendChild(currentLabel);
+
+        const currentHint = document.createElement("div");
+        currentHint.className = "tree-section-hint";
+        currentHint.textContent = showCloudSection
+          ? "Drag a project here from Other or Cloud"
+          : "Drag a project here from Other";
+        currentSection.appendChild(currentHint);
 
         const currentBody = document.createElement("div");
         currentBody.className = "tree-section-body";
