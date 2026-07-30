@@ -81,6 +81,7 @@ fun UndertwigApp(
                 onAddFolder = viewModel::addFolder,
                 onDeletePath = viewModel::deletePath,
                 onRenamePath = viewModel::renamePath,
+                onResolveDriveConflict = viewModel::resolveDriveConflict,
             )
         }
         composable("pdf") {

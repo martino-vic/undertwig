@@ -12,6 +12,8 @@
   const ROLE_KEY = "undertwig-drive-role-v2";
   const OWNER_EMAIL_KEY = "undertwig-drive-owner-email-v1";
   const PENDING_INVITE_KEY = "undertwig-pending-invite-project-v1";
+  // Per Drive folder: last-known remote md5 + local content hash after Load/Save.
+  const BASELINE_KEY = "undertwig-drive-baseline-v1";
   // Legacy keys from the single-JSON sync era — clear on load so stale IDs cannot 404.
   const LEGACY_FILE_KEYS = ["undertwig-drive-file-v1", "undertwig-drive-folder-v1"];
 
@@ -984,6 +986,170 @@
     });
   }
 
+  function base64ToUint8Array(base64) {
+    const binary = atob(String(base64 || ""));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  function bytesToHex(buffer) {
+    const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    let out = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+      out += bytes[i].toString(16).padStart(2, "0");
+    }
+    return out;
+  }
+
+  async function sha256HexOfBytes(bytes) {
+    if (global.crypto && crypto.subtle && typeof crypto.subtle.digest === "function") {
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      return bytesToHex(digest);
+    }
+    // Insecure-context fallback: stable FNV-1a 32-bit hex (enough for conflict checks).
+    let h = 0x811c9dc5;
+    for (let i = 0; i < bytes.length; i += 1) {
+      h ^= bytes[i];
+      h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16).padStart(8, "0");
+  }
+
+  async function hashFileEntry(fileEntry) {
+    if (!fileEntry) {
+      return await sha256HexOfBytes(new Uint8Array(0));
+    }
+    if (fileEntry.binary) {
+      return sha256HexOfBytes(base64ToUint8Array(fileEntry.content));
+    }
+    const text = fileEntry.content == null ? "" : String(fileEntry.content);
+    return sha256HexOfBytes(new TextEncoder().encode(text));
+  }
+
+  function conflictStamp() {
+    const d = new Date();
+    const p = function (n) {
+      return String(n).padStart(2, "0");
+    };
+    return (
+      d.getFullYear() +
+      p(d.getMonth() + 1) +
+      p(d.getDate()) +
+      "-" +
+      p(d.getHours()) +
+      p(d.getMinutes()) +
+      p(d.getSeconds())
+    );
+  }
+
+  function conflictCopyRelativePath(relPath, stamp) {
+    const parts = String(relPath || "").split("/");
+    const name = parts.pop() || "file";
+    const tag = stamp || conflictStamp();
+    const email = (currentSessionEmail() || "local").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 24);
+    const label = tag + "-" + email;
+    const dot = name.lastIndexOf(".");
+    const newName =
+      dot > 0
+        ? name.slice(0, dot) + ".conflict-" + label + name.slice(dot)
+        : name + ".conflict-" + label;
+    parts.push(newName);
+    return parts.join("/");
+  }
+
+  function readAllBaselines() {
+    const data = readJsonStorage(BASELINE_KEY, {});
+    return data && typeof data === "object" ? data : {};
+  }
+
+  function writeAllBaselines(data) {
+    writeJsonStorage(BASELINE_KEY, data || {});
+  }
+
+  function getBaselineMap(folderId) {
+    const id = String(folderId || "").trim();
+    if (!id) {
+      return {};
+    }
+    const all = readAllBaselines();
+    const entry = all[id];
+    if (!entry || typeof entry !== "object") {
+      return {};
+    }
+    const files = entry.files;
+    return files && typeof files === "object" ? Object.assign({}, files) : {};
+  }
+
+  function setBaselineMap(folderId, filesMap) {
+    const id = String(folderId || "").trim();
+    if (!id) {
+      return;
+    }
+    const all = readAllBaselines();
+    all[id] = {
+      updatedAt: Date.now(),
+      files: filesMap && typeof filesMap === "object" ? filesMap : {},
+    };
+    writeAllBaselines(all);
+  }
+
+  function clearBaseline(folderId) {
+    const id = String(folderId || "").trim();
+    if (!id) {
+      return;
+    }
+    const all = readAllBaselines();
+    if (!Object.prototype.hasOwnProperty.call(all, id)) {
+      return;
+    }
+    delete all[id];
+    writeAllBaselines(all);
+  }
+
+  /**
+   * Record sync baseline after a successful Load or Save.
+   * @param {string} folderId
+   * @param {Array<{path:string,id?:string,md5Checksum?:string,md5?:string,modifiedTime?:string|null}>} remoteFiles
+   * @param {Object<string,{content?:string,binary?:boolean}>} localRelativeFiles
+   */
+  async function recordBaseline(folderId, remoteFiles, localRelativeFiles) {
+    const id = String(folderId || "").trim();
+    if (!id) {
+      return;
+    }
+    const next = {};
+    const remoteByPath = {};
+    (remoteFiles || []).forEach(function (entry) {
+      if (!entry || !entry.path) {
+        return;
+      }
+      remoteByPath[entry.path] = entry;
+    });
+    const local = localRelativeFiles || {};
+    const paths = new Set(Object.keys(local));
+    Object.keys(remoteByPath).forEach(function (path) {
+      paths.add(path);
+    });
+    for (const path of paths) {
+      const localEntry = local[path];
+      const remote = remoteByPath[path];
+      if (!localEntry) {
+        continue;
+      }
+      const contentHash = await hashFileEntry(localEntry);
+      next[path] = {
+        id: remote && remote.id ? String(remote.id) : null,
+        md5: (remote && (remote.md5Checksum || remote.md5)) || null,
+        modifiedTime: (remote && remote.modifiedTime) || null,
+        contentHash: contentHash,
+      };
+    }
+    setBaselineMap(id, next);
+  }
+
   async function ensurePathFolders(rootFolderId, relativeDir) {
     const parts = String(relativeDir || "")
       .split("/")
@@ -1355,7 +1521,8 @@
     }
   }
 
-  async function uploadFileToFolder(parentId, fileName, fileEntry, existingId) {
+  async function uploadFileToFolder(parentId, fileName, fileEntry, existingId, options) {
+    const opts = options || {};
     const mime = mimeForPath(fileName);
     const bodyBlob = fileEntry.binary
       ? base64ToBlob(fileEntry.content, mime)
@@ -1373,20 +1540,37 @@
     form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
     form.append("file", bodyBlob);
 
+    const fields = "id,name,md5Checksum,modifiedTime";
     const url = existingId
       ? DRIVE_UPLOAD +
         "/files/" +
         encodeURIComponent(existingId) +
-        "?uploadType=multipart&supportsAllDrives=true&fields=id,name"
-      : DRIVE_UPLOAD + "/files?uploadType=multipart&supportsAllDrives=true&fields=id,name";
+        "?uploadType=multipart&supportsAllDrives=true&fields=" +
+        encodeURIComponent(fields)
+      : DRIVE_UPLOAD +
+        "/files?uploadType=multipart&supportsAllDrives=true&fields=" +
+        encodeURIComponent(fields);
+
+    const headers = {};
+    if (existingId && opts.ifMatchEtag) {
+      headers["If-Match"] = String(opts.ifMatchEtag);
+    }
 
     const response = await driveFetch(url, {
       method: existingId ? "PATCH" : "POST",
       body: form,
+      headers: headers,
     });
     if (!response.ok) {
       if (existingId && response.status === 404) {
-        return uploadFileToFolder(parentId, fileName, fileEntry, null);
+        return uploadFileToFolder(parentId, fileName, fileEntry, null, opts);
+      }
+      if (existingId && response.status === 412) {
+        const conflictError = new Error(
+          "“" + fileName + "” changed on Google Drive since the last sync. Resolve the conflict and try again."
+        );
+        conflictError.code = "drive-precondition-failed";
+        throw conflictError;
       }
       throw new Error(await readDriveError(response, "Could not upload " + fileName + " to Google Drive."));
     }
@@ -1447,12 +1631,279 @@
     return Array.from(names).sort();
   }
 
+  function remoteFingerprint(entry) {
+    if (!entry) {
+      return { md5: null, modifiedTime: null, id: null };
+    }
+    return {
+      id: entry.id || null,
+      md5: entry.md5Checksum || entry.md5 || null,
+      modifiedTime: entry.modifiedTime || null,
+    };
+  }
+
+  function remoteChangedSinceBaseline(baseline, remote) {
+    if (!baseline) {
+      return Boolean(remote && remote.id);
+    }
+    if (!remote || !remote.id) {
+      return false;
+    }
+    const baseMd5 = baseline.md5 || null;
+    const remoteMd5 = remote.md5Checksum || remote.md5 || null;
+    if (baseMd5 && remoteMd5) {
+      return baseMd5 !== remoteMd5;
+    }
+    const baseTime = baseline.modifiedTime || null;
+    const remoteTime = remote.modifiedTime || null;
+    if (baseTime && remoteTime) {
+      return baseTime !== remoteTime;
+    }
+    // Missing fingerprints: treat as changed so we never silently clobber.
+    return true;
+  }
+
+  /**
+   * Classify local vs Drive for one relative path.
+   * @returns {Promise<"safe-create"|"safe-update"|"skip"|"conflict"|"remote-only">}
+   */
+  async function classifySavePath(relPath, localEntry, remoteEntry, baseline) {
+    const hasLocal = Boolean(localEntry);
+    const hasRemote = Boolean(remoteEntry && remoteEntry.id);
+    if (!hasLocal) {
+      return "remote-only";
+    }
+    const localHash = await hashFileEntry(localEntry);
+    const localChanged = !baseline || baseline.contentHash !== localHash;
+
+    if (!hasRemote) {
+      return localChanged || !baseline ? "safe-create" : "skip";
+    }
+
+    const remoteChanged = remoteChangedSinceBaseline(baseline, remoteEntry);
+
+    if (!baseline) {
+      // Never synced this file: compare content hashes via download only when needed.
+      // Prefer cheap path: if local matches remote md5 when we can compute… we don't have
+      // local md5. Download is expensive — mark conflict when remote exists and local changed
+      // from empty is always true for new local edits. Safer: conflict if we cannot prove equality.
+      try {
+        const remoteContent = await downloadDriveFile(
+          remoteEntry.id,
+          Boolean(localEntry.binary) || isBinaryMime(remoteEntry.mimeType, relPath)
+        );
+        const remoteAsEntry = {
+          content: remoteContent,
+          binary: Boolean(localEntry.binary) || isBinaryMime(remoteEntry.mimeType, relPath),
+        };
+        const remoteHash = await hashFileEntry(remoteAsEntry);
+        if (remoteHash === localHash) {
+          return "skip";
+        }
+        return "conflict";
+      } catch (_error) {
+        return "conflict";
+      }
+    }
+
+    if (localChanged && remoteChanged) {
+      return "conflict";
+    }
+    if (!localChanged && remoteChanged) {
+      return "skip";
+    }
+    if (localChanged && !remoteChanged) {
+      return "safe-update";
+    }
+    return "skip";
+  }
+
+  /**
+   * Preview concurrent-edit conflicts before Save.
+   * @returns {Promise<{projectName:string,folderId:string|null,conflicts:Array,safeUploads:Array,skipped:Array}>}
+   */
+  async function previewSaveConflicts(state, options) {
+    const opts = options || {};
+    const signal = opts.signal;
+    const previousSignal = activeOperationSignal;
+    if (signal) {
+      activeOperationSignal = signal;
+    }
+    try {
+      throwIfAborted(signal);
+      await connect();
+      throwIfAborted(signal);
+      const projectName = String(
+        opts.projectName || inferProjectName(state && state.activeFile) || ""
+      ).trim();
+      if (!projectName) {
+        return {
+          projectName: "",
+          folderId: null,
+          conflicts: [],
+          safeUploads: [],
+          skipped: [],
+        };
+      }
+      const folderId = await resolveExistingProjectFolderId(projectName);
+      throwIfAborted(signal);
+      if (!folderId) {
+        return {
+          projectName: projectName,
+          folderId: null,
+          conflicts: [],
+          safeUploads: [],
+          skipped: [],
+        };
+      }
+
+      const relativeFiles = filesForProject(state, projectName);
+      const remote = await listFolderTree(folderId, "", signal);
+      throwIfAborted(signal);
+      const remoteFiles = {};
+      remote.forEach(function (entry) {
+        if (entry && entry.type === "file" && entry.path) {
+          remoteFiles[entry.path] = entry;
+        }
+      });
+      const baseline = getBaselineMap(folderId);
+      const conflicts = [];
+      const safeUploads = [];
+      const skipped = [];
+
+      const paths = Object.keys(relativeFiles);
+      for (let i = 0; i < paths.length; i += 1) {
+        throwIfAborted(signal);
+        const relPath = paths[i];
+        // Conflict copies are local safety nets — never treat them as sync sources.
+        if (/\.conflict-\d{8}-\d{6}/.test(relPath)) {
+          skipped.push(relPath);
+          continue;
+        }
+        const classification = await classifySavePath(
+          relPath,
+          relativeFiles[relPath],
+          remoteFiles[relPath] || null,
+          baseline[relPath] || null
+        );
+        if (classification === "conflict") {
+          conflicts.push({
+            path: relPath,
+            remoteId: remoteFiles[relPath] && remoteFiles[relPath].id,
+            remoteMd5:
+              (remoteFiles[relPath] && remoteFiles[relPath].md5Checksum) || null,
+            remoteModifiedTime:
+              (remoteFiles[relPath] && remoteFiles[relPath].modifiedTime) || null,
+          });
+        } else if (classification === "safe-create" || classification === "safe-update") {
+          safeUploads.push(relPath);
+        } else {
+          skipped.push(relPath);
+        }
+      }
+
+      return {
+        projectName: projectName,
+        folderId: folderId,
+        conflicts: conflicts,
+        safeUploads: safeUploads,
+        skipped: skipped,
+      };
+    } finally {
+      if (signal && activeOperationSignal === signal) {
+        activeOperationSignal = previousSignal;
+      }
+    }
+  }
+
+  /**
+   * Compare local project files to a pulled Drive snapshot before Load replaces them.
+   * @returns {{conflicts:Array<{path:string,reason:string}>,localOnly:Array<string>}}
+   */
+  async function previewLoadConflicts(state, pulledProject) {
+    const projectName =
+      (pulledProject && (pulledProject.currentProject || pulledProject.projectName)) ||
+      inferProjectName(state && state.activeFile) ||
+      "";
+    const name = String(projectName || "").trim();
+    const conflicts = [];
+    const localOnly = [];
+    if (!name) {
+      return { projectName: name, conflicts: conflicts, localOnly: localOnly };
+    }
+
+    const localFiles = filesForProject(state, name);
+    const pulledFiles = {};
+    Object.keys((pulledProject && pulledProject.files) || {}).forEach(function (fullPath) {
+      const rel = projectRelativePath(name, fullPath);
+      if (rel) {
+        pulledFiles[rel] = pulledProject.files[fullPath];
+      }
+    });
+
+    const localPaths = Object.keys(localFiles);
+    for (let i = 0; i < localPaths.length; i += 1) {
+      const relPath = localPaths[i];
+      if (/\.conflict-\d{8}-\d{6}/.test(relPath)) {
+        continue;
+      }
+      const localEntry = localFiles[relPath];
+      const remoteEntry = pulledFiles[relPath];
+      if (!remoteEntry) {
+        localOnly.push(relPath);
+        conflicts.push({ path: relPath, reason: "local-only" });
+        continue;
+      }
+      const localHash = await hashFileEntry(localEntry);
+      const remoteHash = await hashFileEntry(remoteEntry);
+      if (localHash !== remoteHash) {
+        conflicts.push({ path: relPath, reason: "content-differ" });
+      }
+    }
+
+    return { projectName: name, conflicts: conflicts, localOnly: localOnly };
+  }
+
+  /**
+   * Build conflict-copy entries for diverged local files (does not mutate state).
+   * @returns {Promise<Array<{fullPath:string,entry:object}>>}
+   */
+  async function stashLocalLoadConflicts(state, projectName, conflictPaths) {
+    const name = String(projectName || "").trim();
+    const stamp = conflictStamp();
+    const stashed = [];
+    (conflictPaths || []).forEach(function (relPath) {
+      const fullPath = name + "/" + relPath;
+      const entry = state.files && state.files[fullPath];
+      if (!entry) {
+        return;
+      }
+      const stashRel = conflictCopyRelativePath(relPath, stamp);
+      const stashFull = name + "/" + stashRel;
+      stashed.push({
+        fullPath: stashFull,
+        entry: {
+          name: stashRel.split("/").pop(),
+          content: entry.content,
+          binary: Boolean(entry.binary),
+        },
+      });
+    });
+    return stashed;
+  }
+
   async function syncFilesIntoExistingFolder(folderId, state, projectName, options) {
     const opts = options || {};
     const signal = opts.signal;
     const notify = typeof opts.onProgress === "function" ? opts.onProgress : null;
+    // cancel | keep-mine | take-theirs | keep-both
+    // Default keep-mine only when caller already resolved conflicts (or none exist).
+    const resolution = String(opts.conflictResolution || "keep-mine").toLowerCase();
+    const skipConflictCheck = Boolean(opts.skipConflictCheck);
     const relativeFiles = filesForProject(state, projectName);
     const relativeFolders = foldersForProject(state, projectName);
+    const restoredFiles = {};
+    const conflictCopies = [];
 
     throwIfAborted(signal);
 
@@ -1466,10 +1917,59 @@
     await reclaimSharedOwnershipUnderFolder(folderId);
     throwIfAborted(signal);
 
+    const remoteTree = await listFolderTree(folderId, "", signal);
+    throwIfAborted(signal);
+    const remoteFiles = {};
+    remoteTree.forEach(function (entry) {
+      if (entry && entry.type === "file" && entry.path) {
+        remoteFiles[entry.path] = entry;
+      }
+    });
+    const baseline = getBaselineMap(folderId);
+
+    const conflictPaths = {};
+    const pathClass = {};
+    if (!skipConflictCheck) {
+      const pathsForClass = Object.keys(relativeFiles);
+      for (let i = 0; i < pathsForClass.length; i += 1) {
+        throwIfAborted(signal);
+        const relPath = pathsForClass[i];
+        if (/\.conflict-\d{8}-\d{6}/.test(relPath)) {
+          pathClass[relPath] = "skip";
+          continue;
+        }
+        const classification = await classifySavePath(
+          relPath,
+          relativeFiles[relPath],
+          remoteFiles[relPath] || null,
+          baseline[relPath] || null
+        );
+        pathClass[relPath] = classification;
+        if (classification === "conflict") {
+          conflictPaths[relPath] = true;
+        }
+      }
+    } else {
+      Object.keys(relativeFiles).forEach(function (relPath) {
+        pathClass[relPath] = "safe-update";
+      });
+    }
+
+    if (Object.keys(conflictPaths).length && resolution === "cancel") {
+      const cancelError = new Error("Save cancelled because of Drive conflicts.");
+      cancelError.code = "drive-conflict-cancelled";
+      cancelError.conflicts = Object.keys(conflictPaths);
+      throw cancelError;
+    }
+
     if (opts.deleteMissing) {
       const deletions = await findDriveDeletions(folderId, state, projectName);
       for (let i = 0; i < deletions.length; i += 1) {
         throwIfAborted(signal);
+        // Never delete a remote file we are conflicting with when taking theirs / keep both.
+        if (conflictPaths[deletions[i].path] && resolution !== "keep-mine") {
+          continue;
+        }
         await removeDriveItemFromProject(deletions[i]);
       }
     }
@@ -1480,9 +1980,75 @@
     }
 
     const paths = Object.keys(relativeFiles);
+    const uploadedRemoteMeta = [];
+    const stamp = conflictStamp();
+
     for (let i = 0; i < paths.length; i += 1) {
       throwIfAborted(signal);
       const relPath = paths[i];
+      if (/\.conflict-\d{8}-\d{6}/.test(relPath)) {
+        continue;
+      }
+
+      const classification = pathClass[relPath] || "safe-update";
+      const isConflict = classification === "conflict";
+      let uploadRelPath = relPath;
+      let uploadEntry = relativeFiles[relPath];
+      let existingId = null;
+
+      if (isConflict) {
+        if (resolution === "take-theirs") {
+          const remote = remoteFiles[relPath];
+          if (remote && remote.id) {
+            const binary = isBinaryMime(remote.mimeType, relPath);
+            const content = await downloadDriveFile(remote.id, binary, signal);
+            restoredFiles[projectName + "/" + relPath] = {
+              name: relPath.split("/").pop(),
+              content: content,
+              binary: binary,
+            };
+            uploadedRemoteMeta.push({
+              path: relPath,
+              id: remote.id,
+              md5Checksum: remote.md5Checksum || null,
+              modifiedTime: remote.modifiedTime || null,
+            });
+          }
+          continue;
+        }
+        if (resolution === "keep-both") {
+          uploadRelPath = conflictCopyRelativePath(relPath, stamp);
+          conflictCopies.push({ original: relPath, copy: uploadRelPath });
+          existingId = null;
+          const remote = remoteFiles[relPath];
+          if (remote && remote.id) {
+            const binary = isBinaryMime(remote.mimeType, relPath);
+            const content = await downloadDriveFile(remote.id, binary, signal);
+            restoredFiles[projectName + "/" + relPath] = {
+              name: relPath.split("/").pop(),
+              content: content,
+              binary: binary,
+            };
+          }
+        } else {
+          // keep-mine: overwrite remote after user confirmation (no If-Match).
+          existingId = remoteFiles[relPath] && remoteFiles[relPath].id;
+        }
+      } else {
+        if (classification === "skip") {
+          if (remoteFiles[relPath]) {
+            uploadedRemoteMeta.push({
+              path: relPath,
+              id: remoteFiles[relPath].id,
+              md5Checksum: remoteFiles[relPath].md5Checksum || null,
+              modifiedTime: remoteFiles[relPath].modifiedTime || null,
+            });
+          }
+          continue;
+        }
+        existingId = remoteFiles[relPath] && remoteFiles[relPath].id;
+      }
+
       if (notify) {
         notify(
           "Uploading “" +
@@ -1492,18 +2058,82 @@
             "/" +
             paths.length +
             "): " +
-            relPath
+            uploadRelPath
         );
       }
-      const parts = relPath.split("/");
+      const parts = uploadRelPath.split("/");
       const fileName = parts.pop();
       const parentId = await ensurePathFolders(folderId, parts.join("/"));
-      const existing = await findNamedChild(parentId, fileName, null);
-      await uploadFileToFolder(parentId, fileName, relativeFiles[relPath], existing && existing.id);
+      if (!existingId && !(isConflict && resolution === "keep-both")) {
+        const existing = await findNamedChild(parentId, fileName, null);
+        existingId = existing && existing.id;
+      }
+      const saved = await uploadFileToFolder(
+        parentId,
+        fileName,
+        uploadEntry,
+        isConflict && resolution === "keep-both" ? null : existingId
+      );
+      uploadedRemoteMeta.push({
+        path: uploadRelPath,
+        id: saved && saved.id,
+        md5Checksum: (saved && saved.md5Checksum) || null,
+        modifiedTime: (saved && saved.modifiedTime) || null,
+      });
+      if (isConflict && resolution === "keep-both" && remoteFiles[relPath]) {
+        uploadedRemoteMeta.push({
+          path: relPath,
+          id: remoteFiles[relPath].id,
+          md5Checksum: remoteFiles[relPath].md5Checksum || null,
+          modifiedTime: remoteFiles[relPath].modifiedTime || null,
+        });
+      }
     }
 
+    // Baseline uses post-save local files. For take-theirs, merge restored into hash sources.
+    const baselineLocals = Object.assign({}, relativeFiles);
+    Object.keys(restoredFiles).forEach(function (fullPath) {
+      const rel = projectRelativePath(projectName, fullPath);
+      if (rel) {
+        baselineLocals[rel] = restoredFiles[fullPath];
+      }
+    });
+    // Include keep-both copies in local baseline map under their new names.
+    conflictCopies.forEach(function (pair) {
+      if (relativeFiles[pair.original]) {
+        baselineLocals[pair.copy] = relativeFiles[pair.original];
+      }
+    });
+
+    // Refresh remote fingerprints for paths we still care about.
+    let finalRemote = uploadedRemoteMeta;
+    try {
+      const refreshed = await listFolderTree(folderId, "", signal);
+      finalRemote = refreshed
+        .filter(function (entry) {
+          return entry && entry.type === "file";
+        })
+        .map(function (entry) {
+          return {
+            path: entry.path,
+            id: entry.id,
+            md5Checksum: entry.md5Checksum || null,
+            modifiedTime: entry.modifiedTime || null,
+          };
+        });
+    } catch (_error) {
+      // Keep uploadedRemoteMeta.
+    }
+
+    await recordBaseline(folderId, finalRemote, baselineLocals);
+
     writeActiveFolderId(folderId);
-    return folderId;
+    return {
+      folderId: folderId,
+      restoredFiles: restoredFiles,
+      conflictCopies: conflictCopies,
+      resolution: resolution,
+    };
   }
 
   async function syncOneProject(state, projectName, options) {
@@ -1514,9 +2144,9 @@
     }
     try {
       const folderId = await ensureProjectFolder(name);
-      await syncFilesIntoExistingFolder(folderId, state, name, opts);
+      const result = await syncFilesIntoExistingFolder(folderId, state, name, opts);
       writeRole("owner");
-      return folderId;
+      return result;
     } catch (error) {
       const message = (error && error.message) || "";
       if (!/File not found|not found|404/i.test(message)) {
@@ -1525,9 +2155,9 @@
       // Stale cached IDs (often a legacy JSON file) — rebuild Undertwig folders once.
       clearFolderCaches();
       const folderId = await ensureProjectFolder(name);
-      await syncFilesIntoExistingFolder(folderId, state, name, opts);
+      const result = await syncFilesIntoExistingFolder(folderId, state, name, opts);
       writeRole("owner");
-      return folderId;
+      return result;
     }
   }
 
@@ -1538,6 +2168,8 @@
       deleteMissing: Boolean(opts.deleteMissing),
       signal: signal,
       onProgress: opts.onProgress,
+      conflictResolution: opts.conflictResolution || "keep-mine",
+      skipConflictCheck: Boolean(opts.skipConflictCheck),
     };
     const run = async function () {
       const previousSignal = activeOperationSignal;
@@ -1564,8 +2196,20 @@
             throw new Error("Shared project folder is no longer accessible.");
           }
           setMappedProject(projectName, sharedId, cachedRole || "writer");
-          await syncFilesIntoExistingFolder(sharedId, state, projectName, syncOpts);
-          return { folderIds: [sharedId], role: cachedRole, projectName: projectName };
+          const syncResult = await syncFilesIntoExistingFolder(
+            sharedId,
+            state,
+            projectName,
+            syncOpts
+          );
+          return {
+            folderIds: [sharedId],
+            role: cachedRole,
+            projectName: projectName,
+            restoredFiles: (syncResult && syncResult.restoredFiles) || {},
+            conflictCopies: (syncResult && syncResult.conflictCopies) || [],
+            resolution: (syncResult && syncResult.resolution) || syncOpts.conflictResolution,
+          };
         }
 
         if (isCollaborator() && !projectName) {
@@ -1582,11 +2226,15 @@
           throw new Error("Set a current project before saving to Google Drive.");
         }
 
-        const folderId = await syncOneProject(state, projectName, syncOpts);
+        const syncResult = await syncOneProject(state, projectName, syncOpts);
+        const folderId = syncResult && syncResult.folderId;
         return {
           folderIds: folderId ? [folderId] : [],
           role: "owner",
           projectName: projectName,
+          restoredFiles: (syncResult && syncResult.restoredFiles) || {},
+          conflictCopies: (syncResult && syncResult.conflictCopies) || [],
+          resolution: (syncResult && syncResult.resolution) || syncOpts.conflictResolution,
         };
       } finally {
         if (signal && activeOperationSignal === signal) {
@@ -1629,6 +2277,8 @@
           name: child.name,
           mimeType: child.mimeType,
           owners: child.owners || [],
+          md5Checksum: child.md5Checksum || null,
+          modifiedTime: child.modifiedTime || null,
         });
       }
     }
@@ -1782,6 +2432,29 @@
     writeActiveFolderId(folderId);
     setMappedProject(name, folderId, cachedRole || null);
 
+    const relativeLocals = {};
+    const remoteMeta = [];
+    Object.keys(files).forEach(function (fullPath) {
+      const rel = projectRelativePath(name, fullPath);
+      if (!rel) {
+        return;
+      }
+      relativeLocals[rel] = files[fullPath];
+    });
+    fileEntries.forEach(function (item) {
+      remoteMeta.push({
+        path: item.entry.path,
+        id: item.entry.id,
+        md5Checksum: item.entry.md5Checksum || null,
+        modifiedTime: item.entry.modifiedTime || null,
+      });
+    });
+    try {
+      await recordBaseline(folderId, remoteMeta, relativeLocals);
+    } catch (_error) {
+      // Baseline is best-effort; Load still succeeds.
+    }
+
     return {
       activeFile: activeFile,
       folders: folders,
@@ -1791,6 +2464,7 @@
       role: cachedRole,
       fileCount: Object.keys(files).length,
       folderCount: folders.length,
+      folderId: folderId,
     };
   }
 
@@ -2575,6 +3249,23 @@
       throwIfAborted(signal);
 
       writeActiveFolderId(folderId);
+      const fileEntry = {
+        name: fileName,
+        content: content,
+        binary: binary,
+      };
+      try {
+        const baseline = getBaselineMap(folderId);
+        baseline[relative] = {
+          id: remote.id,
+          md5: remote.md5Checksum || null,
+          modifiedTime: remote.modifiedTime || null,
+          contentHash: await hashFileEntry(fileEntry),
+        };
+        setBaselineMap(folderId, baseline);
+      } catch (_error) {
+        // Ignore baseline failures.
+      }
       return {
         path: name + "/" + relative,
         name: fileName,
@@ -3148,6 +3839,10 @@
     refreshProjectMeta,
     probeConnection,
     previewSaveDeletions,
+    previewSaveConflicts,
+    previewLoadConflicts,
+    stashLocalLoadConflicts,
+    hashFileEntry,
     syncProject,
     saveProject,
     listRootProjects,
@@ -3155,5 +3850,6 @@
     clearToken,
     clearFolderCaches,
     clearCollaboratorState,
+    clearBaseline,
   };
 })(window);

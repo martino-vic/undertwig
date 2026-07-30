@@ -58,6 +58,8 @@ data class DriveTreeEntry(
     val id: String,
     val mimeType: String,
     val isFolder: Boolean,
+    val md5Checksum: String? = null,
+    val modifiedTime: String? = null,
 )
 
 data class ProjectFile(
@@ -97,6 +99,40 @@ data class ProjectDownloadInfo(
         }
     }
 }
+
+/** Last-known Drive fingerprint + local content hash after Load/Save. */
+data class DriveBaselineEntry(
+    val id: String?,
+    val md5: String?,
+    val modifiedTime: String?,
+    val contentHash: String,
+)
+
+enum class DriveConflictResolution {
+    Cancel,
+    KeepMine,
+    TakeTheirs,
+    KeepBoth,
+    TakeCloud,
+}
+
+data class DriveFileConflict(
+    val path: String,
+    val remoteId: String? = null,
+    val remoteMd5: String? = null,
+    val remoteModifiedTime: String? = null,
+)
+
+data class DriveSaveConflictPreview(
+    val folderId: String,
+    val conflicts: List<DriveFileConflict>,
+)
+
+data class DriveUploadResult(
+    val folderId: String,
+    val resolution: DriveConflictResolution,
+    val conflictCopies: List<Pair<String, String>> = emptyList(),
+)
 
 class ProjectRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -189,7 +225,7 @@ class ProjectRepository(context: Context) {
     ) {
         val dir = File(root, projectId).also { it.mkdirs() }
         dir.listFiles()?.forEach { child ->
-            if (child.name != META_FILE) child.deleteRecursively()
+            if (child.name != META_FILE && child.name != BASELINE_FILE) child.deleteRecursively()
         }
 
         for (folder in folders) {
@@ -309,7 +345,7 @@ class ProjectRepository(context: Context) {
     fun listFiles(projectId: String): List<String> {
         val dir = projectDir(projectId)
         return dir.walkTopDown()
-            .filter { it.isFile && it.name != META_FILE }
+            .filter { it.isFile && it.name != META_FILE && it.name != BASELINE_FILE }
             .map { it.relativeTo(dir).path.replace(File.separatorChar, '/') }
             .sorted()
             .toList()
@@ -523,7 +559,7 @@ class ProjectRepository(context: Context) {
 
     private fun exportableFiles(projectDir: File): List<File> {
         return projectDir.walkTopDown()
-            .filter { it.isFile && it.name != META_FILE }
+            .filter { it.isFile && it.name != META_FILE && it.name != BASELINE_FILE }
             .sortedBy { it.relativeTo(projectDir).path }
             .toList()
     }
@@ -600,6 +636,49 @@ class ProjectRepository(context: Context) {
         File(dir, META_FILE).writeText(meta.toString())
     }
 
+    fun readDriveBaseline(projectId: String): Map<String, DriveBaselineEntry> {
+        val file = File(projectDir(projectId), BASELINE_FILE)
+        if (!file.isFile) return emptyMap()
+        val root = runCatching { JSONObject(file.readText()) }.getOrNull() ?: return emptyMap()
+        val files = root.optJSONObject("files") ?: return emptyMap()
+        val out = linkedMapOf<String, DriveBaselineEntry>()
+        val keys = files.keys()
+        while (keys.hasNext()) {
+            val path = keys.next()
+            val entry = files.optJSONObject(path) ?: continue
+            val hash = entry.optString("contentHash").takeIf { it.isNotBlank() } ?: continue
+            out[path] = DriveBaselineEntry(
+                id = entry.optString("id").takeIf { it.isNotBlank() },
+                md5 = entry.optString("md5").takeIf { it.isNotBlank() },
+                modifiedTime = entry.optString("modifiedTime").takeIf { it.isNotBlank() },
+                contentHash = hash,
+            )
+        }
+        return out
+    }
+
+    fun writeDriveBaseline(projectId: String, files: Map<String, DriveBaselineEntry>) {
+        val payload = JSONObject()
+        val map = JSONObject()
+        for ((path, entry) in files) {
+            map.put(
+                path,
+                JSONObject()
+                    .put("id", entry.id)
+                    .put("md5", entry.md5)
+                    .put("modifiedTime", entry.modifiedTime)
+                    .put("contentHash", entry.contentHash),
+            )
+        }
+        payload.put("updatedAt", System.currentTimeMillis())
+        payload.put("files", map)
+        File(projectDir(projectId), BASELINE_FILE).writeText(payload.toString())
+    }
+
+    fun clearDriveBaseline(projectId: String) {
+        File(projectDir(projectId), BASELINE_FILE).delete()
+    }
+
     private fun readMeta(dir: File): JSONObject? {
         val file = File(dir, META_FILE)
         if (!file.exists()) return null
@@ -608,6 +687,7 @@ class ProjectRepository(context: Context) {
 
     companion object {
         private const val META_FILE = "project.json"
+        private const val BASELINE_FILE = "drive-baseline.json"
         /** Bump when bundled sample/dummyhippo assets change and existing installs should re-seed. */
         private const val STARTER_ASSET_VERSION = 2
         const val SAMPLE_PROJECT_NAME = "Sample Project"

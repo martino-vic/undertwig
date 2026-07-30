@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.undertwig.app.data.AuthRepository
 import com.undertwig.app.data.AuthUser
 import com.undertwig.app.data.BibToolId
+import com.undertwig.app.data.DriveConflictResolution
 import com.undertwig.app.data.DriveSyncRepository
 import com.undertwig.app.data.EnginePrefs
 import com.undertwig.app.data.HomeProjectItem
@@ -28,6 +29,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 import kotlin.coroutines.coroutineContext
 
 data class HomeUiState(
@@ -70,8 +74,17 @@ data class EditorUiState(
     val latexEngine: LatexEngineId = LatexEngineId.PdfLaTeX,
     val bibTool: BibToolId = BibToolId.BibTeX,
     val error: String? = null,
+    val driveConflict: DriveConflictUi? = null,
 ) {
     val converting: Boolean get() = busy != EditorBusy.Idle
+}
+
+data class DriveConflictUi(
+    val kind: Kind,
+    val projectName: String,
+    val paths: List<String>,
+) {
+    enum class Kind { Save, Load }
 }
 
 class UndertwigViewModel(application: Application) : AndroidViewModel(application) {
@@ -87,6 +100,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private var loadFileJob: Job? = null
     private var cloudJob: Job? = null
     private var openCloudJob: Job? = null
+    private var conflictContinuation: Continuation<DriveConflictResolution>? = null
     @Volatile private var latestBusyStatus: String? = null
     @Volatile private var busyStatusStartedAtMs: Long = 0L
     private var cachedDriveOwned: List<com.undertwig.app.data.DriveRemoteProject> = emptyList()
@@ -498,16 +512,49 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 }
 
                 saveJob = viewModelScope.launch {
-                    _editor.update { it.copy(status = "Saving to Drive…") }
+                    _editor.update { it.copy(status = "Checking Google Drive for conflicts…") }
                     try {
-                        withDriveAccess(activity) { token ->
-                            driveSync.uploadProject(token, projectId, projectName)
+                        val resolution = withDriveAccess(activity) { token ->
+                            val preview = driveSync.previewSaveConflicts(token, projectId, projectName)
+                            if (preview.conflicts.isEmpty()) {
+                                DriveConflictResolution.KeepMine
+                            } else {
+                                awaitDriveConflictResolution(
+                                    DriveConflictUi(
+                                        kind = DriveConflictUi.Kind.Save,
+                                        projectName = projectName,
+                                        paths = preview.conflicts.map { it.path },
+                                    ),
+                                )
+                            }
                         }
+                        if (resolution == DriveConflictResolution.Cancel) {
+                            _editor.update {
+                                it.copy(status = "Save cancelled.", error = null, driveConflict = null)
+                            }
+                            return@launch
+                        }
+                        _editor.update { it.copy(status = "Saving to Drive…") }
+                        withDriveAccess(activity) { token ->
+                            driveSync.uploadProject(
+                                token,
+                                projectId,
+                                projectName,
+                                resolution = resolution,
+                            )
+                        }
+                        val refreshedText = editorDisplayText(repo.readFile(projectId, path))
                         statusFlashJob?.cancel()
                         _editor.update {
                             it.copy(
+                                editorText = refreshedText,
+                                files = repo.listFiles(projectId),
+                                folders = repo.listFolders(projectId),
+                                dirty = false,
+                                editorRevision = it.editorRevision + 1L,
                                 status = "Saved successfully to Google Drive.",
                                 error = null,
+                                driveConflict = null,
                             )
                         }
                     } catch (e: AuthRepository.SignInCancelledException) {
@@ -516,6 +563,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                             it.copy(
                                 status = "Saved on this device (Drive cancelled).",
                                 error = null,
+                                driveConflict = null,
                             )
                         }
                         Toast.makeText(
@@ -533,6 +581,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                             it.copy(
                                 status = "Drive save failed",
                                 error = e.message ?: "Could not save to Google Drive.",
+                                driveConflict = null,
                             )
                         }
                         Toast.makeText(
@@ -558,6 +607,20 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 Toast.makeText(getApplication(), "Save failed: $detail", Toast.LENGTH_LONG).show()
             },
         )
+    }
+
+    fun resolveDriveConflict(resolution: DriveConflictResolution) {
+        val cont = conflictContinuation
+        conflictContinuation = null
+        _editor.update { it.copy(driveConflict = null) }
+        cont?.resume(resolution)
+    }
+
+    private suspend fun awaitDriveConflictResolution(prompt: DriveConflictUi): DriveConflictResolution {
+        return suspendCoroutine { cont ->
+            conflictContinuation = cont
+            _editor.update { it.copy(driveConflict = prompt) }
+        }
     }
 
     /**
@@ -605,8 +668,44 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 )
             }
             try {
+                val remoteFiles = withDriveAccess(activity) { token ->
+                    driveSync.downloadProjectFilesForLoad(token, projectId, projectName).second
+                }
+                val conflicts = driveSync.previewLoadConflicts(projectId, remoteFiles)
+                val resolution = if (conflicts.isEmpty()) {
+                    DriveConflictResolution.TakeCloud
+                } else {
+                    awaitDriveConflictResolution(
+                        DriveConflictUi(
+                            kind = DriveConflictUi.Kind.Load,
+                            projectName = projectName,
+                            paths = conflicts.map { it.path },
+                        ),
+                    )
+                }
+                if (resolution == DriveConflictResolution.Cancel) {
+                    _editor.update {
+                        it.copy(
+                            loadingFile = false,
+                            status = "Load cancelled.",
+                            error = null,
+                            driveConflict = null,
+                        )
+                    }
+                    return@launch
+                }
                 val fileCount = withDriveAccess(activity) { token ->
-                    driveSync.syncProjectFromDrive(token, projectId, projectName)
+                    driveSync.syncProjectFromDrive(
+                        token,
+                        projectId,
+                        projectName,
+                        resolution = when (resolution) {
+                            DriveConflictResolution.KeepBoth -> DriveConflictResolution.KeepBoth
+                            else -> DriveConflictResolution.TakeCloud
+                        },
+                        prefetchedConflicts = conflicts,
+                        prefetchedFiles = remoteFiles,
+                    )
                 }
                 val files = repo.listFiles(projectId)
                 val folders = repo.listFolders(projectId)
@@ -637,11 +736,12 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         status = loadedMessage,
                         editorRevision = it.editorRevision + 1L,
                         pdfPath = repo.existingFile(projectId, "main.pdf")?.absolutePath,
+                        driveConflict = null,
                     )
                 }
                 refreshProjects()
             } catch (e: AuthRepository.SignInCancelledException) {
-                _editor.update { it.copy(loadingFile = false) }
+                _editor.update { it.copy(loadingFile = false, driveConflict = null) }
                 Toast.makeText(
                     getApplication(),
                     "Drive permission was cancelled.",
@@ -649,11 +749,16 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 ).show()
                 restoreEditingStatus()
             } catch (e: CancellationException) {
+                conflictContinuation?.let {
+                    conflictContinuation = null
+                    it.resume(DriveConflictResolution.Cancel)
+                }
                 _editor.update {
                     it.copy(
                         loadingFile = false,
                         status = "Load cancelled.",
                         error = null,
+                        driveConflict = null,
                     )
                 }
                 // Job is already cancelling — don't delay (it would throw again).
@@ -666,6 +771,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         loadingFile = false,
                         status = "Load failed",
                         error = e.message ?: "Could not load from Google Drive.",
+                        driveConflict = null,
                     )
                 }
                 Toast.makeText(
