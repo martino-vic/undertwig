@@ -1147,11 +1147,16 @@
       }
 
       .statusbar {
-        min-height: 36px;
-        padding: 8px 16px;
+        min-height: 28px;
+        max-height: 28px;
+        padding: 4px 16px;
         border-top: 1px solid var(--border);
         color: var(--muted);
         font-size: 12px;
+        line-height: 20px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .statusbar a {
@@ -2897,7 +2902,7 @@
             <p id="assetPreviewNote"></p>
           </div>
         </div>
-        <div class="statusbar" id="status">Ready. Conversion runs locally in your browser with SwiftLaTeX WebAssembly.</div>
+        <div class="statusbar" id="status" title="">Ready.</div>
         <p class="mobile-page-hint" aria-hidden="true">Scroll down for the PDF preview</p>
       </section>
 
@@ -7243,7 +7248,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               maybePresentWritingRoomGate();
               return;
             }
-            // Resume after reload / another tab of the same account.
+            // Resume after reload on THIS device only (deviceId).
             fileLockHeldProject = projectName;
             fileLockHeldFileId = lock._fileId || null;
             fileLockOccupied = null;
@@ -10127,19 +10132,22 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       function setStatus(message, isError = false, options = {}) {
         status.classList.toggle("error", isError);
         status.textContent = "";
+        const raw = String(message || "").trim() || "Ready.";
+        // Keep the bar short; full text is on hover.
+        const short =
+          raw.length > 72 ? raw.slice(0, 69).replace(/\s+\S*$/, "") + "…" : raw;
+        status.title = raw;
 
         if (options && options.offerCloudLogin && !UndertwigAuth.isLoggedIn()) {
-          status.appendChild(document.createTextNode(String(message || "") + " "));
+          status.appendChild(document.createTextNode(short + " "));
           const link = document.createElement("a");
           link.href = cloudLoginUrl();
           link.textContent = "Log in";
           status.appendChild(link);
-          status.appendChild(document.createTextNode(" to use Google Cloud storage (free)."));
           return;
         }
 
-
-        status.textContent = message;
+        status.textContent = short;
       }
 
       // Boot after all declarations so invite sync can run (see cloudInitPromise TDZ note).

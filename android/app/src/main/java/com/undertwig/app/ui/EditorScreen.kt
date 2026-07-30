@@ -1,10 +1,5 @@
 package com.undertwig.app.ui
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -71,7 +66,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
@@ -145,15 +139,6 @@ fun EditorScreen(
     var renameTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
     var renameValue by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<FileBrowserTarget?>(null) }
-    val loadSpin = rememberInfiniteTransition(label = "loadSpin")
-    val loadAngle by loadSpin.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = LinearEasing),
-        ),
-        label = "loadAngle",
-    )
 
     LaunchedEffect(state.projectId, state.activePath, authUser?.email) {
         onRefreshWritingRoom()
@@ -265,27 +250,14 @@ fun EditorScreen(
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.titleMedium,
                             )
-                            Text(
-                                state.status,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
                         }
                         IconButton(onClick = onSave) {
                             Icon(Icons.Default.Save, contentDescription = "Save")
                         }
                         if (authUser != null) {
                             if (state.loadingFile) {
-                                IconButton(onClick = onCancelLoadFromDrive) {
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        contentDescription = "Cancel load",
-                                        modifier = Modifier
-                                            .size(22.dp)
-                                            .rotate(loadAngle),
-                                    )
+                                TextButton(onClick = onCancelLoadFromDrive) {
+                                    Text("Cancel")
                                 }
                             } else {
                                 IconButton(onClick = onLoadFromDrive) {
@@ -461,27 +433,11 @@ fun EditorScreen(
                 }
 
                 if (!imeVisible) {
-                    state.writingRoomOccupiedMessage?.let { lockMessage ->
+                    state.writingRoomOccupiedMessage?.let {
                         Text(
-                            lockMessage,
+                            "Room occupied",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
-                    }
-                    if (state.writingRoomAvailable && !state.inWritingRoom && state.writingRoomOccupiedMessage == null) {
-                        Text(
-                            "Editor locked — enter the writing room to edit.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
-                    }
-                    if (state.writingRoomAvailable && state.inWritingRoom) {
-                        Text(
-                            "You are in the writing room. Exit when you are done so others can edit.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                         )
                     }
@@ -571,10 +527,13 @@ fun EditorScreen(
                         }
                     }
 
-                    state.error?.let {
+                    state.error?.let { err ->
                         Text(
-                            it,
+                            err,
                             color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                         )
                     }

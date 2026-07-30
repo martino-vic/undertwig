@@ -90,8 +90,8 @@ fun HomeScreen(
                         Text("Undertwig", fontWeight = FontWeight.Bold)
                         Text(
                             when {
-                                authUser != null -> "Projects on this device and Drive"
-                                else -> "Local LaTeX on your device"
+                                authUser != null -> "Projects"
+                                else -> "Local projects"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
@@ -106,17 +106,10 @@ fun HomeScreen(
                             onClick = onRefreshCloud,
                             enabled = !cloudLoading,
                         ) {
-                            if (cloudLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "Refresh Google Drive projects",
-                                )
-                            }
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Refresh Google Drive projects",
+                            )
                         }
                         IconButton(onClick = { showAccount = true }) {
                             Icon(
@@ -204,12 +197,8 @@ fun HomeScreen(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
                                     if (cloudLoading) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(16.dp),
-                                            strokeWidth = 2.dp,
-                                        )
                                         Text(
-                                            "Loading Google Drive…",
+                                            "Loading…",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                         )
@@ -218,6 +207,8 @@ fun HomeScreen(
                                             cloudError,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.error,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                     }
                                 }

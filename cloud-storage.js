@@ -3326,16 +3326,8 @@
       return false;
     }
     const device = getDeviceId();
-    if (lock.deviceId && lock.deviceId === device) {
-      return true;
-    }
-    // Same Google account may reclaim (phone vs laptop / cleared site data).
-    // Different people are still exclusive via holderEmail mismatch.
-    const me = currentSessionEmail();
-    if (me && lock.holderEmail && String(lock.holderEmail).toLowerCase() === me) {
-      return true;
-    }
-    return false;
+    // Device-only: same Google account on phone vs laptop must not steal the room.
+    return Boolean(lock.deviceId && lock.deviceId === device);
   }
 
   function projectLockRelPath() {

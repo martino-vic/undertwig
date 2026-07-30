@@ -151,11 +151,12 @@ class DriveSyncRepository(
     private fun isHeldByThisDevice(lock: FileEditLock): Boolean =
         !lock.deviceId.isNullOrBlank() && lock.deviceId == deviceId()
 
+    /**
+     * True only when THIS device holds the lock. Same Google account on phone vs laptop
+     * must not steal each other's writing room.
+     */
     private fun isHeldByMe(lock: FileEditLock, holderEmail: String?): Boolean {
-        if (isHeldByThisDevice(lock)) return true
-        val me = holderEmail?.trim()?.lowercase().orEmpty()
-        val theirs = lock.holderEmail?.trim()?.lowercase().orEmpty()
-        return me.isNotEmpty() && theirs.isNotEmpty() && me == theirs
+        return isHeldByThisDevice(lock)
     }
 
     suspend fun peekFileLock(

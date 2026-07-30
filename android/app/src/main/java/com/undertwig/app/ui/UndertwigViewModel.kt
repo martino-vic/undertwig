@@ -605,9 +605,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 if (_editor.value.projectId != projectId) return@launch
                 if (lock != null) {
                     val mine =
-                        (!lock.deviceId.isNullOrBlank() && lock.deviceId == driveSync.deviceId()) ||
-                            (!userEmail.isNullOrBlank() &&
-                                lock.holderEmail?.equals(userEmail, ignoreCase = true) == true)
+                        !lock.deviceId.isNullOrBlank() && lock.deviceId == driveSync.deviceId()
                     if (mine) {
                         // User just exited — finish releasing instead of reclaiming the room.
                         if (writingRoomSuppressResumeKey == projectName) {
