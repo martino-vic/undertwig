@@ -1161,15 +1161,16 @@
 
       .statusbar {
         min-height: 28px;
-        max-height: 28px;
-        padding: 4px 16px;
+        max-height: none;
+        padding: 6px 16px;
         border-top: 1px solid var(--border);
         color: var(--muted);
         font-size: 12px;
-        line-height: 20px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        line-height: 1.45;
+        white-space: normal;
+        overflow: visible;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
 
       .statusbar a {
@@ -3147,7 +3148,7 @@
     <script src="auth.js?v=20260729e"></script>
     <script src="cloud-storage.js?v=20260730q"></script>
     <script src="invite.js?v=20260728q"></script>
-    <script src="local-project-fs.js?v=20260730i"></script>
+    <script src="local-project-fs.js?v=20260730j"></script>
     <script src="local-desktop.js?v=20260730i"></script>
     <script src="workspace-storage.js?v=20260730a"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
@@ -3595,8 +3596,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       /**
-       * Offline desktop: every Save writes to disk. If this project has no linked
-       * folder yet, ask once and remember the handle.
+       * Offline desktop: every Save writes to disk. Prefer a linked project
+       * folder; otherwise use the save-file picker; last resort download.
+       * Call this while still in the click/key user-gesture turn.
        */
       async function ensureLocalFolderLinked(projectName) {
         const name = String(projectName || "").trim();
@@ -3620,7 +3622,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         setStatus(
           "Choose the local folder for “" + name + "” so saves can write to disk…"
         );
-        await yieldToUi();
         try {
           const handle = await UndertwigLocalFs.pickProjectDirectory();
           const allowed = await UndertwigLocalFs.ensureReadWritePermission(handle);
@@ -3639,26 +3640,95 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           if (error && error.name === "AbortError") {
             return { ok: false, reason: "cancelled" };
           }
+          // Lost user gesture / blocked picker — caller may fall back.
+          if (
+            error &&
+            (error.name === "SecurityError" ||
+              error.name === "NotAllowedError" ||
+              /user gesture|not allowed/i.test(String(error.message || "")))
+          ) {
+            return { ok: false, reason: "gesture" };
+          }
           throw error;
         }
       }
 
       async function writeActiveFileToLocalDisk(projectName, filePath) {
-        const link = await ensureLocalFolderLinked(projectName);
-        if (!link.ok) {
-          return { saved: false, reason: link.reason, folderName: "" };
+        if (!window.UndertwigLocalFs) {
+          return { saved: false, reason: "unavailable", folderName: "" };
         }
-        const diskResult = await UndertwigLocalFs.saveFileToDirectory(
-          projectName,
-          filePath,
-          state.files[filePath],
-          { base64ToBytes: base64ToBytes }
-        );
-        return {
-          saved: Boolean(diskResult && diskResult.saved),
-          reason: (diskResult && diskResult.reason) || link.reason,
-          folderName: (diskResult && diskResult.folderName) || link.folderName || "",
-        };
+        const file = state.files[filePath];
+        if (!file) {
+          return { saved: false, reason: "no-file", folderName: "" };
+        }
+        const shortName = String(filePath || "").split("/").pop() || "file";
+        const helpers = { base64ToBytes: base64ToBytes };
+
+        // 1) Linked project folder (Import / previous Save).
+        if (UndertwigLocalFs.supportsDirectoryPicker()) {
+          const link = await ensureLocalFolderLinked(projectName);
+          if (link.ok) {
+            const diskResult = await UndertwigLocalFs.saveFileToDirectory(
+              projectName,
+              filePath,
+              file,
+              helpers
+            );
+            if (diskResult && diskResult.saved) {
+              return {
+                saved: true,
+                reason: diskResult.reason || link.reason,
+                folderName: diskResult.folderName || link.folderName || "",
+              };
+            }
+          } else if (
+            link.reason === "cancelled" ||
+            link.reason === "denied"
+          ) {
+            return { saved: false, reason: link.reason, folderName: "" };
+          }
+          // unsupported / gesture / unavailable → try save-file picker next
+        }
+
+        // 2) Chromium save-file picker (writes a real file without a folder bind).
+        if (UndertwigLocalFs.supportsSaveFilePicker()) {
+          setStatus("Choose where to save “" + shortName + "” on disk…");
+          try {
+            const picked = await UndertwigLocalFs.saveFileWithSavePicker(
+              shortName,
+              file,
+              helpers
+            );
+            if (picked && picked.saved) {
+              return {
+                saved: true,
+                reason: "save-picker",
+                folderName: picked.folderName || "",
+              };
+            }
+          } catch (error) {
+            if (error && error.name === "AbortError") {
+              return { saved: false, reason: "cancelled", folderName: "" };
+            }
+            if (
+              !(
+                error &&
+                (error.name === "SecurityError" ||
+                  error.name === "NotAllowedError")
+              )
+            ) {
+              throw error;
+            }
+          }
+        }
+
+        // 3) Last resort: trigger a download the user can place in the project.
+        if (UndertwigLocalFs.downloadFile) {
+          UndertwigLocalFs.downloadFile(shortName, file, helpers);
+          return { saved: true, reason: "download", folderName: "" };
+        }
+
+        return { saved: false, reason: "unsupported", folderName: "" };
       }
 
       async function writeProjectToLocalDisk(projectName, signal, onProgress) {
@@ -3695,10 +3765,35 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (reason === "denied") {
           return " Folder permission denied — browser copy only.";
         }
+        if (reason === "gesture") {
+          return " Click Save file again and allow the folder/file picker.";
+        }
+        if (reason === "download") {
+          return " Downloaded the file — move it into your project folder if needed.";
+        }
+        if (reason === "save-picker") {
+          return "";
+        }
         if (reason === "unsupported" || reason === "unavailable") {
-          return " This browser cannot write a local folder — browser copy only.";
+          return " This browser cannot write local files (use Chrome/Edge on desktop).";
         }
         return " Browser copy only.";
+      }
+
+      function diskSuccessNote(diskResult, shortName) {
+        if (!diskResult || !diskResult.saved) {
+          return "";
+        }
+        if (diskResult.reason === "download") {
+          return " and downloaded “" + shortName + "”";
+        }
+        if (diskResult.reason === "save-picker") {
+          return " and on disk";
+        }
+        return (
+          " and local folder" +
+          (diskResult.folderName ? " “" + diskResult.folderName + "”" : "")
+        );
       }
 
       function yieldToUi() {
@@ -4418,12 +4513,24 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           fileButton.disabled = true;
         }
         setStatus("Saving “" + shortName + "”…");
-        await yieldToUi();
 
         try {
           const active = state.files[filePath];
           if (active && !active.binary) {
             active.content = UndertwigEditor.getValue();
+          }
+
+          // Disk first — folder/file pickers require the click user gesture.
+          let diskResult = { saved: false, reason: "unbound", folderName: "" };
+          try {
+            diskResult = await writeActiveFileToLocalDisk(projectName, filePath);
+          } catch (diskError) {
+            diskResult = {
+              saved: false,
+              reason: "error",
+              folderName: "",
+              errorMessage: (diskError && diskError.message) || "disk write failed",
+            };
           }
 
           let localOk = true;
@@ -4432,30 +4539,29 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           } catch (_error) {
             localOk = false;
           }
-          await yieldToUi();
 
-          let diskNote = "";
-          let diskReason = "";
-          setStatus("Writing “" + shortName + "” to the local folder…");
-          await yieldToUi();
-          const diskResult = await writeActiveFileToLocalDisk(projectName, filePath);
-          if (diskResult && diskResult.saved) {
-            diskNote =
-              " and local folder" +
-              (diskResult.folderName ? " “" + diskResult.folderName + "”" : "");
-          } else {
-            diskReason = (diskResult && diskResult.reason) || "unbound";
-          }
-
+          const diskNote = diskSuccessNote(diskResult, shortName);
           if (localOk) {
+            if (diskResult && diskResult.saved) {
+              setStatus(
+                "Saved “" + shortName + "” in this browser" + diskNote + "."
+              );
+            } else if (diskResult && diskResult.reason === "error") {
+              setStatus(
+                "Saved “" +
+                  shortName +
+                  "” in this browser only. Could not write disk: " +
+                  diskResult.errorMessage,
+                true
+              );
+            } else {
+              setStatus(
+                "Saved “" + shortName + "” in this browser." + diskSkipHint(diskResult.reason)
+              );
+            }
+          } else if (diskResult && diskResult.saved) {
             setStatus(
-              diskNote
-                ? "Saved “" + shortName + "” in this browser" + diskNote + "."
-                : "Saved “" + shortName + "”." + diskSkipHint(diskReason)
-            );
-          } else if (diskNote) {
-            setStatus(
-              "Saved “" + shortName + "” to the local folder (browser storage is full)."
+              "Saved “" + shortName + "” to disk (browser storage is full)."
             );
           } else {
             setStatusStorageFull({ force: true });
@@ -4510,6 +4616,19 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const active = state.files[state.activeFile];
         if (active && !active.binary) {
           active.content = UndertwigEditor.getValue();
+        }
+
+        // Link a local folder while the click gesture is still valid (offline desktop).
+        let offlineLink = null;
+        const offlineProjectName = getActiveProjectName();
+        if (
+          !UndertwigAuth.isLoggedIn() &&
+          offlineProjectName &&
+          localDesktopAllowed() &&
+          window.UndertwigLocalFs &&
+          UndertwigLocalFs.supportsDirectoryPicker()
+        ) {
+          offlineLink = await ensureLocalFolderLinked(offlineProjectName);
         }
 
         const abortController = new AbortController();
@@ -4602,34 +4721,40 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           // Offline desktop: always write to a local folder (prompt to link if needed).
           let diskNote = "";
           let diskReason = "";
-          const localProjectName = getActiveProjectName();
+          const localProjectName = offlineProjectName || getActiveProjectName();
           if (localProjectName && localDesktopAllowed() && window.UndertwigLocalFs) {
-            setStatus("Writing project files to the local folder…");
-            await yieldToUi();
-            const diskResult = await writeProjectToLocalDisk(
-              localProjectName,
-              abortController.signal,
-              function (done, total) {
-                setStatus(
-                  "Writing to local folder… " + done + "/" + total + " files"
-                );
-              }
-            );
-            if (abortController.signal.aborted) {
-              setStatus("Save cancelled.");
-              return;
-            }
-            if (diskResult && diskResult.saved) {
-              diskNote =
-                " and local folder" +
-                (diskResult.folderName ? " “" + diskResult.folderName + "”" : "") +
-                " (" +
-                diskResult.written +
-                " file" +
-                (diskResult.written === 1 ? "" : "s") +
-                ")";
+            if (offlineLink && !offlineLink.ok && offlineLink.reason === "cancelled") {
+              diskReason = "cancelled";
+            } else if (offlineLink && !offlineLink.ok && offlineLink.reason === "denied") {
+              diskReason = "denied";
             } else {
-              diskReason = (diskResult && diskResult.reason) || "unbound";
+              setStatus("Writing project files to the local folder…");
+              await yieldToUi();
+              const diskResult = await writeProjectToLocalDisk(
+                localProjectName,
+                abortController.signal,
+                function (done, total) {
+                  setStatus(
+                    "Writing to local folder… " + done + "/" + total + " files"
+                  );
+                }
+              );
+              if (abortController.signal.aborted) {
+                setStatus("Save cancelled.");
+                return;
+              }
+              if (diskResult && diskResult.saved) {
+                diskNote =
+                  " and local folder" +
+                  (diskResult.folderName ? " “" + diskResult.folderName + "”" : "") +
+                  " (" +
+                  diskResult.written +
+                  " file" +
+                  (diskResult.written === 1 ? "" : "s") +
+                  ")";
+              } else {
+                diskReason = (diskResult && diskResult.reason) || "unbound";
+              }
             }
           }
 
@@ -10819,13 +10944,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         status.classList.toggle("error", isError);
         status.textContent = "";
         const raw = String(message || "").trim() || "Ready.";
-        // Keep the bar short; full text is on hover.
-        const short =
-          raw.length > 72 ? raw.slice(0, 69).replace(/\s+\S*$/, "") + "…" : raw;
         status.title = raw;
 
         if (options && options.offerCloudLogin && !UndertwigAuth.isLoggedIn()) {
-          status.appendChild(document.createTextNode(short + " "));
+          status.appendChild(document.createTextNode(raw + " "));
           const link = document.createElement("a");
           link.href = cloudLoginUrl();
           link.textContent = "Log in";
@@ -10833,7 +10955,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
-        status.textContent = short;
+        status.textContent = raw;
       }
 
       if (window.UndertwigLocalDesktop) {

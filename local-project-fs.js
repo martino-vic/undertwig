@@ -22,6 +22,14 @@
     );
   }
 
+  function supportsSaveFilePicker() {
+    return typeof global.showSaveFilePicker === "function";
+  }
+
+  function canWriteLocalFiles() {
+    return supportsDirectoryPicker() || supportsSaveFilePicker();
+  }
+
   function openDb() {
     return new Promise(function (resolve, reject) {
       const request = indexedDB.open(DB_NAME, 1);
@@ -287,6 +295,60 @@
     };
   }
 
+  async function saveFileWithSavePicker(fileName, file, helpers) {
+    if (!supportsSaveFilePicker()) {
+      return { saved: false, reason: "unsupported", written: 0 };
+    }
+    const name = String(fileName || "untitled.txt").split("/").pop() || "untitled.txt";
+    const handle = await global.showSaveFilePicker({
+      suggestedName: name,
+      excludeAcceptAllOption: false,
+    });
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(filePayload(file, helpers));
+    } finally {
+      await writable.close();
+    }
+    return {
+      saved: true,
+      reason: "save-picker",
+      written: 1,
+      folderName: "",
+      relativePath: name,
+    };
+  }
+
+  function downloadFile(fileName, file, helpers) {
+    const name = String(fileName || "untitled.txt").split("/").pop() || "untitled.txt";
+    const payload = filePayload(file, helpers);
+    const blob =
+      payload instanceof Uint8Array
+        ? new Blob([payload])
+        : new Blob([String(payload)], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      setTimeout(function () {
+        URL.revokeObjectURL(url);
+      }, 1000);
+    }
+    return {
+      saved: true,
+      reason: "download",
+      written: 1,
+      folderName: "",
+      relativePath: name,
+    };
+  }
+
   async function hasBoundDirectory(projectName) {
     try {
       return Boolean(await getHandle(projectName));
@@ -311,6 +373,8 @@
 
   global.UndertwigLocalFs = {
     supportsDirectoryPicker: supportsDirectoryPicker,
+    supportsSaveFilePicker: supportsSaveFilePicker,
+    canWriteLocalFiles: canWriteLocalFiles,
     pickProjectDirectory: pickProjectDirectory,
     collectFiles: collectFiles,
     putHandle: putHandle,
@@ -319,6 +383,8 @@
     ensureReadWritePermission: ensureReadWritePermission,
     saveProjectToDirectory: saveProjectToDirectory,
     saveFileToDirectory: saveFileToDirectory,
+    saveFileWithSavePicker: saveFileWithSavePicker,
+    downloadFile: downloadFile,
     hasBoundDirectory: hasBoundDirectory,
     renameProjectBinding: renameProjectBinding,
     removeProjectBinding: removeProjectBinding,
