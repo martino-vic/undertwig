@@ -35,6 +35,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -138,97 +141,110 @@ fun HomeScreen(
             }
         },
     ) { padding ->
-        when {
-            projects.isEmpty() && !cloudLoading -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                        .padding(24.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text("No projects yet", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        if (authUser != null) {
-                            "Create a project, or Save one from another device to see it here."
-                        } else {
-                            "Create a project to edit LaTeX and convert to PDF on-device."
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Button(onClick = { showCreate = true }) { Text("New project") }
-                    if (cloudError != null) {
-                        Spacer(Modifier.height(12.dp))
+        PullToRefreshBox(
+            isRefreshing = cloudLoading,
+            onRefresh = {
+                if (authUser != null && !cloudLoading) {
+                    onRefreshCloud()
+                }
+            },
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            when {
+                projects.isEmpty() && !cloudLoading -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text("No projects yet", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
                         Text(
-                            cloudError,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
+                            if (authUser != null) {
+                                "Create a project, or Save one from another device to see it here."
+                            } else {
+                                "Create a project to edit LaTeX and convert to PDF on-device."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         )
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = { showCreate = true }) { Text("New project") }
+                        if (cloudError != null) {
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                cloudError,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
-            }
-            else -> {
-                val cloudProjects = remember(projects) {
-                    projects.filter { it.origin != ProjectOrigin.Local }
-                }
-                val localProjects = remember(projects) {
-                    projects.filter { it.origin == ProjectOrigin.Local }
-                }
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    if (cloudLoading || cloudError != null) {
-                        item(key = "cloud-status") {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                if (cloudLoading) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    Text(
-                                        "Loading Google Drive…",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                    )
-                                } else if (cloudError != null) {
-                                    Text(
-                                        cloudError,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
+                else -> {
+                    val cloudProjects = remember(projects) {
+                        projects.filter { it.origin != ProjectOrigin.Local }
+                    }
+                    val localProjects = remember(projects) {
+                        projects.filter { it.origin == ProjectOrigin.Local }
+                    }
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (cloudLoading || cloudError != null) {
+                            item(key = "cloud-status") {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    if (cloudLoading) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                        )
+                                        Text(
+                                            "Loading Google Drive…",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                        )
+                                    } else if (cloudError != null) {
+                                        Text(
+                                            cloudError,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
-                    items(cloudProjects, key = { it.key }) { project ->
-                        ProjectCard(
-                            project = project,
-                            opening = openingKey == project.key,
-                            onOpen = { onOpen(project) },
-                            onDelete = {
-                                val id = project.localId
-                                if (id != null) onDelete(id)
-                            },
-                        )
-                    }
-                    items(localProjects, key = { it.key }) { project ->
-                        ProjectCard(
-                            project = project,
-                            opening = openingKey == project.key,
-                            onOpen = { onOpen(project) },
-                            onDelete = {
-                                val id = project.localId
-                                if (id != null) onDelete(id)
-                            },
-                        )
+                        items(cloudProjects, key = { it.key }) { project ->
+                            ProjectCard(
+                                project = project,
+                                opening = openingKey == project.key,
+                                onOpen = { onOpen(project) },
+                                onDelete = {
+                                    val id = project.localId
+                                    if (id != null) onDelete(id)
+                                },
+                            )
+                        }
+                        items(localProjects, key = { it.key }) { project ->
+                            ProjectCard(
+                                project = project,
+                                opening = openingKey == project.key,
+                                onOpen = { onOpen(project) },
+                                onDelete = {
+                                    val id = project.localId
+                                    if (id != null) onDelete(id)
+                                },
+                            )
+                        }
                     }
                 }
             }

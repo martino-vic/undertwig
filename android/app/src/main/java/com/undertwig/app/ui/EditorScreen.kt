@@ -50,6 +50,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -216,7 +217,7 @@ fun EditorScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column(modifier = Modifier.fillMaxWidth()) {
+                    Column {
                         Text(
                             state.projectName,
                             maxLines = 1,
@@ -321,185 +322,195 @@ fun EditorScreen(
             )
         },
     ) { padding ->
-        Column(
+        PullToRefreshBox(
+            isRefreshing = state.loadingFile,
+            onRefresh = {
+                if (authUser != null && !state.loadingFile) {
+                    onLoadFromDrive()
+                }
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            key(state.projectId) {
-                ProjectFileTree(
-                    files = state.files,
-                    folders = state.folders,
-                    activePath = state.activePath,
-                    currentDir = browserDir,
-                    onCurrentDirChange = { browserDir = it },
-                    onSelectFile = { path ->
-                        browserDir = parentDirOf(path)
-                        onSelectFile(path)
-                    },
-                    onLongPressTarget = { actionTarget = it },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                )
-            }
-
-            val darkEditor = isSystemInDarkTheme()
-            val texHighlight = remember(state.activePath, darkEditor, state.editorRevision) {
-                if (isHighlightableTexPath(state.activePath)) {
-                    TexVisualTransformation(darkEditor)
-                } else {
-                    VisualTransformation.None
-                }
-            }
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .pointerInput(state.inWritingRoom) {
-                        if (!state.inWritingRoom) return@pointerInput
-                        awaitPointerEventScope {
-                            while (true) {
-                                awaitPointerEvent()
-                                onWritingRoomActivity()
-                            }
-                        }
-                    },
+            Column(
+                modifier = Modifier.fillMaxSize(),
             ) {
-                key(state.projectId, state.activePath, state.editorRevision) {
-                    BasicTextField(
-                        value = state.editorText,
-                        onValueChange = onEditorChange,
-                        readOnly = state.editorReadOnly,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 12.dp)
-                            .verticalScroll(rememberScrollState()),
-                        textStyle = TextStyle(
-                            color = MaterialTheme.colorScheme.onBackground,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 14.sp,
-                            lineHeight = 20.sp,
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        visualTransformation = texHighlight,
+                key(state.projectId) {
+                    ProjectFileTree(
+                        files = state.files,
+                        folders = state.folders,
+                        activePath = state.activePath,
+                        currentDir = browserDir,
+                        onCurrentDirChange = { browserDir = it },
+                        onSelectFile = { path ->
+                            browserDir = parentDirOf(path)
+                            onSelectFile(path)
+                        },
+                        onLongPressTarget = { actionTarget = it },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }
-            }
 
-            state.writingRoomOccupiedMessage?.let { lockMessage ->
-                Text(
-                    lockMessage,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                )
-            }
-            if (state.writingRoomAvailable && !state.inWritingRoom && state.writingRoomOccupiedMessage == null) {
-                Text(
-                    "Editor locked — enter the writing room to edit.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                )
-            }
-            if (state.writingRoomAvailable && state.inWritingRoom) {
-                Text(
-                    "You are in the writing room. Exit when you are done so others can edit.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val compactPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
-                val convertBusy = state.busy == EditorBusy.Convert
-                val bibBusy = state.busy == EditorBusy.Bibliography
-                ActionButton(
-                    onClick = {
-                        if (convertBusy) onCancelBusy() else onConvert()
-                    },
-                    onLongClick = if (!convertBusy && !bibBusy) {
-                        { showEnginePicker = true }
+                val darkEditor = isSystemInDarkTheme()
+                val texHighlight = remember(state.activePath, darkEditor, state.editorRevision) {
+                    if (isHighlightableTexPath(state.activePath)) {
+                        TexVisualTransformation(darkEditor)
                     } else {
-                        null
-                    },
-                    enabled = !bibBusy,
-                    contentPadding = compactPadding,
-                    expand = true,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    if (convertBusy) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .height(16.dp)
-                                .width(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("Cancel", maxLines = 1)
-                    } else {
-                        Text("Convert", maxLines = 1)
+                        VisualTransformation.None
                     }
                 }
-                ActionButton(
-                    onClick = {
-                        if (bibBusy) onCancelBusy() else onBibliography()
-                    },
-                    onLongClick = if (!convertBusy && !bibBusy) {
-                        { showBibPicker = true }
-                    } else {
-                        null
-                    },
-                    enabled = !convertBusy,
-                    contentPadding = compactPadding,
-                    containerColor = Color(0xFFE67E22),
-                    contentColor = Color.White,
-                    expand = false,
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .pointerInput(state.inWritingRoom) {
+                            if (!state.inWritingRoom) return@pointerInput
+                            awaitPointerEventScope {
+                                while (true) {
+                                    awaitPointerEvent()
+                                    onWritingRoomActivity()
+                                }
+                            }
+                        },
                 ) {
-                    if (bibBusy) {
-                        CircularProgressIndicator(
+                    key(state.projectId, state.activePath, state.editorRevision) {
+                        BasicTextField(
+                            value = state.editorText,
+                            onValueChange = onEditorChange,
+                            readOnly = state.editorReadOnly,
                             modifier = Modifier
-                                .height(16.dp)
-                                .width(16.dp),
-                            strokeWidth = 2.dp,
-                            color = Color.White,
+                                .fillMaxSize()
+                                .padding(horizontal = 12.dp)
+                                .verticalScroll(rememberScrollState()),
+                            textStyle = TextStyle(
+                                color = MaterialTheme.colorScheme.onBackground,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 14.sp,
+                                lineHeight = 20.sp,
+                            ),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            visualTransformation = texHighlight,
                         )
-                        Spacer(Modifier.width(6.dp))
-                        Text("Cancel", maxLines = 1)
-                    } else {
-                        Text("Bib", maxLines = 1)
                     }
                 }
-                OutlinedButton(
-                    onClick = { showLog = true },
-                    enabled = state.lastLog.isNotBlank(),
-                    contentPadding = compactPadding,
-                ) {
-                    Text("Log", maxLines = 1)
+
+                state.writingRoomOccupiedMessage?.let { lockMessage ->
+                    Text(
+                        lockMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
                 }
-                if (state.pdfPath != null) {
+                if (state.writingRoomAvailable && !state.inWritingRoom && state.writingRoomOccupiedMessage == null) {
+                    Text(
+                        "Editor locked — enter the writing room to edit.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                }
+                if (state.writingRoomAvailable && state.inWritingRoom) {
+                    Text(
+                        "You are in the writing room. Exit when you are done so others can edit.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val compactPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                    val convertBusy = state.busy == EditorBusy.Convert
+                    val bibBusy = state.busy == EditorBusy.Bibliography
+                    ActionButton(
+                        onClick = {
+                            if (convertBusy) onCancelBusy() else onConvert()
+                        },
+                        onLongClick = if (!convertBusy && !bibBusy) {
+                            { showEnginePicker = true }
+                        } else {
+                            null
+                        },
+                        enabled = !bibBusy,
+                        contentPadding = compactPadding,
+                        expand = true,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        if (convertBusy) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .height(16.dp)
+                                    .width(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Cancel", maxLines = 1)
+                        } else {
+                            Text("Convert", maxLines = 1)
+                        }
+                    }
+                    ActionButton(
+                        onClick = {
+                            if (bibBusy) onCancelBusy() else onBibliography()
+                        },
+                        onLongClick = if (!convertBusy && !bibBusy) {
+                            { showBibPicker = true }
+                        } else {
+                            null
+                        },
+                        enabled = !convertBusy,
+                        contentPadding = compactPadding,
+                        containerColor = Color(0xFFE67E22),
+                        contentColor = Color.White,
+                        expand = false,
+                    ) {
+                        if (bibBusy) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .height(16.dp)
+                                    .width(16.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Cancel", maxLines = 1)
+                        } else {
+                            Text("Bib", maxLines = 1)
+                        }
+                    }
                     OutlinedButton(
-                        onClick = onOpenPdf,
+                        onClick = { showLog = true },
+                        enabled = state.lastLog.isNotBlank(),
                         contentPadding = compactPadding,
                     ) {
-                        Text("PDF", maxLines = 1)
+                        Text("Log", maxLines = 1)
+                    }
+                    if (state.pdfPath != null) {
+                        OutlinedButton(
+                            onClick = onOpenPdf,
+                            contentPadding = compactPadding,
+                        ) {
+                            Text("PDF", maxLines = 1)
+                        }
                     }
                 }
-            }
 
-            state.error?.let {
-                Text(
-                    it,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                )
+                state.error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                }
             }
         }
     }

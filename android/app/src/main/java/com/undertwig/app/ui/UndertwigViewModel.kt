@@ -119,6 +119,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private var fileLockHeartbeatJob: Job? = null
     private var writingRoomIdleJob: Job? = null
     private var writingRoomBusyTimeoutJob: Job? = null
+    /** After an explicit Exit, do not auto-resume a leftover held-by-me lock. */
+    private var writingRoomSuppressResumeKey: String? = null
+
     private var heldWritingRoomProjectId: String? = null
     /** After View only / OK, don't re-popup the door until the user asks or the project changes. */
     private var writingRoomGateDismissedKey: String? = null
@@ -595,8 +598,40 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                             (!userEmail.isNullOrBlank() &&
                                 lock.holderEmail?.equals(userEmail, ignoreCase = true) == true)
                     if (mine) {
+                        // User just exited — finish releasing instead of reclaiming the room.
+                        if (writingRoomSuppressResumeKey == projectName) {
+                            runCatching {
+                                withDriveAccess(activity) { token ->
+                                    driveSync.releaseFileLock(
+                                        accessToken = token,
+                                        projectId = projectId,
+                                        projectName = projectName,
+                                        holderEmail = userEmail,
+                                    )
+                                }
+                            }
+                            heldWritingRoomProjectId = null
+                            stopFileLockHeartbeat()
+                            writingRoomGateDismissedKey = "enter:$projectName"
+                            val enterKey = "enter:$projectName"
+                            _editor.update {
+                                it.copy(
+                                    writingRoomAvailable = true,
+                                    writingRoomOccupiedMessage = null,
+                                    inWritingRoom = false,
+                                    writingRoomPrompt = if (!gateApplies || writingRoomGateDismissedKey == enterKey) {
+                                        null
+                                    } else {
+                                        WritingRoomPrompt.Enter(projectName)
+                                    },
+                                    status = "You left the writing room for “$projectName”.",
+                                )
+                            }
+                            return@launch
+                        }
                         heldWritingRoomProjectId = projectId
                         writingRoomGateDismissedKey = null
+                        writingRoomSuppressResumeKey = null
                         startFileLockHeartbeat(activity, projectId, projectName)
                         _editor.update {
                             it.copy(
@@ -626,6 +661,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         )
                     }
                 } else {
+                    if (writingRoomSuppressResumeKey == projectName) {
+                        writingRoomSuppressResumeKey = null
+                    }
                     val enterKey = "enter:$projectName"
                     _editor.update {
                         it.copy(
@@ -703,6 +741,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 if (result.ok) {
                     heldWritingRoomProjectId = projectId
                     writingRoomGateDismissedKey = null
+                    writingRoomSuppressResumeKey = null
                     startFileLockHeartbeat(activity, projectId, projectName)
                     _editor.update {
                         it.copy(
@@ -813,8 +852,28 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             )
         }
         viewModelScope.launch {
-            releaseHeldWritingRoomBestEffort()
+            // Suppress held-by-me resume before/while Drive trash propagates.
+            writingRoomSuppressResumeKey = projectName
             writingRoomGateDismissedKey = "enter:$projectName"
+            val snapshot = takeHeldWritingRoomSnapshot()
+            var released = false
+            if (snapshot != null) {
+                try {
+                    released = withDriveAccess(activity) { token ->
+                        driveSync.releaseFileLock(
+                            accessToken = token,
+                            projectId = snapshot.projectId,
+                            projectName = snapshot.projectName,
+                            holderEmail = snapshot.holderEmail,
+                        )
+                    }
+                } catch (_: Exception) {
+                    // Fall through to best-effort cached-token trash.
+                }
+                if (!released) {
+                    runCatching { trashWritingRoomLock(snapshot) }
+                }
+            }
             _editor.update {
                 it.copy(
                     writingRoomBusy = false,
