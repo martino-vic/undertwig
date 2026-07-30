@@ -3915,6 +3915,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let cloudStatusMode = "logged-out";
       // Declared early: boot used to call initCloudProject before this existed (TDZ), so invite sync never ran.
       let cloudInitPromise = null;
+      let cloudInitGeneration = 0;
       const COLLAPSED_FOLDERS_KEY = "undertwig-tree-collapsed-v1";
       let collapsedFolders = loadCollapsedFolders();
 
@@ -4033,10 +4034,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           renderCloudStatus("logged-out");
           return;
         }
-        if (cloudStatusMode === "connecting") {
-          return;
-        }
         if (!UndertwigCloud.hasAccessToken()) {
+          renderCloudStatus("connecting");
           setStatus("Redirecting to Google to connect Drive…");
           try {
             const pending = resolveSharedProjectId();
@@ -6037,7 +6036,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return cloudInitPromise;
         }
 
+        const initGeneration = ++cloudInitGeneration;
         cloudInitPromise = (async () => {
+          const isCurrentInit = function () {
+            return initGeneration === cloudInitGeneration;
+          };
           try {
             if (sharedProjectId) {
               try {
@@ -6055,6 +6058,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                     }, 120000);
                   }),
                 ]);
+                if (!isCurrentInit()) {
+                  return;
+                }
                 const projectName =
                   sharedProject.currentProject || sharedProject.projectName || "SharedProject";
                 // Keep existing local projects under Other; make the Drive project Current.
@@ -6086,6 +6092,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 );
                 return;
               } catch (joinError) {
+                if (!isCurrentInit()) {
+                  return;
+                }
                 const message = (joinError && joinError.message) || "Could not sync shared project.";
                 const code = joinError && joinError.code;
                 if (code === "missing-scope" || /insufficient authentication scopes/i.test(message)) {
@@ -6150,6 +6159,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             }
 
             const verify = await UndertwigCloud.verifyDriveAccess();
+            if (!isCurrentInit()) {
+              return;
+            }
             if (!verify || !verify.ok) {
               const reason = verify && verify.reason;
               if (reason === "missing-scope") {
@@ -6222,50 +6234,60 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               // Ignore.
             }
 
+            // Second check: actually reach Drive and resolve/create the Undertwig root.
+            // A stored token alone must never flip the status to Connected.
+            setStatus("Confirming Google Drive access…");
+            let probe = null;
+            if (UndertwigCloud.probeConnection) {
+              probe = await UndertwigCloud.probeConnection();
+            }
+            if (!isCurrentInit()) {
+              return;
+            }
+            if (!probe || !probe.connected) {
+              renderCloudStatus("disconnected");
+              setStatus(
+                "Could not reach Google Drive" +
+                  (probe && probe.reason ? " (" + probe.reason + ")" : "") +
+                  ". Click Retry.",
+                true
+              );
+              return;
+            }
+
             const currentName = getActiveProjectName();
             if (UndertwigCloud.resolveProjectAccess) {
               try {
                 await UndertwigCloud.resolveProjectAccess(currentName || undefined);
               } catch (_error) {
-                // Keep going; sync/save will surface access problems.
+                // Keep going; Save will surface access problems.
               }
             }
+            if (!isCurrentInit()) {
+              return;
+            }
+
             renderCloudStatus(
               "connected",
-              UndertwigCloud.getProjectFileId() || verify.fileId
+              UndertwigCloud.getProjectFileId() || probe.fileId || verify.fileId
             );
-            setStatus("Connected to Google Drive. Syncing projects…");
-
-            try {
-              await UndertwigCloud.syncProject(state, {
-                projectName: currentName || undefined,
-              });
-              if (cloudStatusMode === "connected") {
-                setStatus(
-                  currentName
-                    ? "Synced current project “" + currentName + "” to Google Drive / Undertwig."
-                    : "Connected to Google Drive."
-                );
-                renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
-              }
-            } catch (syncError) {
-              if (cloudStatusMode === "connected") {
-                setStatus(
-                  `Connected, but sync failed: ${
-                    syncError && syncError.message ? syncError.message : syncError
-                  }`,
-                  true
-                );
-              }
+            setStatus("Connected to Google Drive.");
+            if (typeof refreshCloudProjectsList === "function") {
+              refreshCloudProjectsList();
             }
           } catch (error) {
+            if (!isCurrentInit()) {
+              return;
+            }
             renderCloudStatus("disconnected");
             setStatus(
               `Could not reach Google Drive: ${error && error.message ? error.message : error}`,
               true
             );
           } finally {
-            cloudInitPromise = null;
+            if (isCurrentInit()) {
+              cloudInitPromise = null;
+            }
           }
         })();
 
