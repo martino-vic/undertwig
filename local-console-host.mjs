@@ -476,20 +476,70 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(
-    `[undertwig] Local helper on http://${HOST}:${PORT}\n` +
-      `Leave this running for Import project (auto path), Save-to-disk, and Console.`
-  );
-});
-
-server.on("error", (error) => {
-  if (error && error.code === "EADDRINUSE") {
-    console.error(
-      `[undertwig] Port ${PORT} is already in use. Is the helper already running?`
-    );
-  } else {
-    console.error("[undertwig] Failed to start helper:", error);
+async function runCli(argv) {
+  const args = argv.slice(2);
+  if (!args.length) {
+    return false;
   }
-  process.exit(1);
-});
+  if (args[0] === "open-terminal" || args[0] === "terminal") {
+    const cwd = resolveExistingDir(args[1] || process.cwd());
+    if (process.platform === "linux") {
+      await tryOpenLinuxTerminal(cwd);
+    } else {
+      openSystemTerminal(cwd);
+    }
+    console.log("[undertwig] Opened system terminal in " + cwd);
+    return true;
+  }
+  if (args[0] === "serve" || args[0] === "host") {
+    return false;
+  }
+  // Protocol-style: undertwig-local://open-terminal?cwd=/path
+  if (/^undertwig-local:/i.test(args[0])) {
+    try {
+      const url = new URL(args[0]);
+      if (url.hostname === "open-terminal" || url.pathname.indexOf("open-terminal") !== -1) {
+        const cwd = resolveExistingDir(
+          url.searchParams.get("cwd") || url.searchParams.get("path") || ""
+        );
+        if (process.platform === "linux") {
+          await tryOpenLinuxTerminal(cwd);
+        } else {
+          openSystemTerminal(cwd);
+        }
+        console.log("[undertwig] Opened system terminal in " + cwd);
+        return true;
+      }
+    } catch (error) {
+      console.error("[undertwig]", error && error.message ? error.message : error);
+      process.exit(1);
+    }
+  }
+  return false;
+}
+
+const cliHandled = await runCli(process.argv);
+if (cliHandled) {
+  // Give spawned terminal a moment to detach, then exit.
+  setTimeout(() => process.exit(0), 150);
+} else {
+  server.listen(PORT, HOST, () => {
+    console.log(
+      `[undertwig] Local helper on http://${HOST}:${PORT}\n` +
+        `Leave this running for Import project (auto path) and Save-to-disk.\n` +
+        `Console also works without this via a downloaded launcher.\n` +
+        `One-shot: node local-console-host.mjs open-terminal /path/to/project`
+    );
+  });
+
+  server.on("error", (error) => {
+    if (error && error.code === "EADDRINUSE") {
+      console.error(
+        `[undertwig] Port ${PORT} is already in use. Is the helper already running?`
+      );
+    } else {
+      console.error("[undertwig] Failed to start helper:", error);
+    }
+    process.exit(1);
+  });
+}

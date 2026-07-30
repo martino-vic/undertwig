@@ -324,6 +324,182 @@
     }
   }
 
+  function detectDesktopOs() {
+    const ua = String(
+      (navigator.userAgentData && navigator.userAgentData.platform) ||
+        navigator.platform ||
+        navigator.userAgent ||
+        ""
+    ).toLowerCase();
+    if (ua.indexOf("mac") !== -1 || ua.indexOf("iphone") !== -1) return "mac";
+    if (ua.indexOf("win") !== -1) return "windows";
+    return "linux";
+  }
+
+  function shellQuote(value) {
+    return "'" + String(value || "").replace(/'/g, "'\\''") + "'";
+  }
+
+  function buildTerminalLauncher(cwd) {
+    const osName = detectDesktopOs();
+    if (osName === "windows") {
+      return {
+        filename: "undertwig-console.bat",
+        mime: "application/x-bat",
+        body:
+          "@echo off\r\n" +
+          "cd /d " +
+          String(cwd).replace(/\r|\n/g, "") +
+          "\r\n" +
+          "start \"Undertwig\" cmd.exe\r\n",
+        openCommand:
+          'start cmd.exe /k cd /d "' + String(cwd).replace(/"/g, "") + '"',
+      };
+    }
+    if (osName === "mac") {
+      return {
+        filename: "undertwig-console.command",
+        mime: "application/x-sh",
+        body:
+          "#!/bin/bash\n" +
+          "cd " +
+          shellQuote(cwd) +
+          " || exit 1\n" +
+          'open -a Terminal "' +
+          String(cwd).replace(/"/g, '\\"') +
+          '"\n',
+        openCommand: "open -a Terminal " + shellQuote(cwd),
+      };
+    }
+    return {
+      filename: "undertwig-console.sh",
+      mime: "application/x-sh",
+      body:
+        "#!/bin/bash\n" +
+        "DIR=" +
+        shellQuote(cwd) +
+        "\n" +
+        'cd "$DIR" || exit 1\n' +
+        'if command -v x-terminal-emulator >/dev/null 2>&1; then exec x-terminal-emulator --working-directory="$DIR"; fi\n' +
+        'if command -v gnome-terminal >/dev/null 2>&1; then exec gnome-terminal --working-directory="$DIR"; fi\n' +
+        'if command -v konsole >/dev/null 2>&1; then exec konsole --workdir "$DIR"; fi\n' +
+        'if command -v xfce4-terminal >/dev/null 2>&1; then exec xfce4-terminal --working-directory="$DIR"; fi\n' +
+        'if command -v kitty >/dev/null 2>&1; then exec kitty --directory "$DIR"; fi\n' +
+        'if command -v xterm >/dev/null 2>&1; then exec xterm -e bash -lc "cd \"$DIR\"; exec bash"; fi\n' +
+        'echo "No terminal emulator found."; exec bash\n',
+      openCommand:
+        "x-terminal-emulator --working-directory=" +
+        shellQuote(cwd) +
+        " || gnome-terminal --working-directory=" +
+        shellQuote(cwd),
+    };
+  }
+
+  function downloadTextFile(filename, body, mime) {
+    const blob = new Blob([body], { type: mime || "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(function () {
+      URL.revokeObjectURL(url);
+    }, 2000);
+  }
+
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_error) {
+      // Fall through.
+    }
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "readonly");
+      area.style.position = "fixed";
+      area.style.left = "-9999px";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      return ok;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  async function ensureProjectAbsolutePath(project) {
+    let meta = UndertwigLocalFs.getProjectMeta(project);
+    if (meta && meta.absolutePath) {
+      return meta.absolutePath;
+    }
+
+    // Prefer a native pick through the helper when it is already running.
+    if (await hostHealth()) {
+      try {
+        const response = await fetch(HOST_URL + "/pick-directory", {
+          method: "POST",
+          mode: "cors",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        const data = await response.json();
+        if (response.ok && data && data.ok && data.path) {
+          const handle = await UndertwigLocalFs.getHandle(project);
+          await UndertwigLocalFs.bindProject(project, handle, data.path);
+          if (typeof deps.onBindingChanged === "function") {
+            deps.onBindingChanged(project);
+          }
+          return data.path;
+        }
+      } catch (_error) {
+        // Fall through to manual path entry.
+      }
+    }
+
+    const pathValue = await promptAbsolutePath({
+      title: "Local folder path",
+      message:
+        "Enter the full path of “" +
+        project +
+        "” on this computer. Console opens your system terminal there.",
+      folderName: (meta && meta.folderName) || project,
+      initial: "",
+    });
+    if (!pathValue) {
+      return "";
+    }
+    const handle = await UndertwigLocalFs.getHandle(project);
+    await UndertwigLocalFs.bindProject(project, handle, pathValue);
+    if (typeof deps.onBindingChanged === "function") {
+      deps.onBindingChanged(project);
+    }
+    return pathValue;
+  }
+
+  async function openTerminalViaHelper(cwd) {
+    const response = await fetch(HOST_URL + "/open-terminal", {
+      method: "POST",
+      mode: "cors",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: cwd }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data || !data.ok) {
+      throw new Error((data && data.error) || "Could not open the system terminal.");
+    }
+    return data;
+  }
+
   async function openSystemConsole() {
     if (!isFeatureAllowed()) return;
     const project = currentProjectName();
@@ -334,55 +510,48 @@
       return;
     }
 
-    const ok = await hostHealth();
-    if (!ok) {
+    const cwd = await ensureProjectAbsolutePath(project);
+    if (!cwd) {
       if (typeof deps.setStatus === "function") {
-        deps.setStatus(
-          "Start the local helper first: node local-console-host.mjs",
-          true
-        );
+        deps.setStatus("Console cancelled.");
       }
       return;
     }
 
-    let meta = UndertwigLocalFs.getProjectMeta(project);
-    if (!meta || !meta.absolutePath) {
-      if (typeof deps.setStatus === "function") {
-        deps.setStatus(
-          "No local path is remembered for this project. Use Import project while the local helper is running.",
-          true
-        );
-      }
-      return;
-    }
-
-    // Warn if path looks wrong, but still allow Update flow via banner.
     await refreshLocalPathWarning();
 
-    try {
-      const response = await fetch(HOST_URL + "/open-terminal", {
-        method: "POST",
-        mode: "cors",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd: meta.absolutePath }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error((data && data.error) || "Could not open the system terminal.");
+    // Best case: local helper is already running → open terminal immediately.
+    if (await hostHealth()) {
+      try {
+        const data = await openTerminalViaHelper(cwd);
+        if (typeof deps.setStatus === "function") {
+          deps.setStatus(
+            "Opened system terminal in “" + (data.cwd || cwd) + "”."
+          );
+        }
+        return;
+      } catch (error) {
+        // Fall through to launcher download.
+        console.warn("[undertwig] helper open-terminal failed", error);
       }
-      if (typeof deps.setStatus === "function") {
-        deps.setStatus(
-          "Opened system terminal in “" + (data.cwd || meta.absolutePath) + "”."
-        );
-      }
-    } catch (error) {
-      if (typeof deps.setStatus === "function") {
-        deps.setStatus(
-          (error && error.message) || "Could not open the system terminal.",
-          true
-        );
-      }
+    }
+
+    // No helper required: download a one-click launcher and copy the open command.
+    const launcher = buildTerminalLauncher(cwd);
+    downloadTextFile(launcher.filename, launcher.body, launcher.mime);
+    const copied = await copyText(launcher.openCommand);
+    if (typeof deps.setStatus === "function") {
+      deps.setStatus(
+        copied
+          ? "Downloaded " +
+              launcher.filename +
+              " — open it to launch the terminal. Command also copied to the clipboard."
+          : "Downloaded " +
+              launcher.filename +
+              " — open it to launch the terminal in “" +
+              cwd +
+              "”."
+      );
     }
   }
 
