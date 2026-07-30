@@ -52,6 +52,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -81,7 +82,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.undertwig.app.data.AuthUser
 import com.undertwig.app.data.BibToolId
-import com.undertwig.app.data.DriveConflictResolution
 import com.undertwig.app.data.LatexEngineId
 import com.undertwig.app.data.ProjectDownloadInfo
 import java.io.File
@@ -112,7 +112,7 @@ fun EditorScreen(
     onAddFolder: (String) -> Unit,
     onDeletePath: (path: String, isFolder: Boolean) -> Unit,
     onRenamePath: (from: String, to: String, isFolder: Boolean) -> Unit,
-    onResolveDriveConflict: (DriveConflictResolution) -> Unit = {},
+    onSyncFileLock: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var showAdd by remember { mutableStateOf(false) }
@@ -136,6 +136,10 @@ fun EditorScreen(
         ),
         label = "loadAngle",
     )
+
+    LaunchedEffect(state.projectId, state.activePath, authUser?.email) {
+        onSyncFileLock()
+    }
 
     fun runProjectDownload() {
         val export = onExportZip()
@@ -323,6 +327,7 @@ fun EditorScreen(
                     BasicTextField(
                         value = state.editorText,
                         onValueChange = onEditorChange,
+                        readOnly = state.editorReadOnly,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 12.dp)
@@ -337,6 +342,15 @@ fun EditorScreen(
                         visualTransformation = texHighlight,
                     )
                 }
+            }
+
+            state.fileLockBlockedMessage?.let { lockMessage ->
+                Text(
+                    lockMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
             }
 
             Row(
@@ -685,76 +699,6 @@ fun EditorScreen(
             },
             dismissButton = {
                 TextButton(onClick = { downloadInfo = null }) { Text("Cancel") }
-            },
-        )
-    }
-
-    state.driveConflict?.let { conflict ->
-        val isLoad = conflict.kind == DriveConflictUi.Kind.Load
-        AlertDialog(
-            onDismissRequest = { onResolveDriveConflict(DriveConflictResolution.Cancel) },
-            title = {
-                Text(
-                    if (isLoad) {
-                        "Loading will replace local edits"
-                    } else {
-                        "Google Drive has newer changes"
-                    },
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        if (isLoad) {
-                            "These files in “${conflict.projectName}” differ from Google Drive (or exist only locally):"
-                        } else {
-                            "These files changed on Google Drive since your last Load/Save of “${conflict.projectName}”:"
-                        },
-                    )
-                    conflict.paths.take(12).forEach { path ->
-                        Text("• $path", style = MaterialTheme.typography.bodySmall)
-                    }
-                    if (conflict.paths.size > 12) {
-                        Text(
-                            "…and ${conflict.paths.size - 12} more",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { onResolveDriveConflict(DriveConflictResolution.KeepBoth) },
-                ) {
-                    Text("Keep both")
-                }
-            },
-            dismissButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(
-                        onClick = { onResolveDriveConflict(DriveConflictResolution.Cancel) },
-                    ) {
-                        Text("Cancel")
-                    }
-                    if (isLoad) {
-                        TextButton(
-                            onClick = { onResolveDriveConflict(DriveConflictResolution.TakeCloud) },
-                        ) {
-                            Text("Take cloud")
-                        }
-                    } else {
-                        TextButton(
-                            onClick = { onResolveDriveConflict(DriveConflictResolution.TakeTheirs) },
-                        ) {
-                            Text("Take theirs")
-                        }
-                        TextButton(
-                            onClick = { onResolveDriveConflict(DriveConflictResolution.KeepMine) },
-                        ) {
-                            Text("Overwrite")
-                        }
-                    }
-                }
             },
         )
     }

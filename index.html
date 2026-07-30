@@ -1314,17 +1314,7 @@
       .modal-actions {
         display: flex;
         justify-content: flex-end;
-        flex-wrap: wrap;
         gap: 8px;
-      }
-
-      .modal-actions.modal-actions-conflict {
-        justify-content: stretch;
-      }
-
-      .modal-actions.modal-actions-conflict button {
-        flex: 1 1 auto;
-        min-width: 110px;
       }
 
       .modal-actions button {
@@ -1342,12 +1332,6 @@
       .modal-actions .modal-confirm:hover {
         background: var(--brand-strong);
         border-color: transparent;
-      }
-
-      .modal-actions .modal-danger {
-        background: color-mix(in srgb, #b42318 18%, var(--panel));
-        border-color: color-mix(in srgb, #b42318 35%, var(--border));
-        color: var(--text);
       }
 
       .mobile-app-gate {
@@ -3970,6 +3954,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let cloudOpenInFlight = false;
       let cloudSaveTimer = null;
       let cloudSaveInFlight = false;
+      let fileLockHeartbeatTimer = null;
+      let fileLockHeldPath = null; // project-relative path we currently hold
+      let fileLockBlocked = null; // { fullPath, message, holder }
+      let fileLockSyncGeneration = 0;
+      const FILE_LOCK_HEARTBEAT_MS = 20000;
       let cloudStatusMode = "logged-out";
       // Declared early: boot used to call initCloudProject before this existed (TDZ), so invite sync never ran.
       let cloudInitPromise = null;
@@ -4133,6 +4122,18 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
+        if (
+          fileLockBlocked &&
+          fileLockBlocked.fullPath === state.activeFile
+        ) {
+          setStatus(
+            fileLockBlocked.message ||
+              "Another collaborator is editing this file. Simultaneous collaboration is not supported at the moment.",
+            true
+          );
+          return;
+        }
+
         const saveButton = document.getElementById("saveProject");
         const active = state.files[state.activeFile];
         if (active && !active.binary) {
@@ -4185,48 +4186,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               }
             }
 
-            let conflictResolution = "keep-mine";
-            let conflictCount = 0;
-            if (UndertwigCloud.previewSaveConflicts) {
-              setStatus("Checking Google Drive for concurrent edits…");
-              const conflictPreview = await UndertwigCloud.previewSaveConflicts(state, {
-                projectName: projectName,
-                signal: abortController.signal,
-              });
-              if (abortController.signal.aborted) {
-                setStatus("Save cancelled.");
-                return;
-              }
-              const conflicts = (conflictPreview && conflictPreview.conflicts) || [];
-              conflictCount = conflicts.length;
-              if (conflicts.length) {
-                const choice = await confirmDriveConflictDialog("save", projectName, conflicts);
-                if (choice === "cancel" || abortController.signal.aborted) {
-                  setStatus("Save cancelled.");
-                  return;
-                }
-                conflictResolution = choice;
-              }
-            }
-
             setStatus("Saving “" + projectName + "” to Google Drive…");
-            const saveResult = await UndertwigCloud.saveProject(state, {
+            await UndertwigCloud.saveProject(state, {
               projectName: projectName,
               deleteMissing: true,
-              conflictResolution: conflictResolution,
               signal: abortController.signal,
             });
             if (abortController.signal.aborted) {
               setStatus("Save cancelled.");
               return;
             }
-            applySaveConflictResult(saveResult, projectName);
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-            } catch (_error) {
-              localOk = false;
-            }
-            render();
             renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
             const deleteNote = deletions.length
               ? " Removed " +
@@ -4235,28 +4204,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 (deletions.length === 1 ? "" : "s") +
                 " from Drive."
               : "";
-            let conflictNote = "";
-            if (conflictCount) {
-              if (conflictResolution === "keep-both") {
-                conflictNote = " Kept both versions for " + conflictCount + " conflicting file(s).";
-              } else if (conflictResolution === "take-theirs") {
-                conflictNote = " Kept Drive versions for " + conflictCount + " conflicting file(s).";
-              } else if (conflictResolution === "keep-mine") {
-                conflictNote = " Overwrote Drive for " + conflictCount + " conflicting file(s).";
-              }
-            }
             setStatus(
               localOk
                 ? "Saved in this browser and synced “" +
                     projectName +
                     "” to Google Drive." +
-                    deleteNote +
-                    conflictNote
+                    deleteNote
                 : "Saved “" +
                     projectName +
                     "” to Google Drive (browser storage is full)." +
-                    deleteNote +
-                    conflictNote
+                    deleteNote
             );
             if (typeof refreshCloudProjectsList === "function") {
               refreshCloudProjectsList();
@@ -4476,215 +4433,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             });
           }
         });
-      }
-
-      let driveConflictDialog = null;
-      let driveConflictDialogResolver = null;
-      let driveConflictEscapeBound = false;
-      let cloudConflictStatusAt = 0;
-
-      function ensureDriveConflictDialog() {
-        if (driveConflictDialog) {
-          return driveConflictDialog;
-        }
-        const overlay = document.createElement("div");
-        overlay.className = "modal-overlay hidden";
-        overlay.id = "driveConflictDialog";
-        overlay.hidden = true;
-        overlay.setAttribute("aria-hidden", "true");
-        overlay.inert = true;
-        overlay.setAttribute("aria-labelledby", "driveConflictTitle");
-        overlay.setAttribute("aria-describedby", "driveConflictMessage");
-        overlay.innerHTML =
-          '<div class="modal-card">' +
-          '<h2 id="driveConflictTitle">Resolve Drive conflict</h2>' +
-          '<p id="driveConflictMessage"></p>' +
-          '<ul id="driveConflictList"></ul>' +
-          '<div class="modal-actions modal-actions-conflict" id="driveConflictActions"></div>' +
-          "</div>";
-        driveConflictDialog = overlay;
-        if (!driveConflictEscapeBound) {
-          driveConflictEscapeBound = true;
-          document.addEventListener("keydown", function (event) {
-            if (
-              event.key === "Escape" &&
-              driveConflictDialog &&
-              driveConflictDialog.isConnected &&
-              !driveConflictDialog.hidden
-            ) {
-              event.preventDefault();
-              closeDriveConflictDialog("cancel");
-            }
-          });
-        }
-        overlay.addEventListener("click", function (event) {
-          if (event.target === overlay) {
-            closeDriveConflictDialog("cancel");
-          }
-        });
-        return overlay;
-      }
-
-      function setDriveConflictDialogOpen(open) {
-        if (open) {
-          const dialog = ensureDriveConflictDialog();
-          if (!dialog.isConnected) {
-            document.body.appendChild(dialog);
-          }
-          dialog.classList.remove("hidden");
-          dialog.hidden = false;
-          dialog.setAttribute("role", "alertdialog");
-          dialog.setAttribute("aria-modal", "true");
-          dialog.removeAttribute("aria-hidden");
-          dialog.inert = false;
-          return;
-        }
-        if (!driveConflictDialog) {
-          return;
-        }
-        driveConflictDialog.classList.add("hidden");
-        driveConflictDialog.hidden = true;
-        driveConflictDialog.removeAttribute("role");
-        driveConflictDialog.removeAttribute("aria-modal");
-        driveConflictDialog.setAttribute("aria-hidden", "true");
-        driveConflictDialog.inert = true;
-        if (driveConflictDialog.isConnected) {
-          driveConflictDialog.remove();
-        }
-      }
-
-      function closeDriveConflictDialog(result) {
-        setDriveConflictDialogOpen(false);
-        const resolve = driveConflictDialogResolver;
-        driveConflictDialogResolver = null;
-        if (resolve) {
-          resolve(result || "cancel");
-        }
-      }
-
-      /**
-       * @param {"save"|"load"} kind
-       * @param {string} projectName
-       * @param {Array<{path?:string}|string>} conflicts
-       * @returns {Promise<"cancel"|"keep-mine"|"take-theirs"|"keep-both"|"take-cloud">}
-       */
-      function confirmDriveConflictDialog(kind, projectName, conflicts) {
-        const items = (conflicts || []).map(function (item) {
-          if (typeof item === "string") {
-            return item;
-          }
-          return item.path || item.name || "(unnamed)";
-        });
-        if (!items.length) {
-          return Promise.resolve(kind === "load" ? "take-cloud" : "keep-mine");
-        }
-
-        ensureDriveConflictDialog();
-        const title = driveConflictDialog.querySelector("#driveConflictTitle");
-        const message = driveConflictDialog.querySelector("#driveConflictMessage");
-        const list = driveConflictDialog.querySelector("#driveConflictList");
-        const actions = driveConflictDialog.querySelector("#driveConflictActions");
-
-        title.textContent =
-          kind === "load" ? "Loading will replace local edits" : "Google Drive has newer changes";
-        message.textContent =
-          kind === "load"
-            ? "These files in “" +
-              (projectName || "this project") +
-              "” differ from Google Drive (or exist only locally). Choose how to continue:"
-            : "These files changed on Google Drive since your last Load/Save of “" +
-              (projectName || "this project") +
-              "”. Saving without resolving would overwrite a collaborator’s work:";
-
-        list.replaceChildren();
-        items.forEach(function (name) {
-          const li = document.createElement("li");
-          li.textContent = name;
-          list.appendChild(li);
-        });
-
-        actions.replaceChildren();
-        function addButton(label, result, className) {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.textContent = label;
-          if (className) {
-            button.className = className;
-          }
-          button.addEventListener("click", function () {
-            closeDriveConflictDialog(result);
-          });
-          actions.appendChild(button);
-          return button;
-        }
-
-        addButton("Cancel", "cancel");
-        if (kind === "load") {
-          addButton("Keep both", "keep-both", "modal-confirm");
-          addButton("Take cloud", "take-cloud", "modal-danger");
-        } else {
-          addButton("Keep both", "keep-both", "modal-confirm");
-          addButton("Take theirs", "take-theirs");
-          addButton("Overwrite cloud", "keep-mine", "modal-danger");
-        }
-
-        setDriveConflictDialogOpen(true);
-        const focusBtn = actions.querySelector(".modal-confirm") || actions.querySelector("button");
-        if (focusBtn) {
-          focusBtn.focus();
-        }
-
-        return new Promise(function (resolve) {
-          driveConflictDialogResolver = resolve;
-          if (saveAbortController || syncAbortController) {
-            const controller = saveAbortController || syncAbortController;
-            const onAbort = function () {
-              closeDriveConflictDialog("cancel");
-            };
-            if (controller.signal.aborted) {
-              closeDriveConflictDialog("cancel");
-              return;
-            }
-            controller.signal.addEventListener("abort", onAbort, { once: true });
-          }
-        });
-      }
-
-      function applySaveConflictResult(saveResult, projectName) {
-        if (!saveResult) {
-          return;
-        }
-        const copies = saveResult.conflictCopies || [];
-        // Stash local ("mine") under conflict names before originals become "theirs".
-        copies.forEach(function (pair) {
-          if (!pair || !pair.original || !pair.copy) {
-            return;
-          }
-          const originalFull = projectName + "/" + pair.original;
-          const copyFull = projectName + "/" + pair.copy;
-          const mine = state.files[originalFull];
-          if (!mine || state.files[copyFull]) {
-            return;
-          }
-          state.files[copyFull] = {
-            name: pair.copy.split("/").pop(),
-            content: mine.content,
-            binary: Boolean(mine.binary),
-          };
-        });
-        const restored = saveResult.restoredFiles || {};
-        Object.keys(restored).forEach(function (path) {
-          state.files[path] = restored[path];
-        });
-        if (
-          state.activeFile &&
-          state.files[state.activeFile] &&
-          !state.files[state.activeFile].binary &&
-          UndertwigEditor &&
-          UndertwigEditor.setValue
-        ) {
-          UndertwigEditor.setValue(state.files[state.activeFile].content || "");
-        }
       }
 
       function closeHoverBoxes() {
@@ -5506,6 +5254,28 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       document.getElementById("uploadFiles").addEventListener("click", () => fileInput.click());
       document.getElementById("downloadZip").addEventListener("click", downloadProjectZip);
       document.getElementById("saveProject").addEventListener("click", saveProjectNow);
+      window.addEventListener("pagehide", function () {
+        if (fileLockHeldPath && UndertwigCloud.releaseFileLock) {
+          const projectName = getActiveProjectName();
+          const rel = fileLockHeldPath;
+          // Best-effort; may not finish on unload.
+          try {
+            UndertwigCloud.releaseFileLock(projectName, rel);
+          } catch (_error) {
+            // Ignore.
+          }
+        }
+        stopFileLockHeartbeat();
+      });
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "hidden") {
+          return;
+        }
+        // On return, re-check lock so a takeover while away is noticed.
+        if (fileLocksEnabled()) {
+          syncActiveFileEditLock();
+        }
+      });
       document.getElementById("uploadFolder").addEventListener("click", () => {
         if (!supportsFolderUpload()) {
           setStatus(
@@ -6684,32 +6454,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             scheduleCloudSave(false);
             return;
           }
+          // Don't push edits for a file we don't hold the edit lock on.
+          if (fileLockBlocked && fileLockBlocked.fullPath === state.activeFile) {
+            return;
+          }
           cloudSaveInFlight = true;
           try {
-            const projectName = getActiveProjectName() || undefined;
-            // Never silently overwrite collaborator edits via debounced autosave.
-            if (UndertwigCloud.previewSaveConflicts && projectName) {
-              const preview = await UndertwigCloud.previewSaveConflicts(state, {
-                projectName: projectName,
-              });
-              if (preview && preview.conflicts && preview.conflicts.length) {
-                const now = Date.now();
-                if (!cloudConflictStatusAt || now - cloudConflictStatusAt > 60000) {
-                  cloudConflictStatusAt = now;
-                  setStatus(
-                    "Google Drive has newer changes in “" +
-                      projectName +
-                      "”. Autosave paused — click Save to resolve conflicts.",
-                    true
-                  );
-                }
-                return;
-              }
-            }
             await UndertwigCloud.saveProject(state, {
-              projectName: projectName,
-              conflictResolution: "keep-mine",
-              skipConflictCheck: true,
+              projectName: getActiveProjectName() || undefined,
             });
             renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
           } catch (error) {
@@ -6729,6 +6481,178 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
 
         cloudSaveTimer = setTimeout(run, 1200);
+      }
+
+      function projectRelativeActivePath() {
+        const projectName = getActiveProjectName();
+        const full = state.activeFile || "";
+        if (!projectName || !full.startsWith(projectName + "/")) {
+          return null;
+        }
+        return full.slice(projectName.length + 1);
+      }
+
+      function fileLocksEnabled() {
+        if (!UndertwigAuth.isLoggedIn() || !UndertwigCloud.isAvailable()) {
+          return false;
+        }
+        if (!UndertwigCloud.hasAccessToken || !UndertwigCloud.hasAccessToken()) {
+          return false;
+        }
+        const projectName = getActiveProjectName();
+        if (!projectName) {
+          return false;
+        }
+        return Boolean(
+          (UndertwigCloud.getMappedFolderId && UndertwigCloud.getMappedFolderId(projectName)) ||
+            UndertwigCloud.getProjectFolderId()
+        );
+      }
+
+      function stopFileLockHeartbeat() {
+        if (fileLockHeartbeatTimer) {
+          clearInterval(fileLockHeartbeatTimer);
+          fileLockHeartbeatTimer = null;
+        }
+      }
+
+      function startFileLockHeartbeat(projectName, relPath) {
+        stopFileLockHeartbeat();
+        if (!projectName || !relPath || !UndertwigCloud.heartbeatFileLock) {
+          return;
+        }
+        fileLockHeartbeatTimer = setInterval(function () {
+          UndertwigCloud.heartbeatFileLock(projectName, relPath)
+            .then(function (result) {
+              if (!result || !result.ok) {
+                fileLockHeldPath = null;
+                stopFileLockHeartbeat();
+                fileLockBlocked = {
+                  fullPath: projectName + "/" + relPath,
+                  message:
+                    (result && result.message) ||
+                    "Someone else took over editing this file.",
+                };
+                applyFileLockToEditor();
+                setStatus(fileLockBlocked.message, true);
+              }
+            })
+            .catch(function () {
+              // Transient network errors — keep trying next beat.
+            });
+        }, FILE_LOCK_HEARTBEAT_MS);
+      }
+
+      async function releaseHeldFileLock() {
+        stopFileLockHeartbeat();
+        const projectName = getActiveProjectName();
+        const rel = fileLockHeldPath;
+        fileLockHeldPath = null;
+        if (!projectName || !rel || !UndertwigCloud.releaseFileLock) {
+          return;
+        }
+        try {
+          await UndertwigCloud.releaseFileLock(projectName, rel);
+        } catch (_error) {
+          // Best-effort.
+        }
+      }
+
+      function applyFileLockToEditor() {
+        const file = state.files[state.activeFile];
+        const lockedOut =
+          fileLockBlocked && fileLockBlocked.fullPath === state.activeFile;
+        UndertwigEditor.setReadOnly(!file || Boolean(file.binary) || lockedOut);
+        if (file && !file.binary) {
+          const size = new Blob([file.content || ""]).size;
+          if (lockedOut) {
+            activeFileMeta.textContent =
+              "Read-only — " +
+              (fileLockBlocked.message || "another collaborator is editing this file");
+          } else if (fileLockHeldPath && state.activeFile === getActiveProjectName() + "/" + fileLockHeldPath) {
+            activeFileMeta.textContent =
+              "Text file, " + formatBytes(size) + " · editing lock held";
+          }
+        }
+      }
+
+      /**
+       * Acquire / release per-file Drive edit locks when the active file changes.
+       */
+      async function syncActiveFileEditLock() {
+        const generation = ++fileLockSyncGeneration;
+        const projectName = getActiveProjectName();
+        const fullPath = state.activeFile || "";
+        const file = state.files[fullPath];
+        const rel = projectRelativeActivePath();
+
+        if (!fileLocksEnabled() || !file || file.binary || !rel) {
+          if (fileLockHeldPath) {
+            await releaseHeldFileLock();
+          }
+          fileLockBlocked = null;
+          if (generation === fileLockSyncGeneration) {
+            applyFileLockToEditor();
+          }
+          return;
+        }
+
+        // Switching files: release previous lock first.
+        if (fileLockHeldPath && fileLockHeldPath !== rel) {
+          const previous = fileLockHeldPath;
+          stopFileLockHeartbeat();
+          fileLockHeldPath = null;
+          try {
+            await UndertwigCloud.releaseFileLock(projectName, previous);
+          } catch (_error) {
+            // Ignore.
+          }
+        }
+
+        if (generation !== fileLockSyncGeneration) {
+          return;
+        }
+
+        if (fileLockHeldPath === rel) {
+          fileLockBlocked = null;
+          applyFileLockToEditor();
+          return;
+        }
+
+        try {
+          const result = await UndertwigCloud.acquireFileLock(projectName, rel);
+          if (generation !== fileLockSyncGeneration) {
+            return;
+          }
+          if (result && result.ok) {
+            fileLockHeldPath = rel;
+            fileLockBlocked = null;
+            startFileLockHeartbeat(projectName, rel);
+            applyFileLockToEditor();
+            return;
+          }
+          fileLockHeldPath = null;
+          stopFileLockHeartbeat();
+          fileLockBlocked = {
+            fullPath: fullPath,
+            message:
+              (result && result.message) ||
+              "Someone is currently working on this file. Simultaneous collaboration is not supported at the moment.",
+          };
+          applyFileLockToEditor();
+          setStatus(fileLockBlocked.message, true);
+        } catch (error) {
+          if (generation !== fileLockSyncGeneration) {
+            return;
+          }
+          // Project may not be on Drive yet — allow local editing.
+          fileLockBlocked = null;
+          applyFileLockToEditor();
+          const message = (error && error.message) || "";
+          if (!/not linked|Save once|Missing shared/i.test(message)) {
+            setStatus("Could not check edit lock: " + message, true);
+          }
+        }
       }
 
       function setStatusStorageFull(options) {
@@ -6840,13 +6764,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
         }
         activeFileName.textContent = path || "No file selected";
-        UndertwigEditor.setReadOnly(!file || Boolean(file.binary));
+        const lockedOut =
+          fileLockBlocked && fileLockBlocked.fullPath === path;
+        UndertwigEditor.setReadOnly(!file || Boolean(file.binary) || lockedOut);
         UndertwigEditor.setValue(
           file && !file.binary ? file.content : "",
           path || ""
         );
         renderAssetPreview(file, path);
         updateMeta();
+        syncActiveFileEditLock();
       }
 
       function updateMeta() {
@@ -8532,55 +8459,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             active.content = UndertwigEditor.getValue();
           }
 
-          const existing = state.files[pulled.path];
-          if (existing) {
-            const localHash = UndertwigCloud.hashFileEntry
-              ? await UndertwigCloud.hashFileEntry(existing)
-              : null;
-            const remoteHash = UndertwigCloud.hashFileEntry
-              ? await UndertwigCloud.hashFileEntry({
-                  content: pulled.content,
-                  binary: Boolean(pulled.binary),
-                })
-              : null;
-            if (localHash && remoteHash && localHash !== remoteHash) {
-              const rel = pulled.path.indexOf("/") >= 0 ? pulled.path.split("/").slice(1).join("/") : pulled.path;
-              const choice = await confirmDriveConflictDialog("load", projectName, [
-                { path: rel || pulled.path },
-              ]);
-              if (choice === "cancel" || abortController.signal.aborted) {
-                setStatus("Load cancelled.");
-                return;
-              }
-              if (choice === "keep-both") {
-                const stamp =
-                  new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 15);
-                const parts = pulled.path.split("/");
-                const fileName = parts.pop() || "file";
-                const dot = fileName.lastIndexOf(".");
-                const email = (
-                  (UndertwigAuth.readSession &&
-                    UndertwigAuth.readSession() &&
-                    UndertwigAuth.readSession().email) ||
-                  "local"
-                )
-                  .replace(/[^a-zA-Z0-9._-]+/g, "_")
-                  .slice(0, 24);
-                const newName =
-                  (dot > 0
-                    ? fileName.slice(0, dot) + ".conflict-" + stamp + "-" + email + fileName.slice(dot)
-                    : fileName + ".conflict-" + stamp + "-" + email);
-                parts.push(newName);
-                const stashPath = parts.join("/");
-                state.files[stashPath] = {
-                  name: newName,
-                  content: existing.content,
-                  binary: Boolean(existing.binary),
-                };
-              }
-            }
-          }
-
           state.files[pulled.path] = {
             name: pulled.name,
             content: pulled.content,
@@ -8675,38 +8553,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             setStatus("Load cancelled.");
             return;
           }
-
-          if (UndertwigCloud.previewLoadConflicts) {
-            const loadPreview = await UndertwigCloud.previewLoadConflicts(state, pulled);
-            const conflicts = (loadPreview && loadPreview.conflicts) || [];
-            if (conflicts.length) {
-              const choice = await confirmDriveConflictDialog("load", projectName, conflicts);
-              if (choice === "cancel" || abortController.signal.aborted) {
-                setStatus("Load cancelled.");
-                return;
-              }
-              let stashed = [];
-              if (choice === "keep-both" && UndertwigCloud.stashLocalLoadConflicts) {
-                stashed = await UndertwigCloud.stashLocalLoadConflicts(
-                  state,
-                  projectName,
-                  conflicts.map(function (item) {
-                    return item.path;
-                  })
-                );
-              }
-              applyPulledProject(pulled);
-              (stashed || []).forEach(function (item) {
-                if (item && item.fullPath && item.entry) {
-                  state.files[item.fullPath] = item.entry;
-                }
-              });
-            } else {
-              applyPulledProject(pulled);
-            }
-          } else {
-            applyPulledProject(pulled);
-          }
+          applyPulledProject(pulled);
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
           } catch (_error) {

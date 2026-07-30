@@ -56,7 +56,7 @@ fun UndertwigApp(
                             navController.navigate("pdf")
                         }
                     } else {
-                        viewModel.selectFile(path)
+                        viewModel.selectFile(path, activity)
                     }
                 },
                 onEditorChange = viewModel::onEditorChange,
@@ -81,7 +81,7 @@ fun UndertwigApp(
                 onAddFolder = viewModel::addFolder,
                 onDeletePath = viewModel::deletePath,
                 onRenamePath = viewModel::renamePath,
-                onResolveDriveConflict = viewModel::resolveDriveConflict,
+                onSyncFileLock = { viewModel.syncFileEditLock(activity) },
             )
         }
         composable("pdf") {

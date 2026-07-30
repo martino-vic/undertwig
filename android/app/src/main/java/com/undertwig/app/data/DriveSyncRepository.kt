@@ -16,11 +16,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -33,217 +28,11 @@ class DriveSyncRepository(
 ) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    suspend fun previewSaveConflicts(
-        accessToken: String,
-        projectId: String,
-        projectName: String,
-    ): DriveSaveConflictPreview = withContext(Dispatchers.IO) {
-        val folderId = resolveUploadFolderId(accessToken, projectId, projectName)
-        val remoteFiles = listFolderTree(accessToken, folderId, "")
-            .filter { !it.isFolder }
-            .associateBy { it.path }
-        val baseline = projects.readDriveBaseline(projectId)
-        val conflicts = mutableListOf<DriveFileConflict>()
-        for (relativePath in projects.listFiles(projectId)) {
-            if (isConflictCopyPath(relativePath)) continue
-            val file = projects.existingFile(projectId, relativePath) ?: continue
-            val classification = classifySavePath(
-                accessToken = accessToken,
-                relativePath = relativePath,
-                localFile = file,
-                remote = remoteFiles[relativePath],
-                baseline = baseline[relativePath],
-            )
-            if (classification == PathClass.Conflict) {
-                val remote = remoteFiles[relativePath]
-                conflicts += DriveFileConflict(
-                    path = relativePath,
-                    remoteId = remote?.id,
-                    remoteMd5 = remote?.md5Checksum,
-                    remoteModifiedTime = remote?.modifiedTime,
-                )
-            }
-        }
-        DriveSaveConflictPreview(folderId = folderId, conflicts = conflicts)
-    }
-
     suspend fun uploadProject(
         accessToken: String,
         projectId: String,
         projectName: String,
-        resolution: DriveConflictResolution = DriveConflictResolution.KeepMine,
-        skipConflictCheck: Boolean = false,
-    ): DriveUploadResult = withContext(Dispatchers.IO) {
-        val name = projectName.trim()
-        require(name.isNotEmpty()) { "Missing project name." }
-        if (resolution == DriveConflictResolution.Cancel) {
-            error("Save cancelled because of Drive conflicts.")
-        }
-
-        val projectFolderId = resolveUploadFolderId(accessToken, projectId, projectName)
-
-        for (folder in projects.listFolders(projectId)) {
-            ensurePathFolders(accessToken, projectFolderId, folder)
-        }
-
-        val remoteFiles = listFolderTree(accessToken, projectFolderId, "")
-            .filter { !it.isFolder }
-            .associateBy { it.path }
-        val baseline = projects.readDriveBaseline(projectId)
-        val pathClass = linkedMapOf<String, PathClass>()
-        if (!skipConflictCheck) {
-            for (relativePath in projects.listFiles(projectId)) {
-                if (isConflictCopyPath(relativePath)) {
-                    pathClass[relativePath] = PathClass.Skip
-                    continue
-                }
-                val file = projects.existingFile(projectId, relativePath) ?: continue
-                pathClass[relativePath] = classifySavePath(
-                    accessToken = accessToken,
-                    relativePath = relativePath,
-                    localFile = file,
-                    remote = remoteFiles[relativePath],
-                    baseline = baseline[relativePath],
-                )
-            }
-        } else {
-            for (relativePath in projects.listFiles(projectId)) {
-                pathClass[relativePath] = PathClass.SafeUpdate
-            }
-        }
-
-        val conflicts = pathClass.filterValues { it == PathClass.Conflict }.keys
-        if (conflicts.isNotEmpty() && resolution == DriveConflictResolution.Cancel) {
-            error("Save cancelled because of Drive conflicts.")
-        }
-
-        val stamp = conflictStamp()
-        val conflictCopies = mutableListOf<Pair<String, String>>()
-        val baselineNext = linkedMapOf<String, DriveBaselineEntry>()
-
-        for (relativePath in projects.listFiles(projectId)) {
-            if (isConflictCopyPath(relativePath)) continue
-            val file = projects.existingFile(projectId, relativePath) ?: continue
-            val classification = pathClass[relativePath] ?: PathClass.SafeUpdate
-            val isConflict = classification == PathClass.Conflict
-
-            if (isConflict && resolution == DriveConflictResolution.TakeTheirs) {
-                val remote = remoteFiles[relativePath] ?: continue
-                val bytes = downloadDriveFile(accessToken, remote.id)
-                projects.writeFileBytes(projectId, relativePath, bytes)
-                baselineNext[relativePath] = DriveBaselineEntry(
-                    id = remote.id,
-                    md5 = remote.md5Checksum,
-                    modifiedTime = remote.modifiedTime,
-                    contentHash = sha256Hex(bytes),
-                )
-                continue
-            }
-
-            var uploadPath = relativePath
-            var existingId: String? = remoteFiles[relativePath]?.id
-
-            if (isConflict && resolution == DriveConflictResolution.KeepBoth) {
-                uploadPath = conflictCopyRelativePath(relativePath, stamp)
-                conflictCopies += relativePath to uploadPath
-                existingId = null
-                // Stash mine under conflict name, then restore theirs into original.
-                val mineBytes = file.readBytes()
-                projects.writeFileBytes(projectId, uploadPath, mineBytes)
-                val remote = remoteFiles[relativePath]
-                if (remote != null) {
-                    val theirs = downloadDriveFile(accessToken, remote.id)
-                    projects.writeFileBytes(projectId, relativePath, theirs)
-                    baselineNext[relativePath] = DriveBaselineEntry(
-                        id = remote.id,
-                        md5 = remote.md5Checksum,
-                        modifiedTime = remote.modifiedTime,
-                        contentHash = sha256Hex(theirs),
-                    )
-                }
-            } else if (!isConflict && classification == PathClass.Skip) {
-                val remote = remoteFiles[relativePath]
-                if (remote != null) {
-                    baselineNext[relativePath] = DriveBaselineEntry(
-                        id = remote.id,
-                        md5 = remote.md5Checksum,
-                        modifiedTime = remote.modifiedTime,
-                        contentHash = sha256Hex(file.readBytes()),
-                    )
-                }
-                continue
-            } else if (isConflict && resolution == DriveConflictResolution.KeepMine) {
-                existingId = remoteFiles[relativePath]?.id
-            }
-
-            val parentRel = uploadPath.substringBeforeLast('/', missingDelimiterValue = "")
-            val fileName = uploadPath.substringAfterLast('/')
-            val parentId = if (parentRel.isEmpty()) {
-                projectFolderId
-            } else {
-                ensurePathFolders(accessToken, projectFolderId, parentRel)
-            }
-            if (existingId.isNullOrBlank() &&
-                !(isConflict && resolution == DriveConflictResolution.KeepBoth)
-            ) {
-                existingId = findNamedChild(accessToken, parentId, fileName, mimeType = null)
-                    ?.optString("id")
-                    ?.takeIf { it.isNotBlank() }
-            }
-            val uploadFile = projects.existingFile(projectId, uploadPath)
-                ?: error("Missing file: $uploadPath")
-            val saved = uploadFile(
-                accessToken = accessToken,
-                parentId = parentId,
-                fileName = fileName,
-                file = uploadFile,
-                existingId = if (isConflict && resolution == DriveConflictResolution.KeepBoth) {
-                    null
-                } else {
-                    existingId
-                },
-            )
-            val savedId = saved?.optString("id")?.takeIf { it.isNotBlank() }
-            baselineNext[uploadPath] = DriveBaselineEntry(
-                id = savedId,
-                md5 = saved?.optString("md5Checksum")?.takeIf { it.isNotBlank() },
-                modifiedTime = saved?.optString("modifiedTime")?.takeIf { it.isNotBlank() },
-                contentHash = sha256Hex(uploadFile.readBytes()),
-            )
-        }
-
-        // Refresh fingerprints from Drive when possible.
-        try {
-            val refreshed = listFolderTree(accessToken, projectFolderId, "")
-                .filter { !it.isFolder }
-                .associateBy { it.path }
-            for (path in baselineNext.keys.toList()) {
-                val remote = refreshed[path] ?: continue
-                val localFile = projects.existingFile(projectId, path) ?: continue
-                baselineNext[path] = DriveBaselineEntry(
-                    id = remote.id,
-                    md5 = remote.md5Checksum,
-                    modifiedTime = remote.modifiedTime,
-                    contentHash = sha256Hex(localFile.readBytes()),
-                )
-            }
-        } catch (_: Exception) {
-            // Keep computed baseline.
-        }
-        projects.writeDriveBaseline(projectId, baselineNext)
-
-        DriveUploadResult(
-            folderId = projectFolderId,
-            resolution = resolution,
-            conflictCopies = conflictCopies,
-        )
-    }
-
-    private fun resolveUploadFolderId(
-        accessToken: String,
-        projectId: String,
-        projectName: String,
-    ): String {
+    ) = withContext(Dispatchers.IO) {
         val name = projectName.trim()
         require(name.isNotEmpty()) { "Missing project name." }
 
@@ -254,6 +43,8 @@ class DriveSyncRepository(
         val projectFolderId: String
         val savedRole: String
         if (role == "writer" || role == "reader") {
+            // Invited projects must write into the owner's shared folder — never create
+            // Undertwig/<name> under the invitee's own Drive.
             val sharedId = linkedId?.takeIf { isLiveFolder(accessToken, it) }
                 ?: error(
                     "Missing shared project folder. Open the invited project from the home screen again.",
@@ -272,61 +63,281 @@ class DriveSyncRepository(
             savedRole = "owner"
             projects.setDriveLink(projectId, projectFolderId, role = "owner")
         }
-        return projectFolderId
-    }
 
-    private enum class PathClass {
-        SafeCreate,
-        SafeUpdate,
-        Skip,
-        Conflict,
-    }
-
-    private fun classifySavePath(
-        accessToken: String,
-        relativePath: String,
-        localFile: File,
-        remote: DriveTreeEntry?,
-        baseline: DriveBaselineEntry?,
-    ): PathClass {
-        val localHash = sha256Hex(localFile.readBytes())
-        val localChanged = baseline == null || baseline.contentHash != localHash
-        if (remote == null) {
-            return if (localChanged) PathClass.SafeCreate else PathClass.Skip
+        for (folder in projects.listFolders(projectId)) {
+            ensurePathFolders(accessToken, projectFolderId, folder)
         }
-        val remoteChanged = remoteChangedSinceBaseline(baseline, remote)
-        if (baseline == null) {
-            return try {
-                val remoteBytes = downloadDriveFile(accessToken, remote.id)
-                if (sha256Hex(remoteBytes) == localHash) PathClass.Skip else PathClass.Conflict
-            } catch (_: Exception) {
-                PathClass.Conflict
+
+        for (relativePath in projects.listFiles(projectId)) {
+            if (relativePath == LOCK_DIR_NAME || relativePath.startsWith("$LOCK_DIR_NAME/")) {
+                continue
+            }
+            val parentRel = relativePath.substringBeforeLast('/', missingDelimiterValue = "")
+            val fileName = relativePath.substringAfterLast('/')
+            val parentId = if (parentRel.isEmpty()) {
+                projectFolderId
+            } else {
+                ensurePathFolders(accessToken, projectFolderId, parentRel)
+            }
+            val existing = findNamedChild(accessToken, parentId, fileName, mimeType = null)
+            val file = projects.existingFile(projectId, relativePath)
+                ?: error("Missing file: $relativePath")
+            uploadFile(
+                accessToken = accessToken,
+                parentId = parentId,
+                fileName = fileName,
+                file = file,
+                existingId = existing?.optString("id")?.takeIf { it.isNotBlank() },
+            )
+        }
+    }
+
+    data class FileEditLock(
+        val path: String,
+        val holderEmail: String?,
+        val holderName: String?,
+        val deviceId: String?,
+        val since: String?,
+        val heartbeat: String?,
+        val fileId: String? = null,
+        val parentId: String? = null,
+    ) {
+        fun holderLabel(): String {
+            val name = holderName?.trim().orEmpty()
+            val email = holderEmail?.trim().orEmpty()
+            return when {
+                name.isNotEmpty() && email.isNotEmpty() -> "$name ($email)"
+                name.isNotEmpty() -> name
+                email.isNotEmpty() -> email
+                else -> "Someone"
             }
         }
-        return when {
-            localChanged && remoteChanged -> PathClass.Conflict
-            !localChanged && remoteChanged -> PathClass.Skip
-            localChanged && !remoteChanged -> PathClass.SafeUpdate
-            else -> PathClass.Skip
+
+        fun isStale(nowMs: Long = System.currentTimeMillis()): Boolean {
+            val hb = heartbeat ?: return true
+            val ms = runCatching { java.time.Instant.parse(hb).toEpochMilli() }.getOrNull()
+                ?: return true
+            return nowMs - ms > LOCK_STALE_MS
         }
     }
 
-    private fun remoteChangedSinceBaseline(
-        baseline: DriveBaselineEntry?,
-        remote: DriveTreeEntry,
-    ): Boolean {
-        if (baseline == null) return true
-        val baseMd5 = baseline.md5
-        val remoteMd5 = remote.md5Checksum
-        if (!baseMd5.isNullOrBlank() && !remoteMd5.isNullOrBlank()) {
-            return baseMd5 != remoteMd5
+    data class FileLockResult(
+        val ok: Boolean,
+        val lock: FileEditLock? = null,
+        val message: String? = null,
+    )
+
+    fun deviceId(): String {
+        val existing = prefs.getString(KEY_DEVICE_ID, null)?.trim().orEmpty()
+        if (existing.isNotEmpty()) return existing
+        val created = "android-" + java.util.UUID.randomUUID().toString()
+        prefs.edit().putString(KEY_DEVICE_ID, created).apply()
+        return created
+    }
+
+    private fun isHeldByThisDevice(lock: FileEditLock): Boolean =
+        !lock.deviceId.isNullOrBlank() && lock.deviceId == deviceId()
+
+    suspend fun acquireFileLock(
+        accessToken: String,
+        projectId: String,
+        projectName: String,
+        relativePath: String,
+        holderEmail: String?,
+        holderName: String?,
+    ): FileLockResult = withContext(Dispatchers.IO) {
+        val rel = relativePath.trim().trimStart('/').replace('\\', '/')
+        require(rel.isNotEmpty() && !rel.contains("..")) { "Invalid file path." }
+        val folderId = resolveProjectFolderId(accessToken, projectId, projectName)
+            ?: return@withContext FileLockResult(
+                ok = false,
+                message = "Project is not linked to Google Drive yet. Save once first.",
+            )
+        val existing = readFileLock(accessToken, folderId, rel)
+        if (existing != null && !existing.isStale() && !isHeldByThisDevice(existing)) {
+            return@withContext FileLockResult(
+                ok = false,
+                lock = existing,
+                message = "${existing.holderLabel()} is currently working on “$rel”. " +
+                    "Simultaneous collaboration is not supported at the moment.",
+            )
         }
-        val baseTime = baseline.modifiedTime
-        val remoteTime = remote.modifiedTime
-        if (!baseTime.isNullOrBlank() && !remoteTime.isNullOrBlank()) {
-            return baseTime != remoteTime
+        val payload = buildLockJson(
+            rel,
+            holderEmail,
+            holderName,
+            since = if (existing != null && isHeldByThisDevice(existing)) existing.since else null,
+        )
+        writeFileLock(accessToken, folderId, rel, payload)
+        val again = readFileLock(accessToken, folderId, rel)
+        if (again != null && !again.isStale() && !isHeldByThisDevice(again)) {
+            return@withContext FileLockResult(
+                ok = false,
+                lock = again,
+                message = "${again.holderLabel()} is currently working on “$rel”. " +
+                    "Simultaneous collaboration is not supported at the moment.",
+            )
         }
-        return true
+        FileLockResult(ok = true, lock = again)
+    }
+
+    suspend fun heartbeatFileLock(
+        accessToken: String,
+        projectId: String,
+        projectName: String,
+        relativePath: String,
+        holderEmail: String?,
+        holderName: String?,
+    ): FileLockResult = withContext(Dispatchers.IO) {
+        val rel = relativePath.trim().trimStart('/').replace('\\', '/')
+        val folderId = resolveProjectFolderId(accessToken, projectId, projectName)
+            ?: return@withContext FileLockResult(ok = false, message = "Not linked to Drive.")
+        val existing = readFileLock(accessToken, folderId, rel)
+        if (existing == null) {
+            return@withContext acquireFileLock(
+                accessToken, projectId, projectName, rel, holderEmail, holderName,
+            )
+        }
+        if (!isHeldByThisDevice(existing)) {
+            if (!existing.isStale()) {
+                return@withContext FileLockResult(
+                    ok = false,
+                    lock = existing,
+                    message = "${existing.holderLabel()} is currently working on “$rel”. " +
+                        "Simultaneous collaboration is not supported at the moment.",
+                )
+            }
+            return@withContext acquireFileLock(
+                accessToken, projectId, projectName, rel, holderEmail, holderName,
+            )
+        }
+        val payload = buildLockJson(rel, holderEmail, holderName, since = existing.since)
+        writeFileLock(accessToken, folderId, rel, payload)
+        FileLockResult(ok = true, lock = readFileLock(accessToken, folderId, rel))
+    }
+
+    suspend fun releaseFileLock(
+        accessToken: String,
+        projectId: String,
+        projectName: String,
+        relativePath: String,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val rel = relativePath.trim().trimStart('/').replace('\\', '/')
+        val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext false
+        val existing = readFileLock(accessToken, folderId, rel) ?: return@withContext true
+        if (!isHeldByThisDevice(existing) && !existing.isStale()) return@withContext false
+        val fileId = existing.fileId ?: return@withContext false
+        trashDriveFile(accessToken, fileId)
+        true
+    }
+
+    private fun buildLockJson(
+        relativePath: String,
+        holderEmail: String?,
+        holderName: String?,
+        since: String?,
+    ): JSONObject {
+        val now = java.time.Instant.now().toString()
+        return JSONObject()
+            .put("version", 1)
+            .put("path", relativePath)
+            .put("holderEmail", holderEmail)
+            .put("holderName", holderName)
+            .put("deviceId", deviceId())
+            .put("since", since ?: now)
+            .put("heartbeat", now)
+    }
+
+    private fun readFileLock(
+        accessToken: String,
+        projectFolderId: String,
+        relativePath: String,
+    ): FileEditLock? {
+        val lockRel = "$LOCK_DIR_NAME/$relativePath.json"
+        val parts = lockRel.split('/').filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return null
+        var parentId = projectFolderId
+        for (i in 0 until parts.lastIndex) {
+            val child = findNamedChild(
+                accessToken,
+                parentId,
+                parts[i],
+                mimeType = "application/vnd.google-apps.folder",
+            ) ?: return null
+            parentId = child.getString("id")
+        }
+        val remote = findNamedChild(accessToken, parentId, parts.last(), mimeType = null)
+            ?: return null
+        val mime = remote.optString("mimeType")
+        if (mime == "application/vnd.google-apps.folder") return null
+        val fileId = remote.optString("id").takeIf { it.isNotBlank() } ?: return null
+        val bytes = runCatching { downloadDriveFile(accessToken, fileId) }.getOrNull() ?: return null
+        val json = runCatching { JSONObject(String(bytes, StandardCharsets.UTF_8)) }.getOrNull()
+            ?: return null
+        return FileEditLock(
+            path = json.optString("path").ifBlank { relativePath },
+            holderEmail = json.optString("holderEmail").takeIf { it.isNotBlank() },
+            holderName = json.optString("holderName").takeIf { it.isNotBlank() },
+            deviceId = json.optString("deviceId").takeIf { it.isNotBlank() },
+            since = json.optString("since").takeIf { it.isNotBlank() },
+            heartbeat = json.optString("heartbeat").takeIf { it.isNotBlank() },
+            fileId = fileId,
+            parentId = parentId,
+        )
+    }
+
+    private fun writeFileLock(
+        accessToken: String,
+        projectFolderId: String,
+        relativePath: String,
+        payload: JSONObject,
+    ) {
+        val lockRel = "$LOCK_DIR_NAME/$relativePath.json"
+        val parts = lockRel.split('/').filter { it.isNotEmpty() }
+        val fileName = parts.last()
+        val parentRel = parts.dropLast(1).joinToString("/")
+        val parentId = if (parentRel.isEmpty()) {
+            projectFolderId
+        } else {
+            ensurePathFolders(accessToken, projectFolderId, parentRel)
+        }
+        val existing = findNamedChild(accessToken, parentId, fileName, mimeType = null)
+        val tmp = File.createTempFile("undertwig-lock-", ".json")
+        try {
+            tmp.writeText(payload.toString(2))
+            uploadFile(
+                accessToken = accessToken,
+                parentId = parentId,
+                fileName = fileName,
+                file = tmp,
+                existingId = existing?.optString("id")?.takeIf { it.isNotBlank() },
+            )
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun trashDriveFile(accessToken: String, fileId: String) {
+        val url = "$DRIVE_API/files/${Uri.encode(fileId)}?supportsAllDrives=true"
+        val body = """{"trashed":true}""".toByteArray(StandardCharsets.UTF_8)
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "PATCH"
+            doOutput = true
+            connectTimeout = 30_000
+            readTimeout = 60_000
+            setRequestProperty("Authorization", "Bearer $accessToken")
+            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            setRequestProperty("Content-Length", body.size.toString())
+        }
+        try {
+            connection.outputStream.use { it.write(body) }
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                throwDriveHttpError(code, connection, "Could not release edit lock.")
+            }
+        } finally {
+            connection.disconnect()
+        }
     }
 
     /**
@@ -709,9 +720,6 @@ class DriveSyncRepository(
         accessToken: String,
         projectId: String,
         projectName: String,
-        resolution: DriveConflictResolution = DriveConflictResolution.TakeCloud,
-        prefetchedConflicts: List<DriveFileConflict>? = null,
-        prefetchedFiles: Map<String, ByteArray>? = null,
     ): Int = withContext(Dispatchers.IO) {
         val summary = projects.listProjects().firstOrNull { it.id == projectId }
             ?: error("Open a project first.")
@@ -743,83 +751,22 @@ class DriveSyncRepository(
             )
         }
 
-        val files = if (prefetchedFiles != null) {
-            prefetchedFiles
-        } else {
-            val downloaded = linkedMapOf<String, ByteArray>()
-            for (entry in fileEntries) {
-                coroutineContext.ensureActive()
-                downloaded[entry.path] = downloadDriveFile(accessToken, entry.id)
-            }
-            downloaded
-        }
-
-        val conflicts = prefetchedConflicts ?: previewLoadConflicts(projectId, files)
-        if (conflicts.isNotEmpty() && resolution == DriveConflictResolution.Cancel) {
-            error("Load cancelled because of local edits.")
-        }
-        if (conflicts.isNotEmpty() && resolution == DriveConflictResolution.KeepBoth) {
-            stashLocalLoadConflicts(projectId, conflicts.map { it.path })
-            val stashBytes = linkedMapOf<String, ByteArray>()
-            for (path in projects.listFiles(projectId)) {
-                if (isConflictCopyPath(path)) {
-                    val file = projects.existingFile(projectId, path) ?: continue
-                    stashBytes[path] = file.readBytes()
-                }
-            }
-            projects.replaceProjectContents(
-                projectId = projectId,
-                name = name,
-                driveFolderId = folderId,
-                role = role,
-                ownerEmail = owner ?: firstOwnerEmail(meta),
-                folders = folders,
-                files = files + stashBytes,
-            )
-        } else {
-            projects.replaceProjectContents(
-                projectId = projectId,
-                name = name,
-                driveFolderId = folderId,
-                role = role,
-                ownerEmail = owner ?: firstOwnerEmail(meta),
-                folders = folders,
-                files = files,
-            )
-        }
-
-        recordBaselineFromLocal(projectId, fileEntries.associateBy { it.path })
-        projects.listFiles(projectId).size
-    }
-
-    /**
-     * Download remote bytes for conflict preview without writing them yet.
-     */
-    suspend fun downloadProjectFilesForLoad(
-        accessToken: String,
-        projectId: String,
-        projectName: String,
-    ): Pair<String, Map<String, ByteArray>> = withContext(Dispatchers.IO) {
-        val summary = projects.listProjects().firstOrNull { it.id == projectId }
-            ?: error("Open a project first.")
-        val name = projectName.trim().ifEmpty { summary.name }
-        val folderId = resolveProjectFolderId(accessToken, projectId, name)
-            ?: error(
-                "“$name” was not found on Google Drive. Save it once from this device, or open it from Cloud first.",
-            )
-        val entries = listFolderTree(accessToken, folderId, "")
-        val fileEntries = entries.filter { !it.isFolder }
-        if (fileEntries.isEmpty()) {
-            error(
-                "“$name” has no downloadable files yet. Open it in Undertwig on the web and Save, then try again.",
-            )
-        }
         val files = linkedMapOf<String, ByteArray>()
         for (entry in fileEntries) {
             coroutineContext.ensureActive()
             files[entry.path] = downloadDriveFile(accessToken, entry.id)
         }
-        folderId to files
+
+        projects.replaceProjectContents(
+            projectId = projectId,
+            name = name,
+            driveFolderId = folderId,
+            role = role,
+            ownerEmail = owner ?: firstOwnerEmail(meta),
+            folders = folders,
+            files = files,
+        )
+        files.size
     }
 
     /**
@@ -866,9 +813,7 @@ class DriveSyncRepository(
             ownerEmail = owner,
             folders = folders,
             files = files,
-        ).also { projectId ->
-            recordBaselineFromLocal(projectId, fileEntries.associateBy { it.path })
-        }
+        )
     }
 
     private fun listChildren(accessToken: String, folderId: String): List<JSONObject> {
@@ -880,7 +825,7 @@ class DriveSyncRepository(
                 "$DRIVE_API/files?supportsAllDrives=true&includeItemsFromAllDrives=true" +
                     "&pageSize=100" +
                     "&fields=" + URLEncoder.encode(
-                        "nextPageToken,files(id,name,mimeType,modifiedTime,md5Checksum,owners)",
+                        "nextPageToken,files(id,name,mimeType,modifiedTime,owners)",
                         "UTF-8",
                     ) +
                     "&q=" + URLEncoder.encode(query, "UTF-8")
@@ -908,6 +853,9 @@ class DriveSyncRepository(
             val name = child.optString("name").takeIf { it.isNotBlank() } ?: continue
             val mime = child.optString("mimeType")
             val path = if (prefix.isEmpty()) name else "$prefix/$name"
+            // Hide per-file edit locks from the LaTeX project tree.
+            if (prefix.isEmpty() && name == LOCK_DIR_NAME) continue
+            if (path == LOCK_DIR_NAME || path.startsWith("$LOCK_DIR_NAME/")) continue
             // Skip Google Docs/Sheets/etc. — Undertwig stores plain project files.
             if (mime.startsWith("application/vnd.google-apps.") &&
                 mime != "application/vnd.google-apps.folder"
@@ -915,25 +863,10 @@ class DriveSyncRepository(
                 continue
             }
             if (mime == "application/vnd.google-apps.folder") {
-                out += DriveTreeEntry(
-                    path = path,
-                    name = name,
-                    id = id,
-                    mimeType = mime,
-                    isFolder = true,
-                    modifiedTime = child.optString("modifiedTime").takeIf { it.isNotBlank() },
-                )
+                out += DriveTreeEntry(path = path, name = name, id = id, mimeType = mime, isFolder = true)
                 out += listFolderTree(accessToken, id, path)
             } else {
-                out += DriveTreeEntry(
-                    path = path,
-                    name = name,
-                    id = id,
-                    mimeType = mime,
-                    isFolder = false,
-                    md5Checksum = child.optString("md5Checksum").takeIf { it.isNotBlank() },
-                    modifiedTime = child.optString("modifiedTime").takeIf { it.isNotBlank() },
-                )
+                out += DriveTreeEntry(path = path, name = name, id = id, mimeType = mime, isFolder = false)
             }
         }
         return out
@@ -1080,7 +1013,7 @@ class DriveSyncRepository(
         fileName: String,
         file: File,
         existingId: String?,
-    ): JSONObject? {
+    ) {
         val mime = mimeForPath(fileName)
         val metadata = JSONObject()
             .put("name", fileName)
@@ -1102,14 +1035,11 @@ class DriveSyncRepository(
         }
         val bytes = body.toByteArray()
 
-        val fields = "id,name,md5Checksum,modifiedTime"
         val url = if (existingId.isNullOrBlank()) {
-            "$DRIVE_UPLOAD/files?uploadType=multipart&supportsAllDrives=true&fields=" +
-                URLEncoder.encode(fields, "UTF-8")
+            "$DRIVE_UPLOAD/files?uploadType=multipart&supportsAllDrives=true&fields=id,name"
         } else {
             "$DRIVE_UPLOAD/files/${Uri.encode(existingId)}" +
-                "?uploadType=multipart&supportsAllDrives=true&fields=" +
-                URLEncoder.encode(fields, "UTF-8")
+                "?uploadType=multipart&supportsAllDrives=true&fields=id,name"
         }
         val method = if (existingId.isNullOrBlank()) "POST" else "PATCH"
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -1126,96 +1056,14 @@ class DriveSyncRepository(
             val code = connection.responseCode
             if (code !in 200..299) {
                 if (!existingId.isNullOrBlank() && code == 404) {
-                    return uploadFile(accessToken, parentId, fileName, file, existingId = null)
+                    uploadFile(accessToken, parentId, fileName, file, existingId = null)
+                    return
                 }
                 throwDriveHttpError(code, connection, "Could not upload $fileName to Google Drive.")
             }
-            val raw = connection.inputStream.bufferedReader().use { it.readText() }
-            return runCatching { JSONObject(raw) }.getOrNull()
         } finally {
             connection.disconnect()
         }
-    }
-
-    private fun sha256Hex(bytes: ByteArray): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
-        return digest.joinToString("") { b -> "%02x".format(b) }
-    }
-
-    private fun conflictStamp(): String {
-        val fmt = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
-        fmt.timeZone = TimeZone.getDefault()
-        return fmt.format(Date())
-    }
-
-    private fun conflictCopyRelativePath(relPath: String, stamp: String): String {
-        val parts = relPath.split('/').toMutableList()
-        val name = parts.removeLastOrNull() ?: "file"
-        val dot = name.lastIndexOf('.')
-        val newName = if (dot > 0) {
-            name.substring(0, dot) + ".conflict-" + stamp + name.substring(dot)
-        } else {
-            "$name.conflict-$stamp"
-        }
-        parts += newName
-        return parts.joinToString("/")
-    }
-
-    private fun isConflictCopyPath(path: String): Boolean =
-        Regex("""\.conflict-\d{8}-\d{6}""").containsMatchIn(path)
-
-    fun previewLoadConflicts(
-        projectId: String,
-        remoteFiles: Map<String, ByteArray>,
-    ): List<DriveFileConflict> {
-        val conflicts = mutableListOf<DriveFileConflict>()
-        for (path in projects.listFiles(projectId)) {
-            if (isConflictCopyPath(path)) continue
-            val local = projects.existingFile(projectId, path) ?: continue
-            val remoteBytes = remoteFiles[path]
-            if (remoteBytes == null) {
-                conflicts += DriveFileConflict(path = path)
-                continue
-            }
-            if (sha256Hex(local.readBytes()) != sha256Hex(remoteBytes)) {
-                conflicts += DriveFileConflict(path = path)
-            }
-        }
-        return conflicts
-    }
-
-    fun stashLocalLoadConflicts(
-        projectId: String,
-        conflictPaths: List<String>,
-    ): List<Pair<String, String>> {
-        val stamp = conflictStamp()
-        val stashed = mutableListOf<Pair<String, String>>()
-        for (path in conflictPaths) {
-            val file = projects.existingFile(projectId, path) ?: continue
-            val copyPath = conflictCopyRelativePath(path, stamp)
-            projects.writeFileBytes(projectId, copyPath, file.readBytes())
-            stashed += path to copyPath
-        }
-        return stashed
-    }
-
-    private fun recordBaselineFromLocal(
-        projectId: String,
-        remoteByPath: Map<String, DriveTreeEntry>,
-    ) {
-        val next = linkedMapOf<String, DriveBaselineEntry>()
-        for (path in projects.listFiles(projectId)) {
-            if (isConflictCopyPath(path)) continue
-            val file = projects.existingFile(projectId, path) ?: continue
-            val remote = remoteByPath[path]
-            next[path] = DriveBaselineEntry(
-                id = remote?.id,
-                md5 = remote?.md5Checksum,
-                modifiedTime = remote?.modifiedTime,
-                contentHash = sha256Hex(file.readBytes()),
-            )
-        }
-        projects.writeDriveBaseline(projectId, next)
     }
 
     private fun getJson(accessToken: String, url: String): JSONObject {
@@ -1316,9 +1164,12 @@ class DriveSyncRepository(
     companion object {
         private const val CLOUD_FOLDER_NAME = "Undertwig"
         private const val INVITED_REGISTRY_NAME = "undertwig-invited-projects-v1.json"
+        private const val LOCK_DIR_NAME = ".undertwig-locks"
+        private const val LOCK_STALE_MS = 2 * 60 * 1000L
         private const val DRIVE_API = "https://www.googleapis.com/drive/v3"
         private const val DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3"
         private const val PREFS = "undertwig_drive"
         private const val KEY_UNDERTWIG_FOLDER = "undertwig_folder_id"
+        private const val KEY_DEVICE_ID = "undertwig_device_id"
     }
 }
