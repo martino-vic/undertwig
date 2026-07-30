@@ -323,24 +323,6 @@
         border-top: 1px solid var(--border);
       }
 
-      .tree-section-cloud .tree-section-body:not(.is-empty) {
-        background: color-mix(in srgb, #3d7ea6 8%, transparent);
-        border-radius: 6px;
-        margin: 0 6px 4px;
-        padding-bottom: 6px;
-      }
-
-      .tree-row.tree-row-cloud .tree-name {
-        color: color-mix(in srgb, var(--text) 92%, #3d7ea6);
-      }
-
-      .tree-row.tree-row-cloud.is-local-copy .tree-name::after {
-        content: " · local";
-        color: var(--muted);
-        font-weight: 500;
-        font-size: 0.92em;
-      }
-
       .tree-row[aria-expanded] .tree-icon {
         color: var(--brand-strong);
       }
@@ -6417,11 +6399,26 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         tree.textContent = "";
         const root = buildTree();
         const currentName = getActiveProjectName();
+        const cloudNames = new Set(
+          (cloudProjectsCache || [])
+            .map(function (project) {
+              return project && project.name;
+            })
+            .filter(Boolean)
+        );
+        const showCloudSection =
+          UndertwigAuth.isLoggedIn() &&
+          UndertwigCloud.isAvailable &&
+          UndertwigCloud.isAvailable();
         const currentNode = currentName
           ? root.children.find((node) => node.type === "folder" && node.path === currentName)
           : null;
+        // When Cloud is visible, Drive-backed locals live under Cloud (not Other).
         const otherNodes = root.children.filter(
-          (node) => node.type === "folder" && node.path !== currentName
+          (node) =>
+            node.type === "folder" &&
+            node.path !== currentName &&
+            !(showCloudSection && cloudNames.has(node.path))
         );
 
         const currentSection = document.createElement("div");
@@ -6477,7 +6474,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           const next = dragSourceProject;
           dragSourceProject = null;
           if (next && next !== getActiveProjectName()) {
-            setCurrentProject(next);
+            promoteProjectToCurrent(next);
           }
         });
 
@@ -6508,7 +6505,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         otherSection.appendChild(otherBody);
         tree.appendChild(otherSection);
 
-        if (UndertwigAuth.isLoggedIn() && UndertwigCloud.isAvailable && UndertwigCloud.isAvailable()) {
+        if (showCloudSection) {
           const cloudDivider = document.createElement("hr");
           cloudDivider.className = "tree-section-divider";
           cloudDivider.setAttribute("aria-hidden", "true");
@@ -6523,68 +6520,98 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
           const cloudBody = document.createElement("div");
           cloudBody.className = "tree-section-body";
-          const localRoots = new Set(listLocalRootProjects(state));
 
           if (cloudProjectsLoading && !cloudProjectsCache.length) {
             cloudBody.classList.add("is-empty");
             cloudBody.textContent = "Loading Google Drive…";
           } else if (cloudProjectsNeedConnect && !cloudProjectsCache.length) {
             cloudBody.classList.add("is-empty");
-            const hint = document.createElement("div");
-            hint.textContent = "Connect Google Drive to list cloud projects.";
-            cloudBody.appendChild(hint);
-            const connectBtn = document.createElement("button");
-            connectBtn.type = "button";
-            connectBtn.className = "tree-row tree-row-cloud";
-            connectBtn.style.paddingLeft = "8px";
-            connectBtn.style.marginTop = "4px";
-            connectBtn.innerHTML =
+            cloudBody.textContent = "Connect Google Drive to list cloud projects.";
+            const connectRow = document.createElement("button");
+            connectRow.type = "button";
+            connectRow.className = "tree-row";
+            connectRow.style.paddingLeft = "8px";
+            connectRow.title = "Connect Google Drive";
+            connectRow.innerHTML =
               '<span class="tree-icon">-</span><span class="tree-name">Connect Drive</span>';
-            connectBtn.addEventListener("click", function (event) {
+            connectRow.addEventListener("click", function (event) {
               event.preventDefault();
               event.stopPropagation();
               refreshCloudProjectsList({ interactive: true });
             });
-            cloudBody.appendChild(connectBtn);
+            // Keep Connect as a normal row under the empty hint.
+            cloudBody.classList.remove("is-empty");
+            cloudBody.textContent = "";
+            const hint = document.createElement("div");
+            hint.className = "tree-section-body is-empty";
+            hint.style.paddingBottom = "0";
+            hint.textContent = "Connect Google Drive to list cloud projects.";
+            cloudBody.appendChild(hint);
+            cloudBody.appendChild(connectRow);
           } else if (cloudProjectsError && !cloudProjectsCache.length) {
             cloudBody.classList.add("is-empty");
             cloudBody.textContent = cloudProjectsError;
-          } else if (!cloudProjectsCache.length) {
-            cloudBody.classList.add("is-empty");
-            cloudBody.textContent = "No projects in Google Drive yet";
           } else {
-            cloudProjectsCache.forEach(function (project) {
-              const row = document.createElement("button");
-              row.type = "button";
-              row.className =
-                "tree-row tree-row-cloud" +
-                (localRoots.has(project.name) ? " is-local-copy" : "");
-              row.style.paddingLeft = "8px";
-              row.title = localRoots.has(project.name)
-                ? "Open “" + project.name + "” (already on this device)"
-                : "Open “" + project.name + "” from Google Drive";
-              row.innerHTML =
-                '<span class="tree-icon">-</span><span class="tree-name"></span>';
-              row.querySelector(".tree-name").textContent = project.name;
-              if (getActiveProjectName() === project.name) {
-                row.classList.add("active");
-              }
-              row.addEventListener("click", function () {
-                openCloudProject(project.name);
+            const cloudNodes = cloudProjectsCache
+              .filter(function (project) {
+                return project && project.name && project.name !== currentName;
+              })
+              .map(function (project) {
+                const localNode = root.children.find(
+                  (node) => node.type === "folder" && node.path === project.name
+                );
+                if (localNode) {
+                  return localNode;
+                }
+                // Drive-only stub until dragged to Current / opened.
+                return {
+                  name: project.name,
+                  path: project.name,
+                  type: "folder",
+                  children: [],
+                  cloudOnly: true,
+                };
               });
-              cloudBody.appendChild(row);
-            });
-            if (cloudProjectsLoading) {
-              const loading = document.createElement("div");
-              loading.className = "tree-section-body is-empty";
-              loading.style.paddingTop = "2px";
-              loading.textContent = "Refreshing…";
-              cloudBody.appendChild(loading);
+
+            if (!cloudNodes.length) {
+              cloudBody.classList.add("is-empty");
+              cloudBody.textContent = cloudProjectsLoading
+                ? "Refreshing…"
+                : "No projects in Google Drive yet";
+            } else {
+              cloudNodes.forEach(function (node) {
+                cloudBody.appendChild(
+                  renderNode(node, 0, {
+                    section: "cloud",
+                    projectDraggable: true,
+                    cloudOnly: Boolean(node.cloudOnly),
+                  })
+                );
+              });
+              if (cloudProjectsLoading) {
+                const loading = document.createElement("div");
+                loading.className = "tree-section-body is-empty";
+                loading.style.paddingTop = "2px";
+                loading.textContent = "Refreshing…";
+                cloudBody.appendChild(loading);
+              }
             }
           }
           cloudSection.appendChild(cloudBody);
           tree.appendChild(cloudSection);
         }
+      }
+
+      function promoteProjectToCurrent(projectName) {
+        const name = String(projectName || "").trim();
+        if (!name || name === getActiveProjectName()) {
+          return;
+        }
+        if (listLocalRootProjects(state).includes(name)) {
+          setCurrentProject(name);
+          return;
+        }
+        openCloudProject(name);
       }
 
       async function refreshCloudProjectsList(options) {
@@ -6787,6 +6814,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const isCollapsed = isFolder && collapsedFolders.has(node.path);
         const isRootProject = isFolder && !node.path.includes("/");
         const projectDraggable = Boolean(opts.projectDraggable && isRootProject);
+        const cloudOnly = Boolean(opts.cloudOnly && isRootProject);
 
         const row = document.createElement("button");
         row.type = "button";
@@ -6799,7 +6827,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           row.title = isCollapsed ? `Expand ${node.name}` : `Collapse ${node.name}`;
         }
         if (projectDraggable) {
-          row.title = "Drag to Current to make this the active project";
+          row.title = cloudOnly
+            ? "Drag to Current to download from Google Drive and open"
+            : "Drag to Current to make this the active project";
           row.draggable = true;
         }
         row.innerHTML = `<span class="tree-icon">${isFolder ? (isCollapsed ? ">" : "v") : "-"}</span><span class="tree-name"></span>`;
@@ -6807,6 +6837,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         if (isFolder) {
           row.addEventListener("click", () => {
+            if (cloudOnly) {
+              promoteProjectToCurrent(node.path);
+              return;
+            }
             if (collapsedFolders.has(node.path)) {
               collapsedFolders.delete(node.path);
             } else {
