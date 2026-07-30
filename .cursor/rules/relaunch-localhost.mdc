@@ -1,0 +1,15 @@
+---
+description: Relaunch Undertwig on localhost after every agent turn
+alwaysApply: true
+---
+
+# Relaunch localhost after every prompt
+
+At the **end of every agent turn** (after finishing the user’s request), always relaunch the local Undertwig static server so the user can hard-refresh immediately:
+
+1. Stop any existing listener on `127.0.0.1:8080` (e.g. `fuser -k 8080/tcp` or kill the `python3 -m http.server 8080` process).
+2. Start fresh from the repo root:
+   `python3 -m http.server 8080 --bind 127.0.0.1`
+3. Confirm it responds, then tell the user the URL: **http://127.0.0.1:8080/**
+
+Do this even when the turn only answered a question or only edited files (no deploy required). Skip only if the user explicitly asks not to run a local server.
