@@ -889,6 +889,9 @@
     if (!name) {
       throw new Error("Missing project name.");
     }
+    if (name.toLowerCase() === String(CLOUD_FOLDER_NAME).toLowerCase()) {
+      throw new Error('Project name cannot be "' + CLOUD_FOLDER_NAME + '".');
+    }
 
     const existingId = getMappedFolderId(name);
     const existingRole = getMappedRole(name);
@@ -899,11 +902,27 @@
         writeRole(existingRole);
         return existingId;
       }
-      const meta = await fetchDriveFileMeta(existingId, "id,trashed,mimeType");
-      if (isDriveFolderMeta(meta)) {
+      const meta = await fetchDriveFileMeta(
+        existingId,
+        "id,name,trashed,mimeType,parents"
+      );
+      const rootId = await ensureUndertwigFolder();
+      const namedOk =
+        isDriveFolderMeta(meta) &&
+        String(meta.name || "") === name &&
+        String(meta.id) !== String(rootId);
+      const underUndertwig =
+        namedOk &&
+        Array.isArray(meta.parents) &&
+        meta.parents.some(function (parentId) {
+          return String(parentId) === String(rootId);
+        });
+      if (namedOk && underUndertwig) {
         writeActiveFolderId(existingId);
+        writeRole("owner");
         return existingId;
       }
+      // Stale map (Undertwig root, renamed folder, or legacy JSON id) — rebuild.
       removeMappedProject(name);
       if (cachedActiveFolderId === existingId) {
         writeActiveFolderId(null);
@@ -918,8 +937,12 @@
       return sharedId;
     }
 
+    // Owner path: My Drive / Undertwig / <projectName> /
     const rootId = await ensureUndertwigFolder();
     const folderId = await ensureChildFolder(rootId, name);
+    if (!folderId || String(folderId) === String(rootId)) {
+      throw new Error('Could not create project folder “' + name + '” under Undertwig.');
+    }
     setMappedProject(name, folderId, "owner");
     writeActiveFolderId(folderId);
     writeRole("owner");
@@ -1485,9 +1508,13 @@
 
   async function syncOneProject(state, projectName, options) {
     const opts = options || {};
+    const name = String(projectName || "").trim();
+    if (!name) {
+      throw new Error("Missing project name.");
+    }
     try {
-      const folderId = await ensureProjectFolder(projectName);
-      await syncFilesIntoExistingFolder(folderId, state, projectName, opts);
+      const folderId = await ensureProjectFolder(name);
+      await syncFilesIntoExistingFolder(folderId, state, name, opts);
       writeRole("owner");
       return folderId;
     } catch (error) {
@@ -1497,8 +1524,8 @@
       }
       // Stale cached IDs (often a legacy JSON file) — rebuild Undertwig folders once.
       clearFolderCaches();
-      const folderId = await ensureProjectFolder(projectName);
-      await syncFilesIntoExistingFolder(folderId, state, projectName, opts);
+      const folderId = await ensureProjectFolder(name);
+      await syncFilesIntoExistingFolder(folderId, state, name, opts);
       writeRole("owner");
       return folderId;
     }
@@ -1521,8 +1548,10 @@
         throwIfAborted(signal);
         await connect();
         throwIfAborted(signal);
-        const projectName =
-          opts.projectName || inferProjectName(state.activeFile) || listRootProjects(state)[0];
+        // Only the Current project folder is synced: Undertwig / <projectName> / …
+        const projectName = String(
+          opts.projectName || inferProjectName(state.activeFile) || ""
+        ).trim();
 
         // Shared / invited projects always write into the owner's folder.
         if (projectName && isCurrentProjectShared(projectName)) {
@@ -1536,7 +1565,7 @@
           }
           setMappedProject(projectName, sharedId, cachedRole || "writer");
           await syncFilesIntoExistingFolder(sharedId, state, projectName, syncOpts);
-          return { folderIds: [sharedId], role: cachedRole };
+          return { folderIds: [sharedId], role: cachedRole, projectName: projectName };
         }
 
         if (isCollaborator() && !projectName) {
@@ -1547,18 +1576,18 @@
           throw new Error("Select a file inside the shared project before saving.");
         }
 
-        const projects = opts.projectName ? [opts.projectName] : listRootProjects(state);
-        if (!projects.length) {
+        if (!projectName) {
           await ensureUndertwigFolder();
           writeRole("owner");
-          return { folderIds: [] };
+          throw new Error("Set a current project before saving to Google Drive.");
         }
-        const folderIds = [];
-        for (let i = 0; i < projects.length; i += 1) {
-          throwIfAborted(signal);
-          folderIds.push(await syncOneProject(state, projects[i], syncOpts));
-        }
-        return { folderIds: folderIds, role: "owner" };
+
+        const folderId = await syncOneProject(state, projectName, syncOpts);
+        return {
+          folderIds: folderId ? [folderId] : [],
+          role: "owner",
+          projectName: projectName,
+        };
       } finally {
         if (signal && activeOperationSignal === signal) {
           activeOperationSignal = previousSignal;
@@ -2264,7 +2293,7 @@
       }
     }
 
-    // Owner path: ensure Undertwig exists and upload the current project only.
+    // Owner path: ensure Undertwig/<current project>/ exists and upload that project only.
     try {
       await ensureUndertwigFolder();
     } catch (error) {
@@ -2275,24 +2304,21 @@
       clearFolderCaches();
       await ensureUndertwigFolder();
     }
-    const projects = listRootProjects(localState);
-    if (!projects.length) {
-      writeRole("owner");
-      return { project: localState, source: "uploaded", role: "owner" };
-    }
-
-    const activeProject = projectName || projects[0];
+    const activeProject = String(
+      projectName || listRootProjects(localState)[0] || ""
+    ).trim();
     if (!activeProject) {
       writeRole("owner");
       return { project: localState, source: "uploaded", role: "owner" };
     }
-    await syncOneProject(localState, activeProject);
+    const folderId = await syncOneProject(localState, activeProject);
 
     return {
       project: localState,
       source: "uploaded",
       role: "owner",
-      folderId: getProjectFolderId(),
+      folderId: folderId || getProjectFolderId(),
+      projectName: activeProject,
     };
   }
 
