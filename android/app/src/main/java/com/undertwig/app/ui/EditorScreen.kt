@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -54,7 +56,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -63,9 +64,11 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
@@ -73,12 +76,16 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import android.Manifest
 import android.content.pm.PackageManager
@@ -93,7 +100,7 @@ import com.undertwig.app.data.LatexEngineId
 import com.undertwig.app.data.ProjectDownloadInfo
 import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun EditorScreen(
     state: EditorUiState,
@@ -200,16 +207,44 @@ fun EditorScreen(
     var overflowOpen by remember { mutableStateOf(false) }
     val imeVisible = WindowInsets.isImeVisible
     val editorScroll = rememberScrollState()
-
-    LaunchedEffect(imeVisible) {
-        if (!imeVisible) return@LaunchedEffect
-        // After the IME resizes the window, nudge scroll so the caret area stays reachable.
-        delay(80)
-        val max = editorScroll.maxValue
-        if (max > 0) {
-            val bump = (max * 0.35f).toInt().coerceIn(120, 480)
-            editorScroll.animateScrollTo((editorScroll.value + bump).coerceAtMost(max))
+    val editorScope = rememberCoroutineScope()
+    val bringCursorIntoView = remember { BringIntoViewRequester() }
+    var editorLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var textFieldValue by remember(state.projectId, state.activePath, state.editorRevision) {
+        mutableStateOf(TextFieldValue(state.editorText, TextRange(0)))
+    }
+    val darkEditor = isSystemInDarkTheme()
+    val texHighlight = remember(state.activePath, darkEditor, state.editorRevision) {
+        if (isHighlightableTexPath(state.activePath)) {
+            TexVisualTransformation(darkEditor)
+        } else {
+            VisualTransformation.None
         }
+    }
+
+    fun scrollCursorAboveKeyboard(layout: TextLayoutResult) {
+        val original = textFieldValue.selection.max.coerceIn(0, textFieldValue.text.length)
+        val transformed = texHighlight.filter(AnnotatedString(textFieldValue.text))
+        val mapped = transformed.offsetMapping
+            .originalToTransformed(original)
+            .coerceIn(0, layout.layoutInput.text.length)
+        val cursor = layout.getCursorRect(mapped)
+        // Extra space below the caret so the keyboard does not cover the line being typed.
+        val target = Rect(
+            left = cursor.left,
+            top = cursor.top,
+            right = cursor.right.coerceAtLeast(cursor.left + 1f),
+            bottom = cursor.bottom + 96f,
+        )
+        editorScope.launch {
+            bringCursorIntoView.bringIntoView(target)
+        }
+    }
+
+    LaunchedEffect(imeVisible, textFieldValue.selection, textFieldValue.text.length) {
+        if (!imeVisible) return@LaunchedEffect
+        delay(60)
+        editorLayout?.let { scrollCursorAboveKeyboard(it) }
     }
 
     Scaffold(
@@ -354,72 +389,69 @@ fun EditorScreen(
             }
         },
     ) { padding ->
-        PullToRefreshBox(
-            isRefreshing = state.loadingFile,
-            onRefresh = {
-                if (authUser != null && !state.loadingFile) {
-                    onLoadFromDrive()
-                }
-            },
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                .windowInsetsPadding(WindowInsets.navigationBars),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.navigationBars),
-            ) {
-                if (!imeVisible) {
-                    key(state.projectId) {
-                        ProjectFileTree(
-                            files = state.files,
-                            folders = state.folders,
-                            activePath = state.activePath,
-                            currentDir = browserDir,
-                            onCurrentDirChange = { browserDir = it },
-                            onSelectFile = { path ->
-                                browserDir = parentDirOf(path)
-                                onSelectFile(path)
-                            },
-                            onLongPressTarget = { actionTarget = it },
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        )
-                    }
-                }
-
-                val darkEditor = isSystemInDarkTheme()
-                val texHighlight = remember(state.activePath, darkEditor, state.editorRevision) {
-                    if (isHighlightableTexPath(state.activePath)) {
-                        TexVisualTransformation(darkEditor)
-                    } else {
-                        VisualTransformation.None
-                    }
-                }
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .pointerInput(state.inWritingRoom) {
-                            if (!state.inWritingRoom) return@pointerInput
-                            awaitPointerEventScope {
-                                while (true) {
-                                    awaitPointerEvent()
-                                    onWritingRoomActivity()
-                                }
-                            }
+            if (!imeVisible) {
+                key(state.projectId) {
+                    ProjectFileTree(
+                        files = state.files,
+                        folders = state.folders,
+                        activePath = state.activePath,
+                        currentDir = browserDir,
+                        onCurrentDirChange = { browserDir = it },
+                        onSelectFile = { path ->
+                            browserDir = parentDirOf(path)
+                            onSelectFile(path)
                         },
+                        onLongPressTarget = { actionTarget = it },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .pointerInput(state.inWritingRoom) {
+                        if (!state.inWritingRoom) return@pointerInput
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent()
+                                onWritingRoomActivity()
+                            }
+                        }
+                    },
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(editorScroll)
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = if (imeVisible) 48.dp else 0.dp),
                 ) {
                     key(state.projectId, state.activePath, state.editorRevision) {
                         BasicTextField(
-                            value = state.editorText,
-                            onValueChange = onEditorChange,
+                            value = textFieldValue,
+                            onValueChange = { next ->
+                                textFieldValue = next
+                                onEditorChange(next.text)
+                            },
                             readOnly = state.editorReadOnly,
+                            onTextLayout = { layout ->
+                                editorLayout = layout
+                                if (imeVisible) {
+                                    scrollCursorAboveKeyboard(layout)
+                                }
+                            },
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 12.dp)
-                                .padding(bottom = if (imeVisible) 72.dp else 0.dp)
-                                .verticalScroll(editorScroll),
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = 240.dp)
+                                .bringIntoViewRequester(bringCursorIntoView),
                             textStyle = TextStyle(
                                 color = MaterialTheme.colorScheme.onBackground,
                                 fontFamily = FontFamily.Monospace,
@@ -431,18 +463,19 @@ fun EditorScreen(
                         )
                     }
                 }
+            }
 
-                if (!imeVisible) {
-                    state.writingRoomOccupiedMessage?.let {
-                        Text(
-                            "Room occupied",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
-                    }
+            if (!imeVisible) {
+                state.writingRoomOccupiedMessage?.let {
+                    Text(
+                        "Room occupied",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                }
 
-                    Row(
+                Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 10.dp, vertical = 10.dp)
@@ -537,7 +570,6 @@ fun EditorScreen(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                         )
                     }
-                }
             }
         }
     }
