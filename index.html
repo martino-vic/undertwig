@@ -3044,7 +3044,7 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260729e"></script>
-    <script src="cloud-storage.js?v=20260730a"></script>
+    <script src="cloud-storage.js?v=20260730b"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -6511,7 +6511,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return names;
       }
 
-      /** Own Drive project: listed under Undertwig/ or mapped as owner (not invited). */
+      /** Own Drive project: currently listed under My Drive / Undertwig /. */
       function isOwnCloudProjectName(projectName, invitedNames) {
         const name = String(projectName || "").trim();
         if (!name) {
@@ -6523,16 +6523,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (isInvitedProjectName(name)) {
           return false;
         }
-        if (
-          (cloudProjectsCache || []).some(function (project) {
-            return project && project.name === name;
-          })
-        ) {
-          return true;
-        }
-        return Boolean(
-          UndertwigCloud.getMappedRole && UndertwigCloud.getMappedRole(name) === "owner"
-        );
+        return (cloudProjectsCache || []).some(function (project) {
+          return project && project.name === name;
+        });
       }
 
       function ownedCloudProjectNames(invitedNames) {
@@ -6540,11 +6533,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         (cloudProjectsCache || []).forEach(function (project) {
           if (project && project.name && !(invitedNames && invitedNames.has(project.name))) {
             names.add(project.name);
-          }
-        });
-        listLocalRootProjects(state).forEach(function (name) {
-          if (isOwnCloudProjectName(name, invitedNames)) {
-            names.add(name);
           }
         });
         return names;

@@ -1901,6 +1901,7 @@
     const rootId = await ensureUndertwigFolder();
     const children = await listChildren(rootId);
     const projects = [];
+    const listedNames = {};
     for (let i = 0; i < children.length; i += 1) {
       const child = children[i];
       if (!child || child.mimeType !== "application/vnd.google-apps.folder" || !child.id) {
@@ -1910,16 +1911,32 @@
       if (!name) {
         continue;
       }
+      listedNames[name] = true;
       projects.push({
         id: String(child.id),
         name: name,
         modifiedTime: child.modifiedTime || null,
       });
       // Keep map warm so Save/Load resolve faster.
-      if (!getMappedFolderId(name)) {
+      const existingRole = getMappedRole(name);
+      if (!getMappedFolderId(name) || existingRole === "owner" || !existingRole) {
         setMappedProject(name, child.id, "owner");
       }
     }
+    // Drop stale owner maps for folders that no longer exist under Undertwig/.
+    Object.keys(projectFolderMap || {}).forEach(function (name) {
+      if (listedNames[name]) {
+        return;
+      }
+      if (getMappedRole(name) !== "owner") {
+        return;
+      }
+      const removedId = getMappedFolderId(name);
+      removeMappedProject(name);
+      if (removedId && cachedActiveFolderId === removedId) {
+        writeActiveFolderId(null);
+      }
+    });
     projects.sort(function (a, b) {
       return a.name.localeCompare(b.name);
     });
