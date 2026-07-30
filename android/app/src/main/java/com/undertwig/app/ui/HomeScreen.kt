@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -97,6 +98,22 @@ fun HomeScreen(
                 },
                 actions = {
                     if (authUser != null) {
+                        IconButton(
+                            onClick = onRefreshCloud,
+                            enabled = !cloudLoading,
+                        ) {
+                            if (cloudLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Refresh Google Drive projects",
+                                )
+                            }
+                        }
                         IconButton(onClick = { showAccount = true }) {
                             Icon(
                                 Icons.Default.AccountCircle,
