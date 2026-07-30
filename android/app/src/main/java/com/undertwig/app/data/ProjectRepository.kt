@@ -294,6 +294,40 @@ class ProjectRepository(context: Context) {
         return ProjectSummary(id = id, name = safeName, updatedAt = System.currentTimeMillis())
     }
 
+    /**
+     * Duplicate [sourceId] into a new local-only project named [copyName]
+     * (no Drive link). Used when exiting the writing room with “Save a local copy”.
+     */
+    fun duplicateProjectLocally(sourceId: String, copyName: String): ProjectSummary {
+        val src = projectDir(sourceId)
+        require(src.isDirectory) { "Project not found." }
+        val id = UUID.randomUUID().toString()
+        val dest = File(root, id).also { it.mkdirs() }
+        src.walkTopDown().forEach { file ->
+            if (!file.isFile || file.name == META_FILE) return@forEach
+            val rel = file.relativeTo(src).path
+            if (rel.contains("..")) return@forEach
+            val target = File(dest, rel)
+            target.parentFile?.mkdirs()
+            file.copyTo(target, overwrite = true)
+        }
+        val safeName = copyName.trim().ifEmpty { "Untitled (copy)" }
+        writeMeta(dest, safeName)
+        return ProjectSummary(id = id, name = safeName, updatedAt = System.currentTimeMillis())
+    }
+
+    fun allocateCopyName(baseName: String): String {
+        val base = baseName.trim().ifEmpty { "Untitled" }
+        val taken = listProjects().map { it.name }.toHashSet()
+        var name = "$base (copy)"
+        var n = 2
+        while (name in taken) {
+            name = "$base (copy $n)"
+            n += 1
+        }
+        return name
+    }
+
     fun renameProject(id: String, name: String) {
         val dir = projectDir(id)
         val meta = readMeta(dir) ?: JSONObject()

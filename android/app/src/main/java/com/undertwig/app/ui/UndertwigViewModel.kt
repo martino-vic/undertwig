@@ -91,8 +91,15 @@ data class EditorUiState(
 sealed class WritingRoomPrompt {
     data class Enter(val projectName: String) : WritingRoomPrompt()
     data class Exit(val projectName: String) : WritingRoomPrompt()
+    data class ExitUnsaved(val projectName: String) : WritingRoomPrompt()
     data class Occupied(val message: String) : WritingRoomPrompt()
     data class IdleExit(val minutes: Int, val projectName: String) : WritingRoomPrompt()
+}
+
+enum class UnsavedExitChoice {
+    SaveCloud,
+    SaveLocalCopy,
+    Discard,
 }
 
 class UndertwigViewModel(application: Application) : AndroidViewModel(application) {
@@ -776,12 +783,28 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     fun exitWritingRoom(activity: Activity, skipConfirm: Boolean = false) {
         val projectId = heldWritingRoomProjectId ?: return
         val projectName = _editor.value.projectName
+        val state = _editor.value
+        if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
+            runCatching {
+                repo.writeFile(state.projectId, state.activePath, state.editorText)
+            }
+        }
+        if (_editor.value.dirty) {
+            _editor.update {
+                it.copy(writingRoomPrompt = WritingRoomPrompt.ExitUnsaved(projectName))
+            }
+            return
+        }
         if (!skipConfirm) {
             _editor.update {
                 it.copy(writingRoomPrompt = WritingRoomPrompt.Exit(projectName))
             }
             return
         }
+        performExitWritingRoom(activity, projectName)
+    }
+
+    private fun performExitWritingRoom(activity: Activity, projectName: String) {
         _editor.update {
             it.copy(
                 inWritingRoom = false,
@@ -791,16 +814,104 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         }
         viewModelScope.launch {
             releaseHeldWritingRoomBestEffort()
-            writingRoomGateDismissedKey = null
+            writingRoomGateDismissedKey = "enter:$projectName"
             _editor.update {
                 it.copy(
                     writingRoomBusy = false,
                     inWritingRoom = false,
+                    dirty = false,
                     status = "You left the writing room for “$projectName”.",
                 )
             }
             refreshWritingRoomStatus(activity)
         }
+    }
+
+    fun resolveUnsavedWritingRoomExit(activity: Activity, choice: UnsavedExitChoice) {
+        val projectId = heldWritingRoomProjectId ?: run {
+            _editor.update { it.copy(writingRoomPrompt = null) }
+            return
+        }
+        val projectName = _editor.value.projectName
+        _editor.update { it.copy(writingRoomPrompt = null, writingRoomBusy = true) }
+        viewModelScope.launch {
+            try {
+                val state = _editor.value
+                if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
+                    runCatching {
+                        repo.writeFile(projectId, state.activePath, state.editorText)
+                    }
+                }
+                when (choice) {
+                    UnsavedExitChoice.SaveCloud -> {
+                        _editor.update {
+                            it.copy(status = "Saving “$projectName” to Google Drive before leaving…")
+                        }
+                        withDriveAccess(activity) { token ->
+                            driveSync.uploadProject(token, projectId, projectName)
+                        }
+                        _editor.update { it.copy(dirty = false) }
+                    }
+                    UnsavedExitChoice.SaveLocalCopy -> {
+                        val copyName = repo.allocateCopyName(projectName)
+                        repo.duplicateProjectLocally(projectId, copyName)
+                        refreshProjects()
+                        _editor.update {
+                            it.copy(
+                                status = "Saved a local drawer copy as “$copyName”. Reloading from Drive…",
+                            )
+                        }
+                        reloadWorkDeskFromDrive(activity, projectId, projectName)
+                    }
+                    UnsavedExitChoice.Discard -> {
+                        _editor.update {
+                            it.copy(status = "Discarding unsaved changes and reloading from Google Drive…")
+                        }
+                        reloadWorkDeskFromDrive(activity, projectId, projectName)
+                    }
+                }
+                setWritingRoomBusy(false)
+                performExitWritingRoom(activity, projectName)
+            } catch (e: CancellationException) {
+                setWritingRoomBusy(false)
+                throw e
+            } catch (e: Exception) {
+                if (isInvalidDriveCredentials(e)) {
+                    authRepo.clearDriveToken()
+                }
+                setWritingRoomBusy(false)
+                _editor.update {
+                    it.copy(
+                        error = e.message ?: "Could not finish leaving the writing room.",
+                        status = "Still in the writing room",
+                        inWritingRoom = true,
+                    )
+                }
+                Toast.makeText(
+                    getApplication(),
+                    e.message ?: "Could not finish leaving the writing room.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    private suspend fun reloadWorkDeskFromDrive(
+        activity: Activity,
+        projectId: String,
+        projectName: String,
+    ) {
+        val previousActive = _editor.value.activePath
+        val fileCount = withDriveAccess(activity) { token ->
+            driveSync.syncProjectFromDrive(token, projectId, projectName)
+        }
+        applyLoadedProjectContents(
+            projectId = projectId,
+            projectName = projectName,
+            previousActive = previousActive,
+            fileCount = fileCount,
+            statusMessage = "Reloaded “$projectName” from Google Drive.",
+        )
     }
 
     /** Snapshot lock identity immediately, then trash on a coroutine (safe across project switches). */
@@ -861,6 +972,10 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 // Stay in the room — restart the idle watch.
                 resetWritingRoomIdleWatch()
             }
+            is WritingRoomPrompt.ExitUnsaved -> {
+                // Stay — keep editing.
+                resetWritingRoomIdleWatch()
+            }
             else -> Unit
         }
         _editor.update { it.copy(writingRoomPrompt = null) }
@@ -891,6 +1006,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             }
             is WritingRoomPrompt.Occupied -> {
                 dismissWritingRoomPrompt()
+            }
+            is WritingRoomPrompt.ExitUnsaved -> {
+                // Choices are handled by resolveUnsavedWritingRoomExit.
             }
             null -> Unit
         }

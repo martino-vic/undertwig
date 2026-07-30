@@ -92,6 +92,9 @@ fun UndertwigApp(
                 },
                 onConfirmWritingRoomPrompt = { viewModel.confirmWritingRoomPrompt(activity) },
                 onDismissWritingRoomPrompt = viewModel::dismissWritingRoomPrompt,
+                onUnsavedWritingRoomExit = { choice ->
+                    viewModel.resolveUnsavedWritingRoomExit(activity, choice)
+                },
                 onWritingRoomActivity = viewModel::noteWritingRoomActivity,
             )
         }

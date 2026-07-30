@@ -4022,6 +4022,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let writingRoomGatePromise = null;
       /** After an explicit Exit, do not auto-resume a leftover held-by-me lock. */
       let writingRoomSuppressResumeKey = null;
+      /** True when the work-desk project changed in this writing-room session since Load/Save. */
+      let writingRoomSessionDirty = false;
       let writingRoomIdleTimer = null;
       let writingRoomIdlePromptOpen = false;
       let cloudStatusMode = "logged-out";
@@ -4305,6 +4307,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                     "” to Google Drive (browser storage is full)." +
                     deleteNote
             );
+            writingRoomSessionDirty = false;
             if (typeof refreshCloudProjectsList === "function") {
               refreshCloudProjectsList();
             }
@@ -5612,6 +5615,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           const file = state.files[state.activeFile];
           if (!file || file.binary) return;
           file.content = value;
+          if (fileLockHeldProject && fileLockHeldProject === getActiveProjectName()) {
+            writingRoomSessionDirty = true;
+          }
           noteWritingRoomActivity();
           persistProject();
           updateMeta();
@@ -6956,9 +6962,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       /**
-       * @param {"enter"|"occupied"|"exit"|"idle"} mode
-       * @param {{minutes?: number}=} options
-       * @returns {Promise<"cancel"|"confirm">}
+       * @param {"enter"|"occupied"|"exit"|"exit-unsaved"|"idle"} mode
+       * @param {{minutes?: number, autoExitMs?: number}=} options
+       * @returns {Promise<"cancel"|"confirm"|"cloud"|"local"|"discard">}
        */
       function showWritingRoomDialog(mode, options) {
         const dialogOpts = options || {};
@@ -7009,6 +7015,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             "”? Others will be able to enter and edit this project.";
           addButton("Stay", "cancel");
           addButton("Exit writing room", "confirm", "modal-confirm");
+        } else if (mode === "exit-unsaved") {
+          title.textContent = "Unsaved changes";
+          message.textContent =
+            "You have unsaved changes. Would you like to save them to the cloud, save a copy to your local drawer, or discard them?";
+          addButton("Stay", "cancel");
+          addButton("Discard", "discard");
+          addButton("Save a local copy", "local");
+          addButton("Save to cloud", "cloud", "modal-confirm");
         } else if (mode === "idle") {
           const minutes = Math.max(
             1,
@@ -7308,6 +7322,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                     projectName +
                     "”. Latest Drive changes are loaded. Exit when you are done."
                 );
+                writingRoomSessionDirty = false;
               } catch (loadError) {
                 setStatus(
                   "You are in the writing room for “" +
@@ -7354,6 +7369,103 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
       }
 
+      function allocateDrawerCopyName(baseName) {
+        const base = String(baseName || "").trim() || "Project";
+        const taken = new Set(listLocalRootProjects(state));
+        let name = base + " (copy)";
+        let n = 2;
+        while (taken.has(name)) {
+          name = base + " (copy " + n + ")";
+          n += 1;
+        }
+        return name;
+      }
+
+      function cloneFileEntry(entry) {
+        if (!entry || typeof entry !== "object") {
+          return { name: "file", content: "", binary: false };
+        }
+        return {
+          name: entry.name || "file",
+          content: entry.content == null ? "" : entry.content,
+          binary: Boolean(entry.binary),
+        };
+      }
+
+      /** Copy the work-desk project into Drawer (local) as “Name (copy)”. */
+      function copyCurrentProjectToDrawer(projectName) {
+        const fromName = String(projectName || "").trim();
+        if (!fromName) {
+          throw new Error("Missing project name.");
+        }
+        const active = state.files[state.activeFile];
+        if (active && !active.binary && UndertwigEditor && UndertwigEditor.getValue) {
+          active.content = UndertwigEditor.getValue();
+        }
+        const toName = allocateDrawerCopyName(fromName);
+        const fromPrefix = fromName + "/";
+        const toPrefix = toName + "/";
+        if (!state.folders.includes(toName)) {
+          state.folders.push(toName);
+        }
+        (state.folders || []).slice().forEach(function (folder) {
+          if (folder === fromName) {
+            return;
+          }
+          if (folder.indexOf(fromPrefix) === 0) {
+            const next = toName + "/" + folder.slice(fromPrefix.length);
+            if (next && !state.folders.includes(next)) {
+              state.folders.push(next);
+            }
+          }
+        });
+        Object.keys(state.files || {}).forEach(function (path) {
+          if (path.indexOf(fromPrefix) !== 0) {
+            return;
+          }
+          const rel = path.slice(fromPrefix.length);
+          if (!rel) {
+            return;
+          }
+          state.files[toPrefix + rel] = cloneFileEntry(state.files[path]);
+        });
+        persistProject({ skipCloud: true });
+        if (typeof renderTree === "function") {
+          renderTree();
+        }
+        return toName;
+      }
+
+      async function reloadCurrentProjectFromDrive(projectName) {
+        const name = String(projectName || getActiveProjectName() || "").trim();
+        if (!name || !UndertwigCloud.pullProjectFromDrive) {
+          return false;
+        }
+        if (!UndertwigCloud.hasAccessToken || !UndertwigCloud.hasAccessToken()) {
+          return false;
+        }
+        const active = state.files[state.activeFile];
+        if (active && !active.binary && UndertwigEditor && UndertwigEditor.getValue) {
+          active.content = UndertwigEditor.getValue();
+        }
+        const pulled = await UndertwigCloud.pullProjectFromDrive(name, {
+          onProgress: function (message) {
+            setStatus(message || "Loading from Google Drive…");
+          },
+        });
+        applyPulledProject(pulled);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (_error) {
+          // Optional.
+        }
+        collapsedFolders.delete(name);
+        persistCollapsedFolders();
+        render();
+        writingRoomSessionDirty = false;
+        return true;
+      }
+
       async function exitWritingRoom(options) {
         const opts = options || {};
         const skipConfirm = Boolean(opts.skipConfirm);
@@ -7361,12 +7473,87 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (!fileLockHeldProject) {
           return;
         }
-        if (!skipConfirm) {
+
+        // Flush the editor buffer before deciding about unsaved changes.
+        const active = state.files[state.activeFile];
+        if (active && !active.binary && UndertwigEditor && UndertwigEditor.getValue) {
+          const latest = UndertwigEditor.getValue();
+          if (latest !== active.content) {
+            active.content = latest;
+            writingRoomSessionDirty = true;
+            persistProject({ skipCloud: true });
+          }
+        }
+
+        if (writingRoomSessionDirty) {
+          const choice = await showWritingRoomDialog("exit-unsaved");
+          if (choice === "cancel") {
+            if (skipConfirm) {
+              // Idle prompt chose exit, but user stayed for unsaved changes.
+              resetWritingRoomIdleWatch();
+            }
+            return;
+          }
+          if (choice === "cloud") {
+            setStatus("Saving “" + projectName + "” to Google Drive before leaving…");
+            try {
+              await UndertwigCloud.saveProject(state, {
+                projectName: projectName,
+                deleteMissing: false,
+              });
+              writingRoomSessionDirty = false;
+              if (typeof refreshCloudProjectsList === "function") {
+                refreshCloudProjectsList();
+              }
+            } catch (error) {
+              setStatus(
+                "Could not save to Google Drive: " +
+                  ((error && error.message) || "unknown error") +
+                  ". Stay in the writing room and try Save.",
+                true
+              );
+              return;
+            }
+          } else if (choice === "local") {
+            try {
+              const copyName = copyCurrentProjectToDrawer(projectName);
+              setStatus(
+                "Saved a local drawer copy as “" +
+                  copyName +
+                  "”. Reloading the work desk from Drive…"
+              );
+              await reloadCurrentProjectFromDrive(projectName);
+            } catch (error) {
+              setStatus(
+                "Could not save a local copy: " +
+                  ((error && error.message) || "unknown error"),
+                true
+              );
+              return;
+            }
+          } else if (choice === "discard") {
+            setStatus("Discarding unsaved changes and reloading from Google Drive…");
+            try {
+              await reloadCurrentProjectFromDrive(projectName);
+            } catch (error) {
+              setStatus(
+                "Could not reload from Drive: " +
+                  ((error && error.message) || "unknown error") +
+                  ". Stay in the writing room and try Load.",
+                true
+              );
+              return;
+            }
+          } else {
+            return;
+          }
+        } else if (!skipConfirm) {
           const choice = await showWritingRoomDialog("exit");
           if (choice !== "confirm") {
             return;
           }
         }
+
         setWritingRoomBusy(true, "exit");
         // Prevent refresh from reclaiming a still-visible lock / reopening the door.
         writingRoomSuppressResumeKey = projectName;
@@ -7374,6 +7561,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           ? "enter:" + projectName
           : null;
         await releaseHeldFileLock();
+        writingRoomSessionDirty = false;
         setWritingRoomBusy(false);
         await refreshWritingRoomStatus();
         if (projectName) {

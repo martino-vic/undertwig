@@ -117,6 +117,7 @@ fun EditorScreen(
     onWritingRoomClick: () -> Unit = {},
     onConfirmWritingRoomPrompt: () -> Unit = {},
     onDismissWritingRoomPrompt: () -> Unit = {},
+    onUnsavedWritingRoomExit: (UnsavedExitChoice) -> Unit = {},
     onWritingRoomActivity: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -793,6 +794,41 @@ fun EditorScreen(
                 confirmButton = {
                     TextButton(onClick = onConfirmWritingRoomPrompt) { Text("Exit writing room") }
                 },
+                dismissButton = {
+                    TextButton(onClick = onDismissWritingRoomPrompt) { Text("Stay") }
+                },
+            )
+        }
+        is WritingRoomPrompt.ExitUnsaved -> {
+            AlertDialog(
+                onDismissRequest = onDismissWritingRoomPrompt,
+                title = { Text("Unsaved changes") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "You have unsaved changes. Would you like to save them to the cloud, save a copy to your local drawer, or discard them?",
+                        )
+                        TextButton(
+                            onClick = { onUnsavedWritingRoomExit(UnsavedExitChoice.SaveCloud) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Save to cloud")
+                        }
+                        TextButton(
+                            onClick = { onUnsavedWritingRoomExit(UnsavedExitChoice.SaveLocalCopy) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Save a local copy")
+                        }
+                        TextButton(
+                            onClick = { onUnsavedWritingRoomExit(UnsavedExitChoice.Discard) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Discard")
+                        }
+                    }
+                },
+                confirmButton = {},
                 dismissButton = {
                     TextButton(onClick = onDismissWritingRoomPrompt) { Text("Stay") }
                 },
