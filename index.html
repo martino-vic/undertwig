@@ -6863,18 +6863,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 "Exit writing room",
                 "Leave the writing room and free this project for others"
               );
-            } else if (occupied) {
-              setControl(
-                writingRoomButton,
-                "Room occupied",
-                fileLockOccupied.message ||
-                  "Someone is currently in the writing room. The writing room has space for one person only at the time."
-              );
             } else {
               setControl(
                 writingRoomButton,
                 "Enter writing room",
-                "Open the writing room door to edit this project"
+                occupied
+                  ? fileLockOccupied.message ||
+                      "Someone is currently in the writing room. The writing room has space for one person only at the time."
+                  : "Open the writing room door to edit this project"
               );
             }
           }
