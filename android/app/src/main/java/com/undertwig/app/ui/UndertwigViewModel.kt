@@ -720,19 +720,47 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         if (!state.writingRoomAvailable || state.writingRoomBusy) return
         if (state.inWritingRoom && heldWritingRoomProjectId == state.projectId) return
         writingRoomGateDismissedKey = null
-        if (state.writingRoomOccupiedMessage != null) {
-            _editor.update {
-                it.copy(
-                    status = "Read-only",
-                    error = state.writingRoomOccupiedMessage,
-                    writingRoomPrompt = WritingRoomPrompt.Occupied(state.writingRoomOccupiedMessage!!),
-                )
-            }
-            return
-        }
+
         if (!confirmed) {
-            _editor.update {
-                it.copy(writingRoomPrompt = WritingRoomPrompt.Enter(state.projectName))
+            // Always re-check Drive so a desktop holder shows "Room occupied"
+            // instead of the Enter dialog from a stale free status.
+            val projectId = state.projectId
+            val projectName = state.projectName
+            fileLockJob?.cancel()
+            fileLockJob = viewModelScope.launch {
+                try {
+                    val lock = withDriveAccess(activity) { token ->
+                        driveSync.readProjectLock(token, projectId, projectName)
+                    }
+                    if (_editor.value.projectId != projectId) return@launch
+                    val mine =
+                        lock != null &&
+                            !lock.deviceId.isNullOrBlank() &&
+                            lock.deviceId == driveSync.deviceId()
+                    if (lock != null && !mine) {
+                        showWritingRoomOccupied(
+                            "${lock.holderLabel()} is currently in the writing room. " +
+                                "The writing room has space for one person only at the time.",
+                        )
+                        return@launch
+                    }
+                    _editor.update {
+                        it.copy(
+                            writingRoomOccupiedMessage = null,
+                            writingRoomPrompt = WritingRoomPrompt.Enter(projectName),
+                            error = null,
+                        )
+                    }
+                } catch (_: Exception) {
+                    val cached = _editor.value.writingRoomOccupiedMessage
+                    if (cached != null) {
+                        showWritingRoomOccupied(cached)
+                    } else {
+                        _editor.update {
+                            it.copy(writingRoomPrompt = WritingRoomPrompt.Enter(projectName))
+                        }
+                    }
+                }
             }
             return
         }
@@ -813,15 +841,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     val message = result.message
                         ?: "Someone is currently in the writing room. The writing room has space for one person only at the time."
                     setWritingRoomBusy(false)
-                    _editor.update {
-                        it.copy(
-                            inWritingRoom = false,
-                            writingRoomOccupiedMessage = message,
-                            status = "Read-only",
-                            error = message,
-                            writingRoomPrompt = WritingRoomPrompt.Occupied(message),
-                        )
-                    }
+                    showWritingRoomOccupied(message)
                 }
             } catch (e: Exception) {
                 setWritingRoomBusy(false)
@@ -1240,6 +1260,18 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private fun showWritingRoomOccupied(message: String) {
+        _editor.update {
+            it.copy(
+                inWritingRoom = false,
+                writingRoomOccupiedMessage = message,
+                status = "Read-only — writing room occupied",
+                error = null,
+                writingRoomPrompt = WritingRoomPrompt.Occupied(message),
+            )
+        }
+    }
+
     private fun stopFileLockHeartbeat() {
         fileLockHeartbeatJob?.cancel()
         fileLockHeartbeatJob = null
@@ -1273,15 +1305,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         stopFileLockHeartbeat()
                         val message = result.message
                             ?: "Someone is currently in the writing room. The writing room has space for one person only at the time."
-                        _editor.update {
-                            it.copy(
-                                inWritingRoom = false,
-                                writingRoomOccupiedMessage = message,
-                                status = "Read-only",
-                                error = message,
-                                writingRoomPrompt = WritingRoomPrompt.Occupied(message),
-                            )
-                        }
+                        showWritingRoomOccupied(message)
                         break
                     }
                 } catch (_: Exception) {

@@ -12,8 +12,8 @@ android {
         applicationId = "com.undertwig.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 71
-        versionName = "0.1.70"
+        versionCode = 72
+        versionName = "0.1.71"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

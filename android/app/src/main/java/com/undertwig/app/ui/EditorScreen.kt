@@ -290,15 +290,6 @@ fun EditorScreen(
                             Icon(Icons.Default.Save, contentDescription = "Save")
                         }
                         if (state.writingRoomAvailable) {
-                            val spinnerFrames = listOf("|", "/", "-", "\\")
-                            var spinnerFrame by remember { mutableIntStateOf(0) }
-                            LaunchedEffect(state.writingRoomBusy) {
-                                if (!state.writingRoomBusy) return@LaunchedEffect
-                                while (true) {
-                                    delay(100)
-                                    spinnerFrame = (spinnerFrame + 1) % spinnerFrames.size
-                                }
-                            }
                             TextButton(
                                 onClick = onWritingRoomClick,
                                 enabled = !state.writingRoomBusy,
@@ -306,11 +297,9 @@ fun EditorScreen(
                                 val label = when {
                                     state.writingRoomBusy &&
                                         state.writingRoomBusyMode == WritingRoomBusyMode.Exit -> {
-                                        "Exiting writing room ${spinnerFrames[spinnerFrame]}"
+                                        "Exiting writing room"
                                     }
-                                    state.writingRoomBusy -> {
-                                        "Entering writing room ${spinnerFrames[spinnerFrame]}"
-                                    }
+                                    state.writingRoomBusy -> "Entering writing room"
                                     state.inWritingRoom -> "Exit room"
                                     else -> "Enter room"
                                 }
@@ -950,7 +939,7 @@ fun EditorScreen(
         is WritingRoomPrompt.Occupied -> {
             AlertDialog(
                 onDismissRequest = onDismissWritingRoomPrompt,
-                title = { Text("Writing room occupied") },
+                title = { Text("Room occupied") },
                 text = {
                     Text(prompt.message)
                 },
