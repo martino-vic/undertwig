@@ -5949,7 +5949,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           UndertwigCloud.setActiveProjectByName(name);
         }
 
-        persistProject({ immediateCloud: true });
+        // Local only — Drive upload waits until the user hits Save.
+        persistProject({ skipCloud: true });
         render();
         if (cloudStatusMode === "connected") {
           renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
