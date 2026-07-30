@@ -468,7 +468,6 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             repo.writeFile(state.projectId, state.activePath, state.editorText)
         }
         // Switching files within the same project keeps the writing room.
-        writingRoomGateDismissedKey = null
         val inRoom = heldWritingRoomProjectId == state.projectId
         val file = repo.readFile(state.projectId, path)
         _editor.update {
@@ -483,9 +482,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 } else {
                     "Editing $path"
                 },
-                writingRoomOccupiedMessage = null,
                 inWritingRoom = inRoom,
-                writingRoomAvailable = false,
+                writingRoomAvailable = it.writingRoomAvailable,
                 editorRevision = it.editorRevision + 1L,
             )
         }
