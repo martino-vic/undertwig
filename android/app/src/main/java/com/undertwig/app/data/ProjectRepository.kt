@@ -155,20 +155,41 @@ class ProjectRepository(context: Context) {
         ownerEmail: String?,
         folders: List<String>,
         files: Map<String, ByteArray>,
+        preferProjectId: String? = null,
     ): String {
-        val existing = findByDriveFolderId(driveFolderId)
-        val id = existing?.id ?: UUID.randomUUID().toString()
-        val dir = File(root, id).also { it.mkdirs() }
-        if (existing == null) {
-            // Fresh import: clear anything unexpected.
-            dir.listFiles()?.forEach { child ->
-                if (child.name != META_FILE) child.deleteRecursively()
-            }
-        } else {
-            // Refresh: remove old content files/folders, keep meta briefly.
-            dir.listFiles()?.forEach { child ->
-                if (child.name != META_FILE) child.deleteRecursively()
-            }
+        val preferred = preferProjectId?.takeIf { it.isNotBlank() && projectDir(it).isDirectory }
+        val existing = preferred?.let { id ->
+            listProjects().firstOrNull { it.id == id }
+        } ?: findByDriveFolderId(driveFolderId)
+        val id = existing?.id ?: preferred ?: UUID.randomUUID().toString()
+        replaceProjectContents(
+            projectId = id,
+            name = name,
+            driveFolderId = driveFolderId,
+            role = role,
+            ownerEmail = ownerEmail,
+            folders = folders,
+            files = files,
+        )
+        return id
+    }
+
+    /**
+     * Replace all files in an existing local project with a Drive snapshot.
+     * Always writes into [projectId] so the open editor cannot keep a stale mirror.
+     */
+    fun replaceProjectContents(
+        projectId: String,
+        name: String,
+        driveFolderId: String,
+        role: String,
+        ownerEmail: String?,
+        folders: List<String>,
+        files: Map<String, ByteArray>,
+    ) {
+        val dir = File(root, projectId).also { it.mkdirs() }
+        dir.listFiles()?.forEach { child ->
+            if (child.name != META_FILE) child.deleteRecursively()
         }
 
         for (folder in folders) {
@@ -195,7 +216,6 @@ class ProjectRepository(context: Context) {
             meta.put("ownerEmail", ownerEmail)
         }
         File(dir, META_FILE).writeText(meta.toString())
-        return id
     }
 
     /**

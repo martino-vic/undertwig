@@ -258,7 +258,7 @@ class DriveSyncRepository(
 
     /**
      * Pull the local project's Drive folder into the on-device mirror (desktop "Load").
-     * Resolves the folder via linked id or `Undertwig/<name>`, then refreshes all files.
+     * Always refreshes [projectId] in place so the open editor sees the new files.
      * @return number of files downloaded
      */
     suspend fun syncProjectFromDrive(
@@ -274,14 +274,44 @@ class DriveSyncRepository(
                 "“$name” was not found on Google Drive. Save it once from this device, or open it from Cloud first.",
             )
         val role = summary.driveRole?.takeIf { it.isNotBlank() } ?: "owner"
-        pullProject(
-            accessToken = accessToken,
-            folderId = folderId,
-            projectName = name,
-            role = role,
-            ownerEmail = summary.ownerEmail,
+        val owner = summary.ownerEmail
+
+        coroutineContext.ensureActive()
+        val meta = getJson(
+            accessToken,
+            "$DRIVE_API/files/${Uri.encode(folderId)}" +
+                "?supportsAllDrives=true&fields=id,name,mimeType,trashed,owners",
         )
-        projects.listFiles(projectId).size
+        if (meta.optBoolean("trashed", false)) {
+            error("That Google Drive folder was trashed.")
+        }
+
+        coroutineContext.ensureActive()
+        val entries = listFolderTree(accessToken, folderId, "")
+        val folders = entries.filter { it.isFolder }.map { it.path }
+        val fileEntries = entries.filter { !it.isFolder }
+        if (fileEntries.isEmpty()) {
+            error(
+                "“$name” has no downloadable files yet. Open it in Undertwig on the web and Save, then try again.",
+            )
+        }
+
+        val files = linkedMapOf<String, ByteArray>()
+        for (entry in fileEntries) {
+            coroutineContext.ensureActive()
+            files[entry.path] = downloadDriveFile(accessToken, entry.id)
+        }
+
+        projects.replaceProjectContents(
+            projectId = projectId,
+            name = name,
+            driveFolderId = folderId,
+            role = role,
+            ownerEmail = owner ?: firstOwnerEmail(meta),
+            folders = folders,
+            files = files,
+        )
+        files.size
     }
 
     /**

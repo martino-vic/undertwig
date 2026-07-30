@@ -63,6 +63,8 @@ data class EditorUiState(
     val pdfPath: String? = null,
     /** Increments on each successful Convert so PdfScreen reloads overwritten main.pdf. */
     val pdfRevision: Long = 0L,
+    /** Bumped when disk content replaces the editor buffer (e.g. Load from Drive). */
+    val editorRevision: Long = 0L,
     /** Project-relative PDF currently shown in the full-screen viewer (any tree PDF). */
     val previewPdfRelativePath: String? = null,
     val latexEngine: LatexEngineId = LatexEngineId.PdfLaTeX,
@@ -574,29 +576,31 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     "main.tex" in files -> "main.tex"
                     else -> files.firstOrNull().orEmpty()
                 }
-                val file = if (active.isNotEmpty()) {
-                    repo.readFile(projectId, active)
+                val loadedText = if (active.isNotEmpty()) {
+                    editorDisplayText(repo.readFile(projectId, active))
                 } else {
-                    null
+                    ""
                 }
+                val loadedMessage =
+                    "Loaded “$projectName” from Google Drive (" +
+                        "$fileCount file${if (fileCount == 1) "" else "s"})."
+                statusFlashJob?.cancel()
                 _editor.update {
                     it.copy(
                         projectName = repo.projectName(projectId),
                         files = files,
                         folders = folders,
                         activePath = active,
-                        editorText = file?.let { f -> editorDisplayText(f) }.orEmpty(),
+                        editorText = loadedText,
                         dirty = false,
                         loadingFile = false,
                         error = null,
+                        status = loadedMessage,
+                        editorRevision = it.editorRevision + 1L,
                         pdfPath = repo.existingFile(projectId, "main.pdf")?.absolutePath,
                     )
                 }
                 refreshProjects()
-                flashStatus(
-                    "Loaded “$projectName” from Google Drive (" +
-                        "$fileCount file${if (fileCount == 1) "" else "s"}).",
-                )
             } catch (e: AuthRepository.SignInCancelledException) {
                 _editor.update { it.copy(loadingFile = false) }
                 Toast.makeText(

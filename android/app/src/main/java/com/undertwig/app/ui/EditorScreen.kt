@@ -10,6 +10,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -304,30 +305,37 @@ fun EditorScreen(
             }
 
             val darkEditor = isSystemInDarkTheme()
-            val texHighlight = remember(state.activePath, darkEditor) {
+            val texHighlight = remember(state.activePath, darkEditor, state.editorRevision) {
                 if (isHighlightableTexPath(state.activePath)) {
                     TexVisualTransformation(darkEditor)
                 } else {
                     VisualTransformation.None
                 }
             }
-            BasicTextField(
-                value = state.editorText,
-                onValueChange = onEditorChange,
+            Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-                    .verticalScroll(rememberScrollState()),
-                textStyle = TextStyle(
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                visualTransformation = texHighlight,
-            )
+                    .fillMaxWidth(),
+            ) {
+                key(state.projectId, state.activePath, state.editorRevision) {
+                    BasicTextField(
+                        value = state.editorText,
+                        onValueChange = onEditorChange,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 12.dp)
+                            .verticalScroll(rememberScrollState()),
+                        textStyle = TextStyle(
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        visualTransformation = texHighlight,
+                    )
+                }
+            }
 
             Row(
                 modifier = Modifier
