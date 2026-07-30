@@ -4016,12 +4016,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           renderCloudStatus("logged-out");
           return;
         }
-        if (cloudStatusMode === "connected") {
+        if (cloudStatusMode === "connected" || cloudStatusMode === "connecting") {
           return;
         }
         if (UndertwigCloud.hasAccessToken()) {
-          // Token from login ⇒ treat as connected immediately; verify/sync in the background.
-          renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
+          // Token may be stale — verify before showing Connected.
+          renderCloudStatus("connecting");
           initCloudProject();
           return;
         }
@@ -4031,6 +4031,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       async function connectCloudStorage() {
         if (!UndertwigAuth.isLoggedIn()) {
           renderCloudStatus("logged-out");
+          return;
+        }
+        if (cloudStatusMode === "connecting") {
           return;
         }
         if (!UndertwigCloud.hasAccessToken()) {
@@ -4049,10 +4052,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
           return;
         }
-        renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
-        setStatus("Connected. Syncing with Google Drive…");
+        renderCloudStatus("connecting");
+        setStatus("Checking Google Drive connection…");
         try {
           await initCloudProject({ force: true });
+          if (cloudStatusMode === "connecting") {
+            renderCloudStatus("disconnected");
+            setStatus("Could not verify Google Drive access. Click Retry.", true);
+          }
         } catch (error) {
           renderCloudStatus("disconnected");
           setStatus(
@@ -6018,11 +6025,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
-        // For invite links, wait until join finishes before showing Connected / Open in Drive.
-        if (!sharedProjectId) {
-          renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
-        } else {
+        // Never show Connected until Drive access is verified (or an invite join succeeds).
+        renderCloudStatus("connecting");
+        if (sharedProjectId) {
           setStatus("Opening shared project from the owner's Google Drive…");
+        } else {
+          setStatus("Checking Google Drive connection…");
         }
 
         if (cloudInitPromise && !force) {
