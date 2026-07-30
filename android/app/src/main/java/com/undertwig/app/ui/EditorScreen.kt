@@ -755,7 +755,7 @@ fun EditorScreen(
                 title = { Text("Enter writing room") },
                 text = {
                     Text(
-                        "Live collaboration is not supported yet. The writing room has space for only one person at a time — this door keeps the editor locked until you enter. While you are inside, collaborators see “${prompt.path}” as read-only. Exit when you are done.",
+                        "Live collaboration is not supported yet. The writing room has space for only one person at a time — this door keeps the whole project locked until you enter. While you are inside, collaborators see “${prompt.projectName}” as read-only. Exit when you are done.",
                     )
                 },
                 confirmButton = {
@@ -772,7 +772,7 @@ fun EditorScreen(
                 title = { Text("Exit writing room?") },
                 text = {
                     Text(
-                        "Leave the writing room for “${prompt.path}”? Others will be able to enter and edit this file.",
+                        "Leave the writing room for “${prompt.projectName}”? Others will be able to enter and edit this project.",
                     )
                 },
                 confirmButton = {

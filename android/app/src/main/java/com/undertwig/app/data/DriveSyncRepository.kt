@@ -149,26 +149,22 @@ class DriveSyncRepository(
         accessToken: String,
         projectId: String,
         projectName: String,
-        relativePath: String,
         holderEmail: String? = null,
     ): FileEditLock? = withContext(Dispatchers.IO) {
-        val rel = relativePath.trim().trimStart('/').replace('\\', '/')
         val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext null
-        val existing = readFileLock(accessToken, folderId, rel) ?: return@withContext null
+        val existing = readProjectLockFile(accessToken, folderId) ?: return@withContext null
         if (existing.isStale() || isHeldByMe(existing, holderEmail)) return@withContext null
         existing
     }
 
     /** Returns the lock even when we hold it (for resume-after-reload). */
-    suspend fun readFileLockForPath(
+    suspend fun readProjectLock(
         accessToken: String,
         projectId: String,
         projectName: String,
-        relativePath: String,
     ): FileEditLock? = withContext(Dispatchers.IO) {
-        val rel = relativePath.trim().trimStart('/').replace('\\', '/')
         val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext null
-        val existing = readFileLock(accessToken, folderId, rel) ?: return@withContext null
+        val existing = readProjectLockFile(accessToken, folderId) ?: return@withContext null
         if (existing.isStale()) return@withContext null
         existing
     }
@@ -177,18 +173,15 @@ class DriveSyncRepository(
         accessToken: String,
         projectId: String,
         projectName: String,
-        relativePath: String,
         holderEmail: String?,
         holderName: String?,
     ): FileLockResult = withContext(Dispatchers.IO) {
-        val rel = relativePath.trim().trimStart('/').replace('\\', '/')
-        require(rel.isNotEmpty() && !rel.contains("..")) { "Invalid file path." }
         val folderId = resolveProjectFolderId(accessToken, projectId, projectName)
             ?: return@withContext FileLockResult(
                 ok = false,
                 message = "Project is not linked to Google Drive yet. Save once first.",
             )
-        val existing = readFileLock(accessToken, folderId, rel)
+        val existing = readProjectLockFile(accessToken, folderId)
         if (existing != null && !existing.isStale() && !isHeldByMe(existing, holderEmail)) {
             return@withContext FileLockResult(
                 ok = false,
@@ -197,13 +190,12 @@ class DriveSyncRepository(
             )
         }
         val payload = buildLockJson(
-            rel,
             holderEmail,
             holderName,
             since = if (existing != null && isHeldByMe(existing, holderEmail)) existing.since else null,
         )
-        writeFileLock(accessToken, folderId, rel, payload)
-        val again = readFileLock(accessToken, folderId, rel)
+        writeProjectLockFile(accessToken, folderId, payload)
+        val again = readProjectLockFile(accessToken, folderId)
         if (again != null && !again.isStale() && !isHeldByMe(again, holderEmail)) {
             return@withContext FileLockResult(
                 ok = false,
@@ -218,17 +210,15 @@ class DriveSyncRepository(
         accessToken: String,
         projectId: String,
         projectName: String,
-        relativePath: String,
         holderEmail: String?,
         holderName: String?,
     ): FileLockResult = withContext(Dispatchers.IO) {
-        val rel = relativePath.trim().trimStart('/').replace('\\', '/')
         val folderId = resolveProjectFolderId(accessToken, projectId, projectName)
             ?: return@withContext FileLockResult(ok = false, message = "Not linked to Drive.")
-        val existing = readFileLock(accessToken, folderId, rel)
+        val existing = readProjectLockFile(accessToken, folderId)
         if (existing == null) {
             return@withContext acquireFileLock(
-                accessToken, projectId, projectName, rel, holderEmail, holderName,
+                accessToken, projectId, projectName, holderEmail, holderName,
             )
         }
         if (!isHeldByMe(existing, holderEmail)) {
@@ -240,24 +230,22 @@ class DriveSyncRepository(
                 )
             }
             return@withContext acquireFileLock(
-                accessToken, projectId, projectName, rel, holderEmail, holderName,
+                accessToken, projectId, projectName, holderEmail, holderName,
             )
         }
-        val payload = buildLockJson(rel, holderEmail, holderName, since = existing.since)
-        writeFileLock(accessToken, folderId, rel, payload)
-        FileLockResult(ok = true, lock = readFileLock(accessToken, folderId, rel))
+        val payload = buildLockJson(holderEmail, holderName, since = existing.since)
+        writeProjectLockFile(accessToken, folderId, payload)
+        FileLockResult(ok = true, lock = readProjectLockFile(accessToken, folderId))
     }
 
     suspend fun releaseFileLock(
         accessToken: String,
         projectId: String,
         projectName: String,
-        relativePath: String,
         holderEmail: String? = null,
     ): Boolean = withContext(Dispatchers.IO) {
-        val rel = relativePath.trim().trimStart('/').replace('\\', '/')
         val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext false
-        val existing = readFileLock(accessToken, folderId, rel) ?: return@withContext true
+        val existing = readProjectLockFile(accessToken, folderId) ?: return@withContext true
         if (!isHeldByMe(existing, holderEmail) && !existing.isStale()) return@withContext false
         val fileId = existing.fileId ?: return@withContext false
         trashDriveFile(accessToken, fileId)
@@ -265,15 +253,15 @@ class DriveSyncRepository(
     }
 
     private fun buildLockJson(
-        relativePath: String,
         holderEmail: String?,
         holderName: String?,
         since: String?,
     ): JSONObject {
         val now = java.time.Instant.now().toString()
         return JSONObject()
-            .put("version", 1)
-            .put("path", relativePath)
+            .put("version", 2)
+            .put("scope", "project")
+            .put("path", ".")
             .put("holderEmail", holderEmail)
             .put("holderName", holderName)
             .put("deviceId", deviceId())
@@ -281,12 +269,11 @@ class DriveSyncRepository(
             .put("heartbeat", now)
     }
 
-    private fun readFileLock(
+    private fun readProjectLockFile(
         accessToken: String,
         projectFolderId: String,
-        relativePath: String,
     ): FileEditLock? {
-        val lockRel = "$LOCK_DIR_NAME/$relativePath.json"
+        val lockRel = "$LOCK_DIR_NAME/$PROJECT_LOCK_FILE"
         val parts = lockRel.split('/').filter { it.isNotEmpty() }
         if (parts.isEmpty()) return null
         var parentId = projectFolderId
@@ -308,7 +295,7 @@ class DriveSyncRepository(
         val json = runCatching { JSONObject(String(bytes, StandardCharsets.UTF_8)) }.getOrNull()
             ?: return null
         return FileEditLock(
-            path = json.optString("path").ifBlank { relativePath },
+            path = json.optString("path").ifBlank { "." },
             holderEmail = json.optString("holderEmail").takeIf { it.isNotBlank() },
             holderName = json.optString("holderName").takeIf { it.isNotBlank() },
             deviceId = json.optString("deviceId").takeIf { it.isNotBlank() },
@@ -319,13 +306,12 @@ class DriveSyncRepository(
         )
     }
 
-    private fun writeFileLock(
+    private fun writeProjectLockFile(
         accessToken: String,
         projectFolderId: String,
-        relativePath: String,
         payload: JSONObject,
     ) {
-        val lockRel = "$LOCK_DIR_NAME/$relativePath.json"
+        val lockRel = "$LOCK_DIR_NAME/$PROJECT_LOCK_FILE"
         val parts = lockRel.split('/').filter { it.isNotEmpty() }
         val fileName = parts.last()
         val parentRel = parts.dropLast(1).joinToString("/")
@@ -1198,6 +1184,7 @@ class DriveSyncRepository(
         private const val CLOUD_FOLDER_NAME = "Undertwig"
         private const val INVITED_REGISTRY_NAME = "undertwig-invited-projects-v1.json"
         private const val LOCK_DIR_NAME = ".undertwig-locks"
+        private const val PROJECT_LOCK_FILE = "project.json"
         private const val LOCK_STALE_MS = 45 * 1000L
         private const val DRIVE_API = "https://www.googleapis.com/drive/v3"
         private const val DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3"

@@ -2836,7 +2836,7 @@
                 <a id="accountLogout" href="#">Log out</a>
               </div>
             </div>
-            <button class="toolbar-button writing-room-button hidden" id="writingRoomButton" type="button" hidden title="Enter or leave the writing room for this file">
+            <button class="toolbar-button writing-room-button hidden" id="writingRoomButton" type="button" hidden title="Enter or leave the writing room for this project">
               Enter writing room
             </button>
             <button class="toolbar-button save-button" id="saveProject" type="button" title="Save in this browser">
@@ -3097,7 +3097,7 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260729e"></script>
-    <script src="cloud-storage.js?v=20260730k"></script>
+    <script src="cloud-storage.js?v=20260730l"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -3966,9 +3966,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let cloudSaveTimer = null;
       let cloudSaveInFlight = false;
       let fileLockHeartbeatTimer = null;
-      let fileLockHeldPath = null; // project-relative path we currently hold (inside writing room)
+      let fileLockHeldProject = null; // project name when we hold the writing room
       let fileLockHeldFileId = null; // Drive file id for fast unload release
-      let fileLockOccupied = null; // { fullPath, message, lock } — someone else is in the room
+      let fileLockOccupied = null; // { projectName, message, lock } — someone else is in the room
       let fileLockStatusGeneration = 0;
       let writingRoomBusy = false;
       const FILE_LOCK_HEARTBEAT_MS = 20000;
@@ -3978,7 +3978,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       const writingRoomButton = document.getElementById("writingRoomButton");
       let writingRoomBusyTimer = null;
       let writingRoomDialogMode = null;
-      let writingRoomGateDismissedKey = null; // path or "occupied:path" after view-only / OK
+      let writingRoomGateDismissedKey = null; // project or "occupied:project" after view-only / OK
       let writingRoomGatePromise = null;
       let writingRoomIdleTimer = null;
       let writingRoomIdlePromptOpen = false;
@@ -4147,11 +4147,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         if (
           fileLocksEnabled() &&
-          projectRelativeActivePath() &&
-          fileLockHeldPath !== projectRelativeActivePath()
+          fileLockHeldProject !== getActiveProjectName()
         ) {
           setStatus(
-            "Enter the writing room before saving this file to Google Drive. The writing room has space for only one person at a time.",
+            "Enter the writing room before saving this project to Google Drive. The writing room has space for only one person at a time.",
             true
           );
           writingRoomGateDismissedKey = null;
@@ -4161,7 +4160,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         if (
           fileLockOccupied &&
-          fileLockOccupied.fullPath === state.activeFile
+          fileLockOccupied.projectName === getActiveProjectName()
         ) {
           setStatus(
             fileLockOccupied.message ||
@@ -5306,14 +5305,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
       window.addEventListener("pagehide", function () {
         stopFileLockHeartbeat();
-        if (fileLockHeldPath || fileLockHeldFileId) {
-          const projectName = getActiveProjectName();
-          const rel = fileLockHeldPath;
+        if (fileLockHeldProject || fileLockHeldFileId) {
+          const projectName = fileLockHeldProject;
           const fileId = fileLockHeldFileId;
-          fileLockHeldPath = null;
+          fileLockHeldProject = null;
           fileLockHeldFileId = null;
           try {
-            UndertwigCloud.releaseFileLock(projectName, rel, {
+            UndertwigCloud.releaseFileLock(projectName, undefined, {
               keepalive: true,
               fileId: fileId,
             });
@@ -5323,14 +5321,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
       });
       window.addEventListener("beforeunload", function () {
-        if (!fileLockHeldPath && !fileLockHeldFileId) {
+        if (!fileLockHeldProject && !fileLockHeldFileId) {
           return;
         }
-        const projectName = getActiveProjectName();
-        const rel = fileLockHeldPath;
+        const projectName = fileLockHeldProject;
         const fileId = fileLockHeldFileId;
         try {
-          UndertwigCloud.releaseFileLock(projectName, rel, {
+          UndertwigCloud.releaseFileLock(projectName, undefined, {
             keepalive: true,
             fileId: fileId,
           });
@@ -6538,14 +6535,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             scheduleCloudSave(false);
             return;
           }
-          // Don't push Drive autosaves unless we're inside the writing room for the active file.
-          const rel = projectRelativeActivePath();
-          if (fileLocksEnabled() && (!rel || fileLockHeldPath !== rel)) {
+          // Don't push Drive autosaves unless we're inside the writing room for the active project.
+          if (fileLocksEnabled() && fileLockHeldProject !== getActiveProjectName()) {
             return;
           }
           if (
             fileLockOccupied &&
-            fileLockOccupied.fullPath === state.activeFile
+            fileLockOccupied.projectName === getActiveProjectName()
           ) {
             return;
           }
@@ -6608,7 +6604,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       function noteWritingRoomActivity() {
-        if (!fileLockHeldPath || writingRoomIdlePromptOpen) {
+        if (!fileLockHeldProject || writingRoomIdlePromptOpen) {
           return;
         }
         resetWritingRoomIdleWatch();
@@ -6616,7 +6612,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       function resetWritingRoomIdleWatch() {
         stopWritingRoomIdleWatch();
-        if (!fileLockHeldPath) {
+        if (!fileLockHeldProject) {
           return;
         }
         writingRoomIdleTimer = setTimeout(function () {
@@ -6626,7 +6622,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       async function presentWritingRoomIdleExitPrompt() {
-        if (!fileLockHeldPath || writingRoomIdlePromptOpen) {
+        if (!fileLockHeldProject || writingRoomIdlePromptOpen) {
           return;
         }
         // Don't interrupt enter/exit/occupied dialogs.
@@ -6648,7 +6644,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           setStatus(
             "Left the writing room after " + minutes + " minute" + (minutes === 1 ? "" : "s") + " of inactivity."
           );
-        } else if (fileLockHeldPath) {
+        } else if (fileLockHeldProject) {
           resetWritingRoomIdleWatch();
         }
       }
@@ -6661,20 +6657,20 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         stopWritingRoomIdleWatch();
       }
 
-      function startFileLockHeartbeat(projectName, relPath) {
+      function startFileLockHeartbeat(projectName) {
         stopFileLockHeartbeat();
-        if (!projectName || !relPath || !UndertwigCloud.heartbeatFileLock) {
+        if (!projectName || !UndertwigCloud.heartbeatFileLock) {
           return;
         }
         resetWritingRoomIdleWatch();
         fileLockHeartbeatTimer = setInterval(function () {
-          UndertwigCloud.heartbeatFileLock(projectName, relPath)
+          UndertwigCloud.heartbeatFileLock(projectName)
             .then(function (result) {
               if (!result || !result.ok) {
-                fileLockHeldPath = null;
+                fileLockHeldProject = null;
                 stopFileLockHeartbeat();
                 fileLockOccupied = {
-                  fullPath: projectName + "/" + relPath,
+                  projectName: projectName,
                   message:
                     (result && result.message) ||
                     "Someone is currently in the writing room. The writing room has space for one person only at the time.",
@@ -6694,19 +6690,18 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       async function releaseHeldFileLock(options) {
         const opts = options || {};
         stopFileLockHeartbeat();
-        const projectName = getActiveProjectName();
-        const rel = fileLockHeldPath;
+        const projectName = fileLockHeldProject;
         const fileId = fileLockHeldFileId;
-        fileLockHeldPath = null;
+        fileLockHeldProject = null;
         fileLockHeldFileId = null;
-        if ((!projectName || !rel) && !fileId) {
+        if (!projectName && !fileId) {
           return;
         }
         if (!UndertwigCloud.releaseFileLock) {
           return;
         }
         try {
-          await UndertwigCloud.releaseFileLock(projectName, rel, {
+          await UndertwigCloud.releaseFileLock(projectName, undefined, {
             keepalive: Boolean(opts.keepalive),
             fileId: fileId,
           });
@@ -6733,16 +6728,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       function updateWritingRoomUi() {
         const file = state.files[state.activeFile];
-        const rel = projectRelativeActivePath();
-        const locksOn = fileLocksEnabled() && file && !file.binary && rel;
-        const inside = Boolean(rel && fileLockHeldPath === rel);
+        const projectName = getActiveProjectName();
+        const locksOn = fileLocksEnabled();
+        const inside = fileLockHeldProject === projectName;
         const occupied = Boolean(
           fileLockOccupied &&
-            fileLockOccupied.fullPath === state.activeFile &&
+            fileLockOccupied.projectName === projectName &&
             !inside
         );
 
-        // Logged-in Drive text files stay behind the writing-room door until Enter.
+        // Logged-in Drive projects stay behind the writing-room door until Enter.
         UndertwigEditor.setReadOnly(
           !file || Boolean(file.binary) || (locksOn && !inside)
         );
@@ -6772,7 +6767,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               setControl(
                 writingRoomButton,
                 "Exit writing room",
-                "Leave the writing room and free this file for others"
+                "Leave the writing room and free this project for others"
               );
             } else if (occupied) {
               setControl(
@@ -6785,7 +6780,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               setControl(
                 writingRoomButton,
                 "Enter writing room",
-                "Open the writing room door to edit this file"
+                "Open the writing room door to edit this project"
               );
             }
           }
@@ -6889,7 +6884,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const title = writingRoomDialog.querySelector("#writingRoomTitle");
         const message = writingRoomDialog.querySelector("#writingRoomMessage");
         const actions = writingRoomDialog.querySelector("#writingRoomActions");
-        const rel = projectRelativeActivePath() || "this file";
+        const projectName = getActiveProjectName() || "this project";
 
         actions.replaceChildren();
         function addButton(label, result, className) {
@@ -6916,8 +6911,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           title.textContent = "Exit writing room?";
           message.textContent =
             "Leave the writing room for “" +
-            rel +
-            "”? Others will be able to enter and edit this file.";
+            projectName +
+            "”? Others will be able to enter and edit this project.";
           addButton("Stay", "cancel");
           addButton("Exit writing room", "confirm", "modal-confirm");
         } else if (mode === "idle") {
@@ -6932,15 +6927,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             " minute" +
             (minutes === 1 ? "" : "s") +
             ". Would you like to exit the writing room so others can edit “" +
-            rel +
+            projectName +
             "”?";
           addButton("Stay", "cancel");
           addButton("Exit writing room", "confirm", "modal-confirm");
         } else {
           title.textContent = "Enter writing room";
           message.textContent =
-            "Live collaboration is not supported yet. The writing room has space for only one person at a time — this door keeps the editor locked until you enter. While you are inside, collaborators see “" +
-            rel +
+            "Live collaboration is not supported yet. The writing room has space for only one person at a time — this door keeps the project locked until you enter. While you are inside, collaborators see “" +
+            projectName +
             "” as read-only. Exit when you are done (or close the tab).";
           addButton("View only", "cancel");
           addButton("Enter writing room", "confirm", "modal-confirm");
@@ -6968,22 +6963,23 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       /**
-       * Show the door popup when a Drive-linked file needs Enter (or is occupied).
+       * Show the door popup when a Drive-linked project needs Enter (or is occupied).
        */
       function maybePresentWritingRoomGate(options) {
         const opts = options || {};
         const force = Boolean(opts.force);
         const file = state.files[state.activeFile];
-        const rel = projectRelativeActivePath();
-        const locksOn = fileLocksEnabled() && file && !file.binary && rel;
-        const inside = Boolean(rel && fileLockHeldPath === rel);
+        const projectName = getActiveProjectName();
+        const locksOn = fileLocksEnabled();
+        const gateApplies = locksOn && file && !file.binary;
+        const inside = fileLockHeldProject === projectName;
         const occupied = Boolean(
           fileLockOccupied &&
-            fileLockOccupied.fullPath === state.activeFile &&
+            fileLockOccupied.projectName === projectName &&
             !inside
         );
 
-        if (!locksOn || inside) {
+        if (!gateApplies || inside) {
           if (
             writingRoomDialogMode === "enter" ||
             writingRoomDialogMode === "occupied"
@@ -6997,7 +6993,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
 
         if (occupied) {
-          const key = "occupied:" + rel;
+          const key = "occupied:" + projectName;
           if (!force && writingRoomGateDismissedKey === key) {
             return;
           }
@@ -7007,7 +7003,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
-        const key = "enter:" + rel;
+        const key = "enter:" + projectName;
         if (!force && writingRoomGateDismissedKey === key) {
           return;
         }
@@ -7022,18 +7018,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       /**
-       * Peek at lock status without entering. Releases our lock if we switched files.
+       * Peek at lock status without entering. Releases our lock if we switched projects.
        * Resumes a lock we already hold (same device / same Google account) after reload.
        */
       async function refreshWritingRoomStatus() {
         const generation = ++fileLockStatusGeneration;
         const projectName = getActiveProjectName();
-        const fullPath = state.activeFile || "";
-        const file = state.files[fullPath];
-        const rel = projectRelativeActivePath();
 
-        if (!fileLocksEnabled() || !file || file.binary || !rel) {
-          if (fileLockHeldPath) {
+        if (!fileLocksEnabled() || !projectName) {
+          if (fileLockHeldProject) {
             await releaseHeldFileLock();
           }
           fileLockOccupied = null;
@@ -7044,8 +7037,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
-        // Switching files while inside a room: exit the previous room.
-        if (fileLockHeldPath && fileLockHeldPath !== rel) {
+        // Switching projects while inside a room: exit the previous room.
+        if (fileLockHeldProject && fileLockHeldProject !== projectName) {
           await releaseHeldFileLock();
           writingRoomGateDismissedKey = null;
         }
@@ -7054,7 +7047,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
-        if (fileLockHeldPath === rel) {
+        if (fileLockHeldProject === projectName) {
           fileLockOccupied = null;
           writingRoomGateDismissedKey = null;
           updateWritingRoomUi();
@@ -7065,17 +7058,17 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         try {
           const lock =
             UndertwigCloud.readFileLock &&
-            (await UndertwigCloud.readFileLock(projectName, rel));
+            (await UndertwigCloud.readFileLock(projectName));
           if (generation !== fileLockStatusGeneration) {
             return;
           }
           if (lock && !UndertwigCloud.isLockStale(lock) && UndertwigCloud.isLockHeldByMe(lock)) {
             // Resume after reload / another tab of the same account.
-            fileLockHeldPath = rel;
+            fileLockHeldProject = projectName;
             fileLockHeldFileId = lock._fileId || null;
             fileLockOccupied = null;
             writingRoomGateDismissedKey = null;
-            startFileLockHeartbeat(projectName, rel);
+            startFileLockHeartbeat(projectName);
             updateWritingRoomUi();
             maybePresentWritingRoomGate();
             return;
@@ -7086,7 +7079,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             !UndertwigCloud.isLockHeldByMe(lock)
           ) {
             fileLockOccupied = {
-              fullPath: fullPath,
+              projectName: projectName,
               lock: lock,
               message:
                 UndertwigCloud.lockHolderLabel(lock) +
@@ -7107,35 +7100,34 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       async function enterWritingRoom(options) {
         const opts = options || {};
         const projectName = getActiveProjectName();
-        const rel = projectRelativeActivePath();
-        if (!projectName || !rel || writingRoomBusy) {
+        if (!projectName || writingRoomBusy) {
           return;
         }
         if (!opts.confirmed) {
           const choice = await showWritingRoomDialog("enter");
           if (choice !== "confirm") {
-            writingRoomGateDismissedKey = "enter:" + rel;
+            writingRoomGateDismissedKey = "enter:" + projectName;
             return;
           }
         }
         writingRoomGateDismissedKey = null;
         setWritingRoomBusy(true);
-        setStatus("Entering the writing room for “" + rel + "”…");
+        setStatus("Entering the writing room for “" + projectName + "”…");
         try {
-          const result = await UndertwigCloud.acquireFileLock(projectName, rel);
+          const result = await UndertwigCloud.acquireFileLock(projectName);
           if (result && result.ok) {
-            fileLockHeldPath = rel;
+            fileLockHeldProject = projectName;
             fileLockHeldFileId =
               (result.lock && (result.lock._fileId || result.lock.id)) || null;
             fileLockOccupied = null;
-            startFileLockHeartbeat(projectName, rel);
-            setStatus("You are in the writing room for “" + rel + "”. Exit when you are done.");
+            startFileLockHeartbeat(projectName);
+            setStatus("You are in the writing room for “" + projectName + "”. Exit when you are done.");
           } else {
-            fileLockHeldPath = null;
+            fileLockHeldProject = null;
             fileLockHeldFileId = null;
             stopFileLockHeartbeat();
             fileLockOccupied = {
-              fullPath: state.activeFile,
+              projectName: projectName,
               lock: result && result.lock,
               message:
                 (result && result.message) ||
@@ -7144,7 +7136,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             setStatus(fileLockOccupied.message, true);
             writingRoomGateDismissedKey = null;
             showWritingRoomDialog("occupied").then(function () {
-              writingRoomGateDismissedKey = "occupied:" + rel;
+              writingRoomGateDismissedKey = "occupied:" + projectName;
             });
           }
         } catch (error) {
@@ -7162,8 +7154,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       async function exitWritingRoom(options) {
         const opts = options || {};
         const skipConfirm = Boolean(opts.skipConfirm);
-        const rel = fileLockHeldPath || projectRelativeActivePath();
-        if (!fileLockHeldPath) {
+        const projectName = fileLockHeldProject;
+        if (!fileLockHeldProject) {
           return;
         }
         if (!skipConfirm) {
@@ -7177,22 +7169,22 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         writingRoomGateDismissedKey = null;
         setWritingRoomBusy(false);
         await refreshWritingRoomStatus();
-        if (rel) {
-          setStatus("You left the writing room for “" + rel + "”.");
+        if (projectName) {
+          setStatus("You left the writing room for “" + projectName + "”.");
         }
         updateWritingRoomUi();
       }
 
       async function onWritingRoomButtonClick() {
-        const rel = projectRelativeActivePath();
-        if (!rel) {
+        const projectName = getActiveProjectName();
+        if (!projectName) {
           return;
         }
-        if (fileLockHeldPath === rel) {
+        if (fileLockHeldProject === projectName) {
           await exitWritingRoom();
           return;
         }
-        if (fileLockOccupied && fileLockOccupied.fullPath === state.activeFile) {
+        if (fileLockOccupied && fileLockOccupied.projectName === projectName) {
           writingRoomGateDismissedKey = null;
           maybePresentWritingRoomGate({ force: true });
           return;

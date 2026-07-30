@@ -15,6 +15,7 @@
   // Legacy keys from the single-JSON sync era — clear on load so stale IDs cannot 404.
   const LEGACY_FILE_KEYS = ["undertwig-drive-file-v1", "undertwig-drive-folder-v1"];
   const LOCK_DIR_NAME = ".undertwig-locks";
+  const PROJECT_LOCK_FILE = "project.json";
   const DEVICE_ID_KEY = "undertwig-device-id-v1";
   // Abandoned rooms free quickly so a closed tab / crashed client does not brick collaborators.
   const LOCK_HEARTBEAT_STALE_MS = 45 * 1000;
@@ -3211,22 +3212,17 @@
     return false;
   }
 
-  function lockRelativePathForFile(fileRelPath) {
-    const rel = String(fileRelPath || "")
-      .replace(/\\/g, "/")
-      .replace(/^\/+|\/+$/g, "");
-    if (!rel || rel.indexOf("..") >= 0) {
-      throw new Error("Invalid file path for edit lock.");
-    }
-    return LOCK_DIR_NAME + "/" + rel + ".json";
+  function projectLockRelPath() {
+    return LOCK_DIR_NAME + "/" + PROJECT_LOCK_FILE;
   }
 
-  function buildLockPayload(fileRelPath, previous) {
+  function buildLockPayload(previous) {
     const session = auth().readSession && auth().readSession();
     const now = new Date().toISOString();
     return {
-      version: 1,
-      path: String(fileRelPath || ""),
+      version: 2,
+      scope: "project",
+      path: ".",
       holderEmail: (session && session.email) || currentSessionEmail() || null,
       holderName: (session && session.name) || null,
       deviceId: getDeviceId(),
@@ -3244,12 +3240,12 @@
     return resolveExistingProjectFolderId(name);
   }
 
-  async function readFileLock(projectName, fileRelPath) {
+  async function readFileLock(projectName) {
     const folderId = await resolveProjectFolderForLocks(projectName);
     if (!folderId) {
       return null;
     }
-    const lockRel = lockRelativePathForFile(fileRelPath);
+    const lockRel = projectLockRelPath();
     const parts = lockRel.split("/");
     const fileName = parts.pop();
     let parentId = folderId;
@@ -3282,12 +3278,12 @@
     }
   }
 
-  async function writeFileLock(projectName, fileRelPath, payload) {
+  async function writeFileLock(projectName, payload) {
     const folderId = await resolveProjectFolderForLocks(projectName);
     if (!folderId) {
       throw new Error("Project is not linked to Google Drive yet. Save once first.");
     }
-    const lockRel = lockRelativePathForFile(fileRelPath);
+    const lockRel = projectLockRelPath();
     const parts = lockRel.split("/");
     const fileName = parts.pop();
     const parentId = await ensurePathFolders(folderId, parts.join("/"));
@@ -3296,27 +3292,24 @@
       content: JSON.stringify(payload, null, 2),
       binary: false,
     };
-    const saved = await uploadFileToFolder(
+    return uploadFileToFolder(
       parentId,
       fileName,
       entry,
       existing && existing.id
     );
-    return saved;
   }
 
   /**
-   * Try to take the exclusive edit lock for one project-relative file.
+   * Exclusive writing-room lock for an entire project (not per-file).
    * @returns {Promise<{ok:true,lock:object}|{ok:false,lock:object|null,message:string}>}
    */
-      async function acquireFileLock(projectName, fileRelPath) {
-    const rel = String(fileRelPath || "")
-      .replace(/\\/g, "/")
-      .replace(/^\/+|\/+$/g, "");
-    if (!rel) {
-      return { ok: false, lock: null, message: "Choose a file to edit." };
+  async function acquireFileLock(projectName) {
+    const name = String(projectName || "").trim();
+    if (!name) {
+      return { ok: false, lock: null, message: "Choose a project first." };
     }
-    const existing = await readFileLock(projectName, rel);
+    const existing = await readFileLock(name);
     if (existing && !isLockStale(existing) && !isLockHeldByMe(existing)) {
       return {
         ok: false,
@@ -3326,10 +3319,9 @@
           " is currently in the writing room. The writing room has space for one person only at the time.",
       };
     }
-    const payload = buildLockPayload(rel, isLockHeldByMe(existing) ? existing : null);
-    const saved = await writeFileLock(projectName, rel, payload);
-    // Re-read to detect a lost race.
-    const again = await readFileLock(projectName, rel);
+    const payload = buildLockPayload(isLockHeldByMe(existing) ? existing : null);
+    const saved = await writeFileLock(name, payload);
+    const again = await readFileLock(name);
     if (again && !isLockHeldByMe(again) && !isLockStale(again)) {
       return {
         ok: false,
@@ -3348,16 +3340,14 @@
     return { ok: true, lock: lock };
   }
 
-  async function heartbeatFileLock(projectName, fileRelPath) {
-    const rel = String(fileRelPath || "")
-      .replace(/\\/g, "/")
-      .replace(/^\/+|\/+$/g, "");
-    if (!rel) {
-      return { ok: false, lock: null, message: "Missing file." };
+  async function heartbeatFileLock(projectName) {
+    const name = String(projectName || "").trim();
+    if (!name) {
+      return { ok: false, lock: null, message: "Missing project." };
     }
-    const existing = await readFileLock(projectName, rel);
+    const existing = await readFileLock(name);
     if (!existing) {
-      return acquireFileLock(projectName, rel);
+      return acquireFileLock(name);
     }
     if (!isLockHeldByMe(existing)) {
       if (!isLockStale(existing)) {
@@ -3369,19 +3359,17 @@
             " is currently in the writing room. The writing room has space for one person only at the time.",
         };
       }
-      return acquireFileLock(projectName, rel);
+      return acquireFileLock(name);
     }
-    const payload = buildLockPayload(rel, existing);
-    await writeFileLock(projectName, rel, payload);
+    const payload = buildLockPayload(existing);
+    await writeFileLock(name, payload);
     return { ok: true, lock: payload };
   }
 
-  async function releaseFileLock(projectName, fileRelPath, options) {
+  async function releaseFileLock(projectName, _ignoredFileRelPath, options) {
     const opts = options || {};
-    const rel = String(fileRelPath || "")
-      .replace(/\\/g, "/")
-      .replace(/^\/+|\/+$/g, "");
-    if (!rel && !opts.fileId) {
+    const name = String(projectName || "").trim();
+    if (!name && !opts.fileId) {
       return false;
     }
 
@@ -3390,24 +3378,24 @@
       return true;
     }
 
-    if (!rel) {
-      return false;
+    let existing = null;
+    if (name) {
+      existing = await readFileLock(name);
+      if (!existing && !opts.fileId) {
+        return true;
+      }
+      if (existing && !isLockHeldByMe(existing) && !isLockStale(existing)) {
+        return false;
+      }
     }
-    const existing = await readFileLock(projectName, rel);
-    if (!existing) {
-      return true;
-    }
-    if (!isLockHeldByMe(existing) && !isLockStale(existing)) {
-      return false;
-    }
-    const fileId = existing._fileId || opts.fileId;
+    const fileId = (existing && existing._fileId) || opts.fileId;
     if (!fileId) {
       return false;
     }
     try {
       await removeDriveItemFromProject({
         id: fileId,
-        parentId: existing._parentId || null,
+        parentId: (existing && existing._parentId) || null,
         owners: [],
       });
       return true;
