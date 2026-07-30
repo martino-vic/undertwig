@@ -79,6 +79,8 @@ data class EditorUiState(
     /** True when this device has entered the writing room for the current project. */
     val inWritingRoom: Boolean = false,
     val writingRoomBusy: Boolean = false,
+    /** Which writing-room transition is in flight (for Entering… / Exiting… UI). */
+    val writingRoomBusyMode: WritingRoomBusyMode? = null,
     val writingRoomPrompt: WritingRoomPrompt? = null,
 ) {
     val converting: Boolean get() = busy != EditorBusy.Idle
@@ -86,6 +88,11 @@ data class EditorUiState(
         get() = ProjectRepository.isBinaryPath(activePath) ||
             writingRoomOccupiedMessage != null ||
             (writingRoomAvailable && !inWritingRoom)
+}
+
+enum class WritingRoomBusyMode {
+    Enter,
+    Exit,
 }
 
 sealed class WritingRoomPrompt {
@@ -733,7 +740,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         val projectId = state.projectId
         val projectName = state.projectName
         val user = _auth.value.user
-        setWritingRoomBusy(true)
+        setWritingRoomBusy(true, WritingRoomBusyMode.Enter)
         _editor.update { it.copy(writingRoomPrompt = null, error = null) }
         fileLockJob?.cancel()
         fileLockJob = viewModelScope.launch {
@@ -855,10 +862,10 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun performExitWritingRoom(activity: Activity, projectName: String) {
         writingRoomSessionDirty = false
+        setWritingRoomBusy(true, WritingRoomBusyMode.Exit)
         _editor.update {
             it.copy(
                 inWritingRoom = false,
-                writingRoomBusy = true,
                 writingRoomPrompt = null,
             )
         }
@@ -910,6 +917,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             _editor.update {
                 it.copy(
                     writingRoomBusy = false,
+                    writingRoomBusyMode = null,
                     inWritingRoom = false,
                     dirty = false,
                     status = "You left the writing room for “$projectName”.",
@@ -942,7 +950,13 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
         val projectName = editorState.projectName
-        _editor.update { it.copy(writingRoomPrompt = null, writingRoomBusy = true) }
+        _editor.update {
+            it.copy(
+                writingRoomPrompt = null,
+                writingRoomBusy = true,
+                writingRoomBusyMode = WritingRoomBusyMode.Exit,
+            )
+        }
         viewModelScope.launch {
             try {
                 when (choice) {
@@ -1207,14 +1221,21 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private fun setWritingRoomBusy(busy: Boolean) {
+    private fun setWritingRoomBusy(busy: Boolean, mode: WritingRoomBusyMode? = null) {
         writingRoomBusyTimeoutJob?.cancel()
         writingRoomBusyTimeoutJob = null
-        _editor.update { it.copy(writingRoomBusy = busy) }
+        _editor.update {
+            it.copy(
+                writingRoomBusy = busy,
+                writingRoomBusyMode = if (busy) (mode ?: it.writingRoomBusyMode) else null,
+            )
+        }
         if (busy) {
             writingRoomBusyTimeoutJob = viewModelScope.launch {
                 delay(15_000L)
-                _editor.update { it.copy(writingRoomBusy = false) }
+                _editor.update {
+                    it.copy(writingRoomBusy = false, writingRoomBusyMode = null)
+                }
             }
         }
     }

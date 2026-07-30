@@ -290,18 +290,31 @@ fun EditorScreen(
                             Icon(Icons.Default.Save, contentDescription = "Save")
                         }
                         if (state.writingRoomAvailable) {
+                            val spinnerFrames = listOf("|", "/", "-", "\\")
+                            var spinnerFrame by remember { mutableIntStateOf(0) }
+                            LaunchedEffect(state.writingRoomBusy) {
+                                if (!state.writingRoomBusy) return@LaunchedEffect
+                                while (true) {
+                                    delay(100)
+                                    spinnerFrame = (spinnerFrame + 1) % spinnerFrames.size
+                                }
+                            }
                             TextButton(
                                 onClick = onWritingRoomClick,
                                 enabled = !state.writingRoomBusy,
                             ) {
-                                Text(
-                                    when {
-                                        state.inWritingRoom -> "Exit"
-                                        state.writingRoomOccupiedMessage != null -> "Occupied"
-                                        else -> "Enter"
-                                    },
-                                    maxLines = 1,
-                                )
+                                val label = when {
+                                    state.writingRoomBusy &&
+                                        state.writingRoomBusyMode == WritingRoomBusyMode.Exit -> {
+                                        "Exiting writing room ${spinnerFrames[spinnerFrame]}"
+                                    }
+                                    state.writingRoomBusy -> {
+                                        "Entering writing room ${spinnerFrames[spinnerFrame]}"
+                                    }
+                                    state.inWritingRoom -> "Exit room"
+                                    else -> "Enter room"
+                                }
+                                Text(label, maxLines = 1)
                             }
                         }
                         if (authUser != null) {
