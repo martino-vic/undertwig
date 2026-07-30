@@ -719,11 +719,14 @@
         padding: 0 16px;
         border-bottom: 1px solid var(--border);
         background: #16202a;
+        container-type: inline-size;
+        container-name: workspace-topbar;
       }
 
       .file-title,
       .preview-title {
         min-width: 0;
+        flex: 1 1 auto;
       }
 
       .file-title strong,
@@ -741,6 +744,16 @@
         margin-top: 2px;
         color: var(--muted);
         font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* When the top bar is squeezed, keep the filename only — drop the meta line. */
+      @container workspace-topbar (max-width: 760px) {
+        .file-title span {
+          display: none;
+        }
       }
 
       .topbar-actions {
@@ -6889,30 +6902,29 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 "Exit writing room",
                 "Leave the writing room and free this project for others"
               );
+            } else if (occupied) {
+              setControl(
+                writingRoomButton,
+                "Room occupied",
+                fileLockOccupied.message ||
+                  "Someone is currently in the writing room. The writing room has space for one person only at the time."
+              );
             } else {
               setControl(
                 writingRoomButton,
                 "Enter writing room",
-                occupied
-                  ? fileLockOccupied.message ||
-                      "Someone is currently in the writing room. The writing room has space for one person only at the time."
-                  : "Open the writing room door to edit this project"
+                "Open the writing room door to edit this project"
               );
             }
           }
         }
 
-        if (file && !file.binary && locksOn) {
+        // File meta stays short (size only). Writing-room state lives on the button.
+        if (typeof updateMeta === "function") {
+          updateMeta();
+        } else if (file && !file.binary) {
           const size = new Blob([file.content || ""]).size;
-          if (inside) {
-            activeFileMeta.textContent =
-              "Text file, " + formatBytes(size) + " · you are in the writing room";
-          } else if (occupied) {
-            activeFileMeta.textContent = "Read-only — writing room occupied";
-          } else {
-            activeFileMeta.textContent =
-              "Text file, " + formatBytes(size) + " · enter the writing room to edit";
-          }
+          activeFileMeta.textContent = "Text file, " + formatBytes(size);
         }
       }
 

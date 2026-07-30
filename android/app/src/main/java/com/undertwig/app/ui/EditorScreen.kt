@@ -289,6 +289,21 @@ fun EditorScreen(
                         IconButton(onClick = onSave) {
                             Icon(Icons.Default.Save, contentDescription = "Save")
                         }
+                        if (state.writingRoomAvailable) {
+                            TextButton(
+                                onClick = onWritingRoomClick,
+                                enabled = !state.writingRoomBusy,
+                            ) {
+                                Text(
+                                    when {
+                                        state.inWritingRoom -> "Exit"
+                                        state.writingRoomOccupiedMessage != null -> "Occupied"
+                                        else -> "Enter"
+                                    },
+                                    maxLines = 1,
+                                )
+                            }
+                        }
                         if (authUser != null) {
                             if (state.loadingFile) {
                                 TextButton(onClick = onCancelLoadFromDrive) {
@@ -367,22 +382,6 @@ fun EditorScreen(
                                     )
                                 }
                             }
-                        }
-                    }
-                    if (state.writingRoomAvailable) {
-                        TextButton(
-                            onClick = onWritingRoomClick,
-                            enabled = !state.writingRoomBusy,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 0.dp),
-                        ) {
-                            Text(
-                                if (state.inWritingRoom) {
-                                    "Exit writing room"
-                                } else {
-                                    "Enter writing room"
-                                },
-                                maxLines = 1,
-                            )
                         }
                     }
                 }
@@ -466,15 +465,6 @@ fun EditorScreen(
             }
 
             if (!imeVisible) {
-                state.writingRoomOccupiedMessage?.let {
-                    Text(
-                        "Room occupied",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    )
-                }
-
                 Row(
                         modifier = Modifier
                             .fillMaxWidth()
