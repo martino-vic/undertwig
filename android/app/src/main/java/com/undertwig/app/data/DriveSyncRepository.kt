@@ -64,7 +64,9 @@ class DriveSyncRepository(
     }
 
     /**
-     * Owned projects under My Drive / Undertwig /, plus folders shared with the user.
+     * Owned projects = children of My Drive / Undertwig /.
+     * Invited projects = folders shared with the user that live under someone else's Undertwig /
+     * (or children of a shared Undertwig root).
      */
     suspend fun listCloudProjects(
         accessToken: String,
@@ -73,6 +75,7 @@ class DriveSyncRepository(
         val me = userEmail?.trim()?.lowercase().orEmpty()
         val owned = mutableListOf<DriveRemoteProject>()
         val invited = mutableListOf<DriveRemoteProject>()
+        val invitedIds = mutableSetOf<String>()
 
         val rootId = runCatching { ensureUndertwigFolder(accessToken) }.getOrNull()
         val ownedIds = mutableSetOf<String>()
@@ -100,23 +103,84 @@ class DriveSyncRepository(
         for (i in 0 until shared.length()) {
             val child = shared.getJSONObject(i)
             val id = child.optString("id").takeIf { it.isNotBlank() } ?: continue
-            if (id in ownedIds || id == rootId) continue
+            if (id in ownedIds || id == rootId || id in invitedIds) continue
             val name = child.optString("name").ifBlank { "Untitled" }
-            if (name.equals(CLOUD_FOLDER_NAME, ignoreCase = true)) continue
             val owner = firstOwnerEmail(child)
-            val ownedByMe = !me.isEmpty() && owner?.equals(me, ignoreCase = true) == true
+            val ownedByMe = me.isNotEmpty() && owner?.equals(me, ignoreCase = true) == true
             if (ownedByMe) continue
+
+            // Whole Undertwig folder shared with us → list its project children.
+            if (name.equals(CLOUD_FOLDER_NAME, ignoreCase = true)) {
+                for (project in listChildren(accessToken, id)) {
+                    if (project.optString("mimeType") != "application/vnd.google-apps.folder") continue
+                    val projectId = project.optString("id").takeIf { it.isNotBlank() } ?: continue
+                    if (projectId in ownedIds || projectId in invitedIds) continue
+                    invitedIds += projectId
+                    invited += DriveRemoteProject(
+                        folderId = projectId,
+                        name = project.optString("name").ifBlank { "Untitled" },
+                        modifiedTimeMs = parseDriveTime(project.optString("modifiedTime")),
+                        ownerEmail = firstOwnerEmail(project) ?: owner,
+                        ownedByMe = false,
+                    )
+                }
+                continue
+            }
+
+            // Project folder shared directly → only keep if parent is someone else's Undertwig.
+            val meta = folderMetaWithParents(accessToken, id) ?: child
+            if (!isUnderForeignUndertwig(accessToken, meta, me)) continue
+            invitedIds += id
             invited += DriveRemoteProject(
                 folderId = id,
                 name = name,
-                modifiedTimeMs = parseDriveTime(child.optString("modifiedTime")),
-                ownerEmail = owner,
+                modifiedTimeMs = parseDriveTime(meta.optString("modifiedTime").ifBlank {
+                    child.optString("modifiedTime")
+                }),
+                ownerEmail = firstOwnerEmail(meta) ?: owner,
                 ownedByMe = false,
             )
         }
 
         owned.sortedByDescending { it.modifiedTimeMs } to
             invited.sortedByDescending { it.modifiedTimeMs }
+    }
+
+    /** True when [folderMeta] has a parent folder named Undertwig that is not owned by [me]. */
+    private fun isUnderForeignUndertwig(
+        accessToken: String,
+        folderMeta: JSONObject,
+        me: String,
+    ): Boolean {
+        val parents = folderMeta.optJSONArray("parents") ?: return false
+        for (i in 0 until parents.length()) {
+            val parentId = parents.optString(i).takeIf { it.isNotBlank() } ?: continue
+            val parent = runCatching {
+                getJson(
+                    accessToken,
+                    "$DRIVE_API/files/${Uri.encode(parentId)}" +
+                        "?supportsAllDrives=true&fields=id,name,mimeType,trashed,owners",
+                )
+            }.getOrNull() ?: continue
+            if (parent.optBoolean("trashed", false)) continue
+            if (parent.optString("mimeType") != "application/vnd.google-apps.folder") continue
+            if (!parent.optString("name").equals(CLOUD_FOLDER_NAME, ignoreCase = true)) continue
+            val parentOwner = firstOwnerEmail(parent)?.lowercase().orEmpty()
+            if (parentOwner.isEmpty() || parentOwner != me) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun folderMetaWithParents(accessToken: String, folderId: String): JSONObject? {
+        return runCatching {
+            getJson(
+                accessToken,
+                "$DRIVE_API/files/${Uri.encode(folderId)}" +
+                    "?supportsAllDrives=true&fields=id,name,mimeType,modifiedTime,owners,parents,trashed",
+            )
+        }.getOrNull()?.takeUnless { it.optBoolean("trashed", false) }
     }
 
     /**
@@ -345,7 +409,7 @@ class DriveSyncRepository(
     private fun driveSearch(accessToken: String, query: String, pageSize: Int): JSONArray {
         val url =
             "$DRIVE_API/files?supportsAllDrives=true&includeItemsFromAllDrives=true" +
-                "&fields=files(id,name,mimeType,modifiedTime,owners)" +
+                "&fields=files(id,name,mimeType,modifiedTime,owners,parents)" +
                 "&q=${URLEncoder.encode(query, "UTF-8")}" +
                 "&pageSize=$pageSize"
         val payload = getJson(accessToken, url)

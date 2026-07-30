@@ -21,7 +21,7 @@ This is **not** a Chrome Custom Tab / TWA wrapper of the website.
 - Compiler log sheet
 - Google Sign-In on home and editor (session stored on device)
 - When logged in, **Save** writes locally and syncs the project to Google Drive (`Undertwig/<project>/`)
-- Home list shows on-device projects, Drive-owned Undertwig folders (cool tint), and shared/invited folders (warm tint)
+- Home list shows on-device projects, Drive projects under your `Undertwig/` folder (cool tint), and shared projects that live under someone else’s `Undertwig/` (warm tint)
 
 ## Not in this build yet
 
@@ -43,7 +43,7 @@ Drive Save/list requests the same Drive scope as the website (`https://www.googl
 
 ## Package
 
-`com.undertwig.app` · version `0.1.37`
+`com.undertwig.app` · version `0.1.38`
 
 ## Store assets
 
