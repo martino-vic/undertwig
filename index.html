@@ -6934,9 +6934,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         } else {
           title.textContent = "Enter writing room";
           message.textContent =
-            "The writing room has space for only one person at a time. Cross this door to claim it — until then, the project stays locked. While you are inside, collaborators see project “" +
-            projectName +
-            "” as read-only. Exit when you are done (or close the tab).";
+            "The writing room has space for only one person at a time. Cross this door to enter it. While you are inside, collaborators have to stay out. Exit when you are done (or close the tab) to allow others to enter again.";
           addButton("View only", "cancel");
           addButton("Enter writing room", "confirm", "modal-confirm");
         }
