@@ -7436,7 +7436,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return toName;
       }
 
-      async function reloadCurrentProjectFromDrive(projectName) {
+      async function reloadCurrentProjectFromDrive(projectName, options) {
+        const opts = options || {};
+        const discardLocalEdits = Boolean(opts.discardLocalEdits);
         const name = String(projectName || getActiveProjectName() || "").trim();
         if (!name || !UndertwigCloud.pullProjectFromDrive) {
           return false;
@@ -7444,9 +7446,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (!UndertwigCloud.hasAccessToken || !UndertwigCloud.hasAccessToken()) {
           return false;
         }
-        const active = state.files[state.activeFile];
-        if (active && !active.binary && UndertwigEditor && UndertwigEditor.getValue) {
-          active.content = UndertwigEditor.getValue();
+        // Load keeps a flush for conflict tooling; Discard must not seed the dirty buffer
+        // into local state before Drive bytes replace the project.
+        if (!discardLocalEdits) {
+          const active = state.files[state.activeFile];
+          if (active && !active.binary && UndertwigEditor && UndertwigEditor.getValue) {
+            active.content = UndertwigEditor.getValue();
+          }
         }
         const pulled = await UndertwigCloud.pullProjectFromDrive(name, {
           onProgress: function (message) {
@@ -7462,6 +7468,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         collapsedFolders.delete(name);
         persistCollapsedFolders();
         render();
+        // Ensure the visible editor matches Drive even if Monaco skipped a no-op setValue.
+        const path = state.activeFile;
+        const file = state.files[path];
+        if (UndertwigEditor && UndertwigEditor.setValue) {
+          UndertwigEditor.setValue(
+            file && !file.binary ? file.content : "",
+            path || ""
+          );
+        }
         writingRoomSessionDirty = false;
         return true;
       }
@@ -7532,9 +7547,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               return;
             }
           } else if (choice === "discard") {
-            setStatus("Discarding unsaved changes and reloading from Google Drive…");
+            setStatus("Discarding unsaved changes and loading from Google Drive…");
             try {
-              await reloadCurrentProjectFromDrive(projectName);
+              writingRoomSessionDirty = false;
+              await reloadCurrentProjectFromDrive(projectName, { discardLocalEdits: true });
             } catch (error) {
               setStatus(
                 "Could not reload from Drive: " +

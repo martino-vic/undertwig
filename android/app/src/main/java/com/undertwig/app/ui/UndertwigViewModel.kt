@@ -887,22 +887,23 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun resolveUnsavedWritingRoomExit(activity: Activity, choice: UnsavedExitChoice) {
-        val projectId = heldWritingRoomProjectId ?: run {
+        val editorState = _editor.value
+        val projectId = (heldWritingRoomProjectId ?: editorState.projectId).ifEmpty {
             _editor.update { it.copy(writingRoomPrompt = null) }
             return
         }
-        val projectName = _editor.value.projectName
+        val projectName = editorState.projectName
         _editor.update { it.copy(writingRoomPrompt = null, writingRoomBusy = true) }
         viewModelScope.launch {
             try {
-                val state = _editor.value
-                if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
-                    runCatching {
-                        repo.writeFile(projectId, state.activePath, state.editorText)
-                    }
-                }
                 when (choice) {
                     UnsavedExitChoice.SaveCloud -> {
+                        val state = _editor.value
+                        if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
+                            runCatching {
+                                repo.writeFile(projectId, state.activePath, state.editorText)
+                            }
+                        }
                         _editor.update {
                             it.copy(status = "Saving “$projectName” to Google Drive before leaving…")
                         }
@@ -912,6 +913,12 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         _editor.update { it.copy(dirty = false) }
                     }
                     UnsavedExitChoice.SaveLocalCopy -> {
+                        val state = _editor.value
+                        if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
+                            runCatching {
+                                repo.writeFile(projectId, state.activePath, state.editorText)
+                            }
+                        }
                         val copyName = repo.allocateCopyName(projectName)
                         repo.duplicateProjectLocally(projectId, copyName)
                         refreshProjects()
@@ -920,13 +927,30 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                                 status = "Saved a local drawer copy as “$copyName”. Reloading from Drive…",
                             )
                         }
-                        reloadWorkDeskFromDrive(activity, projectId, projectName)
+                        // Same as Load: replace work desk + editor from Drive.
+                        loadCurrentProjectFromDriveSuspending(
+                            activity = activity,
+                            projectId = projectId,
+                            projectName = projectName,
+                            statusMessage =
+                                "Saved a local drawer copy as “$copyName”. Loading “$projectName” from Google Drive…",
+                        )
                     }
                     UnsavedExitChoice.Discard -> {
+                        // Do not flush discarded edits to disk — match the Load button.
                         _editor.update {
-                            it.copy(status = "Discarding unsaved changes and reloading from Google Drive…")
+                            it.copy(
+                                dirty = false,
+                                status = "Discarding unsaved changes and loading from Google Drive…",
+                            )
                         }
-                        reloadWorkDeskFromDrive(activity, projectId, projectName)
+                        loadCurrentProjectFromDriveSuspending(
+                            activity = activity,
+                            projectId = projectId,
+                            projectName = projectName,
+                            statusMessage =
+                                "Discarding unsaved changes and loading “$projectName” from Google Drive…",
+                        )
                     }
                 }
                 setWritingRoomBusy(false)
@@ -941,6 +965,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 setWritingRoomBusy(false)
                 _editor.update {
                     it.copy(
+                        loadingFile = false,
                         error = e.message ?: "Could not finish leaving the writing room.",
                         status = "Still in the writing room",
                         inWritingRoom = true,
@@ -955,12 +980,23 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private suspend fun reloadWorkDeskFromDrive(
+    /**
+     * Same work as the editor Load button: pull the Drive tree and replace the open editor buffer.
+     */
+    private suspend fun loadCurrentProjectFromDriveSuspending(
         activity: Activity,
         projectId: String,
         projectName: String,
+        statusMessage: String,
     ) {
         val previousActive = _editor.value.activePath
+        _editor.update {
+            it.copy(
+                loadingFile = true,
+                status = statusMessage,
+                error = null,
+            )
+        }
         val fileCount = withDriveAccess(activity) { token ->
             driveSync.syncProjectFromDrive(token, projectId, projectName)
         }
@@ -969,7 +1005,23 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             projectName = projectName,
             previousActive = previousActive,
             fileCount = fileCount,
-            statusMessage = "Reloaded “$projectName” from Google Drive.",
+            statusMessage =
+                "Loaded “$projectName” from Google Drive (" +
+                    "$fileCount file${if (fileCount == 1) "" else "s"}).",
+        )
+        refreshProjects()
+    }
+
+    private suspend fun reloadWorkDeskFromDrive(
+        activity: Activity,
+        projectId: String,
+        projectName: String,
+    ) {
+        loadCurrentProjectFromDriveSuspending(
+            activity = activity,
+            projectId = projectId,
+            projectName = projectName,
+            statusMessage = "Loading “$projectName” from Google Drive…",
         )
     }
 
@@ -1300,7 +1352,6 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
         val projectId = state.projectId
         val projectName = state.projectName
-        val previousActive = state.activePath
 
         // Flush unsaved text before replacing local files (same as desktop).
         if (state.dirty && !ProjectRepository.isBinaryPath(state.activePath)) {
@@ -1310,27 +1361,13 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         loadFileJob = viewModelScope.launch {
-            _editor.update {
-                it.copy(
-                    loadingFile = true,
-                    status = "Loading “$projectName” from Google Drive…",
-                    error = null,
-                )
-            }
             try {
-                val fileCount = withDriveAccess(activity) { token ->
-                    driveSync.syncProjectFromDrive(token, projectId, projectName)
-                }
-                applyLoadedProjectContents(
+                loadCurrentProjectFromDriveSuspending(
+                    activity = activity,
                     projectId = projectId,
                     projectName = projectName,
-                    previousActive = previousActive,
-                    fileCount = fileCount,
-                    statusMessage =
-                        "Loaded “$projectName” from Google Drive (" +
-                            "$fileCount file${if (fileCount == 1) "" else "s"}).",
+                    statusMessage = "Loading “$projectName” from Google Drive…",
                 )
-                refreshProjects()
             } catch (e: AuthRepository.SignInCancelledException) {
                 _editor.update { it.copy(loadingFile = false) }
                 Toast.makeText(
