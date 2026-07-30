@@ -351,27 +351,62 @@ class DriveSyncRepository(
         projectName: String,
         holderEmail: String? = null,
     ): Boolean = withContext(Dispatchers.IO) {
-        val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext false
-        val existing = readProjectLockFile(accessToken, folderId) ?: return@withContext true
-        val fileId = existing.fileId ?: return@withContext false
-        val parentId = existing.parentId ?: return@withContext false
-        val ref = LockFileRef(
-            fileId = fileId,
-            parentId = parentId,
-            modifiedTimeMs = existing.modifiedTimeMs,
-            lock = existing,
-        )
-        // Only trash our own lock, or a clearly abandoned foreign lock.
-        if (!isHeldByThisDevice(existing) && !isAbandonedLock(ref)) {
-            return@withContext false
+        val folderId = resolveProjectFolderId(accessToken, projectId, projectName)
+            ?: return@withContext false
+        // Remove every lock file held by THIS device (duplicates from older bugs included).
+        var refs = listProjectLockFiles(accessToken, folderId)
+        val ours = refs.filter { ref -> ref.lock != null && isHeldByThisDevice(ref.lock) }
+        if (ours.isEmpty()) {
+            // Nothing of ours left — room is free from this device's perspective.
+            return@withContext true
         }
-        removeDriveItemFromProject(
-            accessToken = accessToken,
-            fileId = fileId,
-            parentId = parentId,
+        for (ref in ours) {
+            removeLockFileForce(accessToken, ref)
+        }
+        // Verify: no lock from this device may remain for desktop to see.
+        refs = listProjectLockFiles(accessToken, folderId)
+        val stillOurs = refs.any { ref -> ref.lock != null && isHeldByThisDevice(ref.lock) }
+        if (stillOurs) {
+            // One more pass after a short settle.
+            delay(LOCK_STEAL_RECHECK_MS)
+            for (ref in listProjectLockFiles(accessToken, folderId)) {
+                if (ref.lock != null && isHeldByThisDevice(ref.lock)) {
+                    removeLockFileForce(accessToken, ref)
+                }
+            }
+        }
+        val remaining = listProjectLockFiles(accessToken, folderId)
+            .any { ref -> ref.lock != null && isHeldByThisDevice(ref.lock) }
+        !remaining
+    }
+
+    /**
+     * Trash, detach, or DELETE a lock file, then confirm it is gone from the project folder.
+     */
+    private fun removeLockFileForce(accessToken: String, ref: LockFileRef) {
+        // 1) Trash (owners).
+        runCatching { trashDriveFile(accessToken, ref.fileId) }
+        if (!lockFileStillInFolder(accessToken, ref)) return
+
+        // 2) removeParents (shared-folder writers).
+        if (ref.parentId.isNotBlank()) {
+            runCatching { removeDriveParents(accessToken, ref.fileId, ref.parentId) }
+            if (!lockFileStillInFolder(accessToken, ref)) return
+        }
+
+        // 3) Hard DELETE — HttpURLConnection supports DELETE even when PATCH is flaky.
+        runCatching { deleteDriveFile(accessToken, ref.fileId) }
+    }
+
+    private fun lockFileStillInFolder(accessToken: String, ref: LockFileRef): Boolean {
+        if (ref.parentId.isBlank()) return true
+        val children = findNamedChildren(
+            accessToken,
+            ref.parentId,
+            PROJECT_LOCK_FILE,
+            mimeType = null,
         )
-        val after = readProjectLockFile(accessToken, folderId)
-        after == null || isHeldByThisDevice(after)
+        return children.any { it.optString("id") == ref.fileId }
     }
 
     /**
@@ -383,14 +418,15 @@ class DriveSyncRepository(
         fileId: String,
         parentId: String?,
     ) {
-        val trashed = runCatching {
-            trashDriveFile(accessToken, fileId)
-            true
-        }.getOrElse { false }
-        if (trashed) return
-        val parent = parentId?.takeIf { it.isNotBlank() }
-            ?: error("Could not release the writing room lock (no parent folder).")
-        removeDriveParents(accessToken, fileId, parent)
+        removeLockFileForce(
+            accessToken,
+            LockFileRef(
+                fileId = fileId,
+                parentId = parentId.orEmpty(),
+                modifiedTimeMs = 0L,
+                lock = null,
+            ),
+        )
     }
 
     private fun removeDriveParents(accessToken: String, fileId: String, parentId: String) {
@@ -400,7 +436,7 @@ class DriveSyncRepository(
                 "&removeParents=${Uri.encode(parentId)}" +
                 "&fields=id,parents"
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "PATCH"
+            setHttpMethod(this, "PATCH")
             doOutput = true
             connectTimeout = 30_000
             readTimeout = 60_000
@@ -562,7 +598,7 @@ class DriveSyncRepository(
         val url = "$DRIVE_API/files/${Uri.encode(fileId)}?supportsAllDrives=true"
         val body = """{"trashed":true}""".toByteArray(StandardCharsets.UTF_8)
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "PATCH"
+            setHttpMethod(this, "PATCH")
             doOutput = true
             connectTimeout = 30_000
             readTimeout = 60_000
@@ -579,6 +615,56 @@ class DriveSyncRepository(
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun deleteDriveFile(accessToken: String, fileId: String) {
+        val url = "$DRIVE_API/files/${Uri.encode(fileId)}?supportsAllDrives=true"
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            setHttpMethod(this, "DELETE")
+            connectTimeout = 30_000
+            readTimeout = 60_000
+            setRequestProperty("Authorization", "Bearer $accessToken")
+        }
+        try {
+            val code = connection.responseCode
+            // 204 no content, 200 ok, 404 already gone.
+            if (code !in 200..299 && code != 404) {
+                throwDriveHttpError(code, connection, "Could not delete edit lock.")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * HttpURLConnection historically rejects PATCH. Use the method when allowed;
+     * otherwise reflect into the field / X-HTTP-Method-Override so Drive trash works.
+     */
+    private fun setHttpMethod(connection: HttpURLConnection, method: String) {
+        try {
+            connection.requestMethod = method
+            return
+        } catch (_: java.net.ProtocolException) {
+            // Fall through.
+        }
+        try {
+            var target: Any = connection
+            val delegateField = runCatching {
+                connection.javaClass.getDeclaredField("delegate").also { it.isAccessible = true }
+            }.getOrNull()
+            val delegate = delegateField?.get(connection)
+            if (delegate is HttpURLConnection) {
+                target = delegate
+            }
+            val methodField = java.net.HttpURLConnection::class.java.getDeclaredField("method")
+            methodField.isAccessible = true
+            methodField.set(target, method)
+            return
+        } catch (_: Exception) {
+            // Fall through.
+        }
+        connection.setRequestProperty("X-HTTP-Method-Override", method)
+        connection.requestMethod = if (method == "DELETE") "POST" else "POST"
     }
 
     /**
@@ -1343,7 +1429,7 @@ class DriveSyncRepository(
         }
         val method = if (existingId.isNullOrBlank()) "POST" else "PATCH"
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
+            setHttpMethod(this, method)
             doOutput = true
             connectTimeout = 30_000
             readTimeout = 120_000

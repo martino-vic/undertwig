@@ -896,27 +896,10 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             val snapshot = takeHeldWritingRoomSnapshot()
             var released = false
             if (snapshot != null) {
-                try {
-                    released = withDriveAccess(activity) { token ->
-                        driveSync.releaseFileLock(
-                            accessToken = token,
-                            projectId = snapshot.projectId,
-                            projectName = snapshot.projectName,
-                            holderEmail = snapshot.holderEmail,
-                        )
-                    }
-                } catch (_: Exception) {
-                    // Fall through to best-effort cached-token trash.
-                }
-                if (!released) {
-                    runCatching {
-                        trashWritingRoomLock(snapshot)
-                        released = true
-                    }
-                }
-                // One more verified pass — desktop must see the room free.
-                if (released) {
-                    runCatching {
+                // Retry until Drive no longer lists our lock — desktop reads the same file.
+                repeat(3) { attempt ->
+                    if (released) return@repeat
+                    released = runCatching {
                         withDriveAccess(activity) { token ->
                             driveSync.releaseFileLock(
                                 accessToken = token,
@@ -925,14 +908,16 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                                 holderEmail = snapshot.holderEmail,
                             )
                         }
+                    }.getOrDefault(false)
+                    if (!released) {
+                        released = trashWritingRoomLock(snapshot)
                     }
-                } else {
-                    Toast.makeText(
-                        getApplication(),
-                        "Could not fully release the writing room on Drive. It should free within about a minute.",
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    if (!released && attempt < 2) {
+                        delay(500L * (attempt + 1))
+                    }
                 }
+            } else {
+                released = true
             }
             _editor.update {
                 it.copy(
@@ -940,8 +925,24 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     writingRoomBusyMode = null,
                     inWritingRoom = false,
                     dirty = false,
-                    status = "You left the writing room for “$projectName”.",
+                    status = if (released) {
+                        "You left the writing room for “$projectName”."
+                    } else {
+                        "Left locally, but the Drive lock may still be held. Try Exit again or wait ~10 minutes."
+                    },
+                    error = if (released) {
+                        null
+                    } else {
+                        "Could not remove the writing room lock on Google Drive. Desktop may still see the room as occupied."
+                    },
                 )
+            }
+            if (!released) {
+                Toast.makeText(
+                    getApplication(),
+                    "Could not release the writing room on Google Drive. Desktop may still see it as occupied.",
+                    Toast.LENGTH_LONG,
+                ).show()
             }
             refreshWritingRoomStatus(activity)
             val navigateBack = pendingNavigateBackAfterExit
@@ -1172,16 +1173,16 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         trashWritingRoomLock(snapshot)
     }
 
-    private suspend fun trashWritingRoomLock(held: HeldWritingRoom) {
-        val token = authRepo.cachedDriveAccessTokenOrNull() ?: return
-        runCatching {
+    private suspend fun trashWritingRoomLock(held: HeldWritingRoom): Boolean {
+        val token = authRepo.cachedDriveAccessTokenOrNull() ?: return false
+        return runCatching {
             driveSync.releaseFileLock(
                 token,
                 held.projectId,
                 held.projectName,
                 holderEmail = held.holderEmail,
             )
-        }
+        }.getOrDefault(false)
     }
 
     fun dismissWritingRoomPrompt() {
