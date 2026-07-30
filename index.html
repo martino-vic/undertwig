@@ -4027,6 +4027,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let fileLockHeldFileId = null; // Drive file id for fast unload release
       let fileLockOccupied = null; // { projectName, message, lock } — someone else is in the room
       let fileLockStatusGeneration = 0;
+      let fileLockOccupiedPollTimer = null;
       let writingRoomBusy = false;
       const FILE_LOCK_HEARTBEAT_MS = 20000;
       /** Prompt to leave the writing room after this much idle time while still inside. */
@@ -6751,6 +6752,41 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         stopWritingRoomIdleWatch();
       }
 
+      function stopOccupiedLockPoll() {
+        if (fileLockOccupiedPollTimer) {
+          clearInterval(fileLockOccupiedPollTimer);
+          fileLockOccupiedPollTimer = null;
+        }
+      }
+
+      /** While someone else holds the room, re-peek Drive so we notice when they leave. */
+      function syncOccupiedLockPoll() {
+        const projectName = getActiveProjectName();
+        const occupied = Boolean(
+          fileLockOccupied &&
+            fileLockOccupied.projectName === projectName &&
+            fileLockHeldProject !== projectName
+        );
+        if (!occupied || !fileLocksEnabled()) {
+          stopOccupiedLockPoll();
+          return;
+        }
+        if (fileLockOccupiedPollTimer) {
+          return;
+        }
+        fileLockOccupiedPollTimer = setInterval(function () {
+          if (
+            !fileLockOccupied ||
+            fileLockHeldProject ||
+            !fileLocksEnabled()
+          ) {
+            stopOccupiedLockPoll();
+            return;
+          }
+          refreshWritingRoomStatus();
+        }, FILE_LOCK_HEARTBEAT_MS);
+      }
+
       function startFileLockHeartbeat(projectName) {
         stopFileLockHeartbeat();
         if (!projectName || !UndertwigCloud.heartbeatFileLock) {
@@ -6922,6 +6958,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           const size = new Blob([file.content || ""]).size;
           activeFileMeta.textContent = "Text file, " + formatBytes(size);
         }
+        syncOccupiedLockPoll();
       }
 
       let writingRoomDialog = null;
@@ -7297,6 +7334,27 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
         if (!opts.confirmed) {
+          // Re-check before the Enter dialog so a freed room is not still
+          // shown as occupied from an earlier peek.
+          setWritingRoomBusy(true, "enter");
+          try {
+            await refreshWritingRoomStatus();
+          } finally {
+            setWritingRoomBusy(false);
+          }
+          if (fileLockHeldProject === projectName) {
+            return;
+          }
+          if (
+            fileLockOccupied &&
+            fileLockOccupied.projectName === projectName
+          ) {
+            writingRoomGateDismissedKey = null;
+            showWritingRoomDialog("occupied").then(function () {
+              writingRoomGateDismissedKey = "occupied:" + projectName;
+            });
+            return;
+          }
           const choice = await showWritingRoomDialog("enter");
           if (choice !== "confirm") {
             writingRoomGateDismissedKey = "enter:" + projectName;
@@ -7648,9 +7706,19 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           await exitWritingRoom();
           return;
         }
-        if (fileLockOccupied && fileLockOccupied.projectName === projectName) {
-          writingRoomGateDismissedKey = null;
-          maybePresentWritingRoomGate({ force: true });
+        // Always re-check Drive. Cached fileLockOccupied goes stale when the
+        // holder exits on another device — without this, desktop keeps showing
+        // "occupied by User1" after the room is already free (app was correct).
+        if (writingRoomBusy) {
+          return;
+        }
+        setWritingRoomBusy(true, "enter");
+        try {
+          await refreshWritingRoomStatus();
+        } finally {
+          setWritingRoomBusy(false);
+        }
+        if (fileLockHeldProject === projectName) {
           return;
         }
         writingRoomGateDismissedKey = null;
