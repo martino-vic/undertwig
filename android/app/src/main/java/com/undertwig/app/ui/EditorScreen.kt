@@ -254,10 +254,10 @@ fun EditorScreen(
                             enabled = !state.writingRoomBusy,
                         ) {
                             Text(
-                                when {
-                                    state.inWritingRoom -> "Exit writing room"
-                                    state.writingRoomOccupiedMessage != null -> "Room occupied"
-                                    else -> "Enter writing room"
+                                if (state.inWritingRoom) {
+                                    "Exit writing room"
+                                } else {
+                                    "Enter writing room"
                                 },
                                 maxLines = 1,
                             )
