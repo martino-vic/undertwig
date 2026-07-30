@@ -2136,16 +2136,6 @@
   }
 
   /**
-   * True for a shared project under someone else's Undertwig, or when the parent
-   * cannot be read (typical project-only invites). Identity is the Undertwig parent,
-   * never LaTeX file contents.
-   */
-  async function isInvitedSharedProjectFolder(folderMeta, me) {
-    const status = await undertwigInviteStatus(folderMeta, me);
-    return status === "foreign-undertwig" || status === "unknown";
-  }
-
-  /**
    * List invited project folders shared with the user that live under someone else's Undertwig /
    * (or children of a shared Undertwig root). Mirrors Android DriveSyncRepository.listCloudProjects.
    * @returns {Promise<Array<{id: string, name: string, modifiedTime: string|null, ownerEmail: string|null}>>}
@@ -2232,8 +2222,9 @@
         continue;
       }
 
-      // Project folder shared directly. Identity = child of Undertwig.
-      // Invitees often cannot read the parent — still keep those shares.
+      // Project folder shared directly → only keep if parent is someone else's Undertwig.
+      // Unknown/unreadable parents are NOT listed here (that re-includes every Shared Drive
+      // folder). Those invites appear via the Undertwig invite registry after open.
       const meta =
         (await fetchDriveFileMeta(
           id,
@@ -2242,7 +2233,7 @@
       if (!isDriveFolderMeta(meta)) {
         continue;
       }
-      if (!(await isInvitedSharedProjectFolder(meta, me))) {
+      if (!(await isUnderForeignUndertwig(meta, me))) {
         continue;
       }
       invitedIds[id] = true;
@@ -2331,8 +2322,10 @@
         continue;
       }
       if (status !== "foreign-undertwig") {
-        // unknown parent: keep only if this id was accepted via Undertwig invite registry
+        // unknown parent: keep only if accepted via Undertwig invite registry;
+        // drop stale Shared-with-me pollution from older builds.
         if (!registryIds[mappedId]) {
+          removeMappedProject(mapped.name);
           continue;
         }
       }

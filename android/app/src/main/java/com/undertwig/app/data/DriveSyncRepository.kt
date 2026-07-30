@@ -507,10 +507,11 @@ class DriveSyncRepository(
                 continue
             }
 
-            // Project folder shared directly. Identity = child of Undertwig.
-            // Invitees often cannot read the parent Undertwig folder — still keep those.
+            // Project folder shared directly → only keep if parent is someone else's Undertwig.
+            // Unknown/unreadable parents are handled by the invite registry (opened via Undertwig),
+            // not by listing every Shared-with-me folder.
             val meta = folderMetaWithParents(accessToken, id) ?: child
-            if (!isInvitedSharedProjectFolder(accessToken, meta, me)) continue
+            if (!isUnderForeignUndertwig(accessToken, meta, me)) continue
             invitedIds += id
             invited += DriveRemoteProject(
                 folderId = id,
@@ -582,20 +583,14 @@ class DriveSyncRepository(
     }
 
     /**
-     * True for a shared project folder under someone else's Undertwig, or when the parent
-     * cannot be read (typical for invitees who only received the project folder).
-     * False only when every readable parent is confirmed not to be a foreign Undertwig.
+     * True only when a parent folder is named Undertwig and is not owned by [me].
+     * Unrelated shared Drive folders are excluded from Cloud (invited).
      */
-    private fun isInvitedSharedProjectFolder(
+    private fun isUnderForeignUndertwig(
         accessToken: String,
         folderMeta: JSONObject,
         me: String,
-    ): Boolean {
-        return when (undertwigInviteStatus(accessToken, folderMeta, me)) {
-            InviteStatus.FOREIGN_UNDERTWIG, InviteStatus.UNKNOWN -> true
-            InviteStatus.NOT_UNDERTWIG -> false
-        }
-    }
+    ): Boolean = undertwigInviteStatus(accessToken, folderMeta, me) == InviteStatus.FOREIGN_UNDERTWIG
 
     private fun folderMetaWithParents(accessToken: String, folderId: String): JSONObject? {
         return runCatching {
