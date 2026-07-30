@@ -3097,7 +3097,7 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260729e"></script>
-    <script src="cloud-storage.js?v=20260730i"></script>
+    <script src="cloud-storage.js?v=20260730j"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -3972,11 +3972,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let fileLockStatusGeneration = 0;
       let writingRoomBusy = false;
       const FILE_LOCK_HEARTBEAT_MS = 20000;
+      /** Prompt to leave the writing room after this much idle time while still inside. */
+      const WRITING_ROOM_IDLE_MS = 5 * 60 * 1000;
+      const WRITING_ROOM_IDLE_MINUTES = Math.round(WRITING_ROOM_IDLE_MS / 60000);
       const writingRoomButton = document.getElementById("writingRoomButton");
       let writingRoomBusyTimer = null;
       let writingRoomDialogMode = null;
       let writingRoomGateDismissedKey = null; // path or "occupied:path" after view-only / OK
       let writingRoomGatePromise = null;
+      let writingRoomIdleTimer = null;
+      let writingRoomIdlePromptOpen = false;
       let cloudStatusMode = "logged-out";
       // Declared early: boot used to call initCloudProject before this existed (TDZ), so invite sync never ran.
       let cloudInitPromise = null;
@@ -5333,10 +5338,23 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           // Ignore.
         }
       });
+      // Activity while holding the writing room resets the idle-exit timer.
+      ["keydown", "mousedown", "pointerdown", "touchstart", "wheel", "scroll"].forEach(
+        function (type) {
+          document.addEventListener(
+            type,
+            function () {
+              noteWritingRoomActivity();
+            },
+            { passive: true, capture: true }
+          );
+        }
+      );
       document.addEventListener("visibilitychange", function () {
         if (document.visibilityState === "hidden") {
           return;
         }
+        noteWritingRoomActivity();
         if (fileLocksEnabled()) {
           refreshWritingRoomStatus();
         }
@@ -5545,6 +5563,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           const file = state.files[state.activeFile];
           if (!file || file.binary) return;
           file.content = value;
+          noteWritingRoomActivity();
           persistProject();
           updateMeta();
         },
@@ -6581,11 +6600,65 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         );
       }
 
+      function stopWritingRoomIdleWatch() {
+        if (writingRoomIdleTimer) {
+          clearTimeout(writingRoomIdleTimer);
+          writingRoomIdleTimer = null;
+        }
+      }
+
+      function noteWritingRoomActivity() {
+        if (!fileLockHeldPath || writingRoomIdlePromptOpen) {
+          return;
+        }
+        resetWritingRoomIdleWatch();
+      }
+
+      function resetWritingRoomIdleWatch() {
+        stopWritingRoomIdleWatch();
+        if (!fileLockHeldPath) {
+          return;
+        }
+        writingRoomIdleTimer = setTimeout(function () {
+          writingRoomIdleTimer = null;
+          presentWritingRoomIdleExitPrompt();
+        }, WRITING_ROOM_IDLE_MS);
+      }
+
+      async function presentWritingRoomIdleExitPrompt() {
+        if (!fileLockHeldPath || writingRoomIdlePromptOpen) {
+          return;
+        }
+        // Don't interrupt enter/exit/occupied dialogs.
+        if (
+          writingRoomDialog &&
+          !writingRoomDialog.hidden &&
+          writingRoomDialogMode &&
+          writingRoomDialogMode !== "idle"
+        ) {
+          resetWritingRoomIdleWatch();
+          return;
+        }
+        writingRoomIdlePromptOpen = true;
+        const minutes = WRITING_ROOM_IDLE_MINUTES;
+        const choice = await showWritingRoomDialog("idle", { minutes: minutes });
+        writingRoomIdlePromptOpen = false;
+        if (choice === "confirm") {
+          await exitWritingRoom({ skipConfirm: true });
+          setStatus(
+            "Left the writing room after " + minutes + " minute" + (minutes === 1 ? "" : "s") + " of inactivity."
+          );
+        } else if (fileLockHeldPath) {
+          resetWritingRoomIdleWatch();
+        }
+      }
+
       function stopFileLockHeartbeat() {
         if (fileLockHeartbeatTimer) {
           clearInterval(fileLockHeartbeatTimer);
           fileLockHeartbeatTimer = null;
         }
+        stopWritingRoomIdleWatch();
       }
 
       function startFileLockHeartbeat(projectName, relPath) {
@@ -6593,6 +6666,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (!projectName || !relPath || !UndertwigCloud.heartbeatFileLock) {
           return;
         }
+        resetWritingRoomIdleWatch();
         fileLockHeartbeatTimer = setInterval(function () {
           UndertwigCloud.heartbeatFileLock(projectName, relPath)
             .then(function (result) {
@@ -6792,10 +6866,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       /**
-       * @param {"enter"|"occupied"|"exit"} mode
+       * @param {"enter"|"occupied"|"exit"|"idle"} mode
+       * @param {{minutes?: number}=} options
        * @returns {Promise<"cancel"|"confirm">}
        */
-      function showWritingRoomDialog(mode) {
+      function showWritingRoomDialog(mode, options) {
+        const dialogOpts = options || {};
         if (
           writingRoomGatePromise &&
           writingRoomDialog &&
@@ -6837,7 +6913,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               : "") +
             "Live collaboration is not supported yet — the writing room has space for only one person at a time. You can read “" +
             rel +
-            "” now. Abandoned rooms free after about 45 seconds.";
+            "” now. Abandoned rooms free shortly after the holder leaves or closes the browser.";
           addButton("OK", "cancel", "modal-confirm");
         } else if (mode === "exit") {
           title.textContent = "Exit writing room?";
@@ -6845,6 +6921,22 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             "Leave the writing room for “" +
             rel +
             "”? Others will be able to enter and edit this file.";
+          addButton("Stay", "cancel");
+          addButton("Exit writing room", "confirm", "modal-confirm");
+        } else if (mode === "idle") {
+          const minutes = Math.max(
+            1,
+            Number(dialogOpts.minutes) || WRITING_ROOM_IDLE_MINUTES
+          );
+          title.textContent = "Still in the writing room?";
+          message.textContent =
+            "You've been inactive for " +
+            minutes +
+            " minute" +
+            (minutes === 1 ? "" : "s") +
+            ". Would you like to exit the writing room so others can edit “" +
+            rel +
+            "”?";
           addButton("Stay", "cancel");
           addButton("Exit writing room", "confirm", "modal-confirm");
         } else {

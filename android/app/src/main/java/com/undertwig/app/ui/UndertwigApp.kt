@@ -92,6 +92,7 @@ fun UndertwigApp(
                 },
                 onConfirmWritingRoomPrompt = { viewModel.confirmWritingRoomPrompt(activity) },
                 onDismissWritingRoomPrompt = viewModel::dismissWritingRoomPrompt,
+                onWritingRoomActivity = viewModel::noteWritingRoomActivity,
             )
         }
         composable("pdf") {

@@ -63,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -116,6 +117,7 @@ fun EditorScreen(
     onWritingRoomClick: () -> Unit = {},
     onConfirmWritingRoomPrompt: () -> Unit = {},
     onDismissWritingRoomPrompt: () -> Unit = {},
+    onWritingRoomActivity: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var showAdd by remember { mutableStateOf(false) }
@@ -339,7 +341,16 @@ fun EditorScreen(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .pointerInput(state.inWritingRoom) {
+                        if (!state.inWritingRoom) return@pointerInput
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent()
+                                onWritingRoomActivity()
+                            }
+                        }
+                    },
             ) {
                 key(state.projectId, state.activePath, state.editorRevision) {
                     BasicTextField(
@@ -762,6 +773,24 @@ fun EditorScreen(
                 text = {
                     Text(
                         "Leave the writing room for “${prompt.path}”? Others will be able to enter and edit this file.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = onConfirmWritingRoomPrompt) { Text("Exit writing room") }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismissWritingRoomPrompt) { Text("Stay") }
+                },
+            )
+        }
+        is WritingRoomPrompt.IdleExit -> {
+            AlertDialog(
+                onDismissRequest = onDismissWritingRoomPrompt,
+                title = { Text("Still in the writing room?") },
+                text = {
+                    val minutes = prompt.minutes
+                    Text(
+                        "You've been inactive for $minutes minute${if (minutes == 1) "" else "s"}. Would you like to exit the writing room so others can edit?",
                     )
                 },
                 confirmButton = {

@@ -92,6 +92,7 @@ sealed class WritingRoomPrompt {
     data class Enter(val path: String) : WritingRoomPrompt()
     data class Exit(val path: String) : WritingRoomPrompt()
     data class Occupied(val message: String) : WritingRoomPrompt()
+    data class IdleExit(val minutes: Int) : WritingRoomPrompt()
 }
 
 class UndertwigViewModel(application: Application) : AndroidViewModel(application) {
@@ -109,6 +110,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private var openCloudJob: Job? = null
     private var fileLockJob: Job? = null
     private var fileLockHeartbeatJob: Job? = null
+    private var writingRoomIdleJob: Job? = null
     private var heldFileLockPath: String? = null
     /** After View only / OK, don't re-popup the door until the user asks or the file changes. */
     private var writingRoomGateDismissedKey: String? = null
@@ -490,6 +492,35 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         if (_editor.value.editorReadOnly) return
         if (ProjectRepository.isBinaryPath(_editor.value.activePath)) return
         _editor.update { it.copy(editorText = text, dirty = true) }
+        noteWritingRoomActivity()
+    }
+
+    fun noteWritingRoomActivity() {
+        if (heldFileLockPath == null) return
+        if (_editor.value.writingRoomPrompt is WritingRoomPrompt.IdleExit) return
+        resetWritingRoomIdleWatch()
+    }
+
+    private fun stopWritingRoomIdleWatch() {
+        writingRoomIdleJob?.cancel()
+        writingRoomIdleJob = null
+    }
+
+    private fun resetWritingRoomIdleWatch() {
+        stopWritingRoomIdleWatch()
+        if (heldFileLockPath == null) return
+        writingRoomIdleJob = viewModelScope.launch {
+            delay(WRITING_ROOM_IDLE_MS)
+            if (heldFileLockPath == null) return@launch
+            val prompt = _editor.value.writingRoomPrompt
+            if (prompt != null && prompt !is WritingRoomPrompt.IdleExit) {
+                resetWritingRoomIdleWatch()
+                return@launch
+            }
+            _editor.update {
+                it.copy(writingRoomPrompt = WritingRoomPrompt.IdleExit(WRITING_ROOM_IDLE_MINUTES))
+            }
+        }
     }
 
     fun refreshWritingRoomStatus(activity: Activity) {
@@ -794,6 +825,10 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             is WritingRoomPrompt.Occupied -> {
                 writingRoomGateDismissedKey = "occupied:${_editor.value.activePath}"
             }
+            is WritingRoomPrompt.IdleExit -> {
+                // Stay in the room — restart the idle watch.
+                resetWritingRoomIdleWatch()
+            }
             else -> Unit
         }
         _editor.update { it.copy(writingRoomPrompt = null) }
@@ -810,6 +845,10 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 _editor.update { it.copy(writingRoomPrompt = null) }
                 exitWritingRoom(activity, skipConfirm = true)
             }
+            is WritingRoomPrompt.IdleExit -> {
+                _editor.update { it.copy(writingRoomPrompt = null) }
+                exitWritingRoom(activity, skipConfirm = true)
+            }
             is WritingRoomPrompt.Occupied -> {
                 dismissWritingRoomPrompt()
             }
@@ -820,6 +859,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private fun stopFileLockHeartbeat() {
         fileLockHeartbeatJob?.cancel()
         fileLockHeartbeatJob = null
+        stopWritingRoomIdleWatch()
     }
 
     private fun startFileLockHeartbeat(
@@ -829,6 +869,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         path: String,
     ) {
         stopFileLockHeartbeat()
+        resetWritingRoomIdleWatch()
         val user = _auth.value.user
         fileLockHeartbeatJob = viewModelScope.launch {
             while (isActive) {
@@ -1654,6 +1695,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     companion object {
         private const val STATUS_TICK_MS = 10_000L
         private const val STATUS_FLASH_MS = 2_500L
+        private const val WRITING_ROOM_IDLE_MS = 5 * 60 * 1000L
+        private const val WRITING_ROOM_IDLE_MINUTES = 5
     }
 
     /**
