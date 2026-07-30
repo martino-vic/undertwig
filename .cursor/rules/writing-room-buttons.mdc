@@ -1,0 +1,26 @@
+---
+description: Writing room control labels — never use Occupied as a button
+alwaysApply: true
+---
+
+# Writing room buttons
+
+**NEVER** use "Room occupied", "Occupied", or any occupied-state label as a **button** label — on Android, web, or anywhere else.
+
+Allowed writing-room **button** labels only:
+- Enter room / Enter writing room
+- Exit room / Exit writing room
+- Entering writing room / Exiting writing room (or Leaving…) while a transition is in progress
+
+Occupied state is communicated with a **dialog/message** when the user tries to enter (or on open), never by renaming the button.
+
+```
+// ❌ BAD — button text changes when someone else holds the room
+button.text = "Room occupied"
+
+// ✅ GOOD — button stays Enter; tap shows Occupied dialog
+button.text = "Enter writing room"
+// → show "Room occupied" dialog / alert
+```
+
+Also: no ASCII `| / - \` rotators on the Android app — ever.
