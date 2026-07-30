@@ -7349,7 +7349,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         });
 
         item.appendChild(row);
-        if (opts.section === "current") {
+        if (opts.section === "current" || opts.section === "other") {
           const renameButton = document.createElement("button");
           renameButton.type = "button";
           renameButton.className = "tree-rename";
@@ -7474,6 +7474,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return cleaned === project || cleaned.startsWith(project + "/");
       }
 
+      function pathBelongsToLocalProject(path) {
+        const cleaned = normalizePath(path);
+        if (!cleaned) {
+          return false;
+        }
+        const root = cleaned.split("/")[0];
+        return listLocalRootProjects(state).includes(root);
+      }
+
       function sanitizeEntryName(raw) {
         const cleaned = String(raw || "")
           .replace(/\\/g, "/")
@@ -7487,8 +7496,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         path = normalizePath(path);
         const file = state.files[path];
         if (!file) return;
-        if (!pathBelongsToCurrentProject(path)) {
-          setStatus("Only files in the current project can be renamed.", true);
+        if (!pathBelongsToLocalProject(path)) {
+          setStatus("Only local project files can be renamed.", true);
           return;
         }
 
@@ -7501,7 +7510,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const parent = parentFolder(path);
         const destination = parent ? parent + "/" + nextName : nextName;
         if (!destination.includes("/")) {
-          setStatus("Keep files inside the current project.", true);
+          setStatus("Keep files inside a project.", true);
           return;
         }
         if (state.files[destination]) {
@@ -7528,8 +7537,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       function renameFolderEntry(path) {
         path = normalizePath(path);
         if (!path) return;
-        if (!pathBelongsToCurrentProject(path)) {
-          setStatus("Only folders in the current project can be renamed.", true);
+        if (!pathBelongsToLocalProject(path)) {
+          setStatus("Only local project folders can be renamed.", true);
           return;
         }
 
@@ -7623,8 +7632,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       function deleteFile(path) {
         if (!state.files[path]) return;
-        if (!pathBelongsToCurrentProject(path)) {
-          setStatus("Only files in the current project can be deleted.", true);
+        if (!pathBelongsToLocalProject(path)) {
+          setStatus("Only local project files can be deleted.", true);
           return;
         }
 
@@ -7641,8 +7650,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       function deleteFolder(path) {
         if (!path) return;
-        if (!pathBelongsToCurrentProject(path)) {
-          setStatus("Only folders in the current project can be deleted.", true);
+        if (!pathBelongsToLocalProject(path)) {
+          setStatus("Only local project folders can be deleted.", true);
           return;
         }
 
