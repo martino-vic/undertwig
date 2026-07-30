@@ -2884,13 +2884,13 @@
             <button class="toolbar-button writing-room-button hidden" id="writingRoomButton" type="button" hidden title="Enter or leave the writing room for this project">
               Enter writing room
             </button>
-            <button class="toolbar-button save-button" id="saveProject" type="button" title="Save in this browser">
+            <button class="toolbar-button save-button" id="saveProject" type="button" title="Save the whole project in this browser and on disk">
               <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
                 <path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zM15 9H5V5h10v4z"/>
               </svg>
               Save
             </button>
-            <button class="toolbar-button save-file-button hidden" id="saveFile" type="button" hidden title="Save only the open file in this browser and the linked local folder">
+            <button class="toolbar-button save-file-button hidden" id="saveFile" type="button" hidden title="Save only the open file in this browser and on disk">
               Save file
             </button>
             </div>
@@ -3559,8 +3559,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           bound = false;
         }
         saveButton.title = bound
-          ? "Save project in this browser and the linked local folder"
-          : "Save project in this browser";
+          ? "Save the whole project in this browser and the linked local folder"
+          : "Save the whole project in this browser and on disk (you’ll choose a folder if needed)";
       }
 
       function localDesktopAllowed() {
@@ -3590,8 +3590,115 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         button.classList.toggle("hidden", !show);
         if (show) {
           button.title =
-            "Save only the open file in this browser and the linked local folder";
+            "Save only the open editor file in this browser and on disk";
         }
+      }
+
+      /**
+       * Offline desktop: every Save writes to disk. If this project has no linked
+       * folder yet, ask once and remember the handle.
+       */
+      async function ensureLocalFolderLinked(projectName) {
+        const name = String(projectName || "").trim();
+        if (!name) {
+          return { ok: false, reason: "no-project" };
+        }
+        if (!localDesktopAllowed() || !window.UndertwigLocalFs) {
+          return { ok: false, reason: "unavailable" };
+        }
+        if (!UndertwigLocalFs.supportsDirectoryPicker()) {
+          return { ok: false, reason: "unsupported" };
+        }
+        try {
+          if (await UndertwigLocalFs.hasBoundDirectory(name)) {
+            return { ok: true, reason: "bound" };
+          }
+        } catch (_error) {
+          // Fall through and offer a picker.
+        }
+
+        setStatus(
+          "Choose the local folder for “" + name + "” so saves can write to disk…"
+        );
+        await yieldToUi();
+        try {
+          const handle = await UndertwigLocalFs.pickProjectDirectory();
+          const allowed = await UndertwigLocalFs.ensureReadWritePermission(handle);
+          if (!allowed) {
+            return { ok: false, reason: "denied" };
+          }
+          await UndertwigLocalFs.putHandle(name, handle);
+          restoreSaveButtonTitle();
+          refreshSaveFileButtonVisibility();
+          return {
+            ok: true,
+            reason: "linked",
+            folderName: handle.name || name,
+          };
+        } catch (error) {
+          if (error && error.name === "AbortError") {
+            return { ok: false, reason: "cancelled" };
+          }
+          throw error;
+        }
+      }
+
+      async function writeActiveFileToLocalDisk(projectName, filePath) {
+        const link = await ensureLocalFolderLinked(projectName);
+        if (!link.ok) {
+          return { saved: false, reason: link.reason, folderName: "" };
+        }
+        const diskResult = await UndertwigLocalFs.saveFileToDirectory(
+          projectName,
+          filePath,
+          state.files[filePath],
+          { base64ToBytes: base64ToBytes }
+        );
+        return {
+          saved: Boolean(diskResult && diskResult.saved),
+          reason: (diskResult && diskResult.reason) || link.reason,
+          folderName: (diskResult && diskResult.folderName) || link.folderName || "",
+        };
+      }
+
+      async function writeProjectToLocalDisk(projectName, signal, onProgress) {
+        const link = await ensureLocalFolderLinked(projectName);
+        if (!link.ok) {
+          return {
+            saved: false,
+            reason: link.reason,
+            folderName: "",
+            written: 0,
+          };
+        }
+        const diskResult = await UndertwigLocalFs.saveProjectToDirectory(
+          projectName,
+          state,
+          {
+            base64ToBytes: base64ToBytes,
+            signal: signal,
+            onProgress: onProgress,
+          }
+        );
+        return {
+          saved: Boolean(diskResult && diskResult.saved),
+          reason: (diskResult && diskResult.reason) || link.reason,
+          folderName: (diskResult && diskResult.folderName) || link.folderName || "",
+          written: (diskResult && diskResult.written) || 0,
+        };
+      }
+
+      function diskSkipHint(reason) {
+        if (reason === "cancelled") {
+          return " Folder picker cancelled — browser copy only.";
+        }
+        if (reason === "denied") {
+          return " Folder permission denied — browser copy only.";
+        }
+        if (reason === "unsupported" || reason === "unavailable") {
+          return " This browser cannot write a local folder — browser copy only.";
+        }
+        return " Browser copy only.";
       }
 
       function yieldToUi() {
@@ -4328,32 +4435,23 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           await yieldToUi();
 
           let diskNote = "";
-          const bound =
-            window.UndertwigLocalFs &&
-            (await UndertwigLocalFs.hasBoundDirectory(projectName));
-          if (bound) {
-            setStatus("Writing “" + shortName + "” to the local folder…");
-            await yieldToUi();
-            const diskResult = await UndertwigLocalFs.saveFileToDirectory(
-              projectName,
-              filePath,
-              state.files[filePath],
-              { base64ToBytes: base64ToBytes }
-            );
-            if (diskResult && diskResult.saved) {
-              diskNote =
-                " and local folder" +
-                (diskResult.folderName ? " “" + diskResult.folderName + "”" : "");
-            }
+          let diskReason = "";
+          setStatus("Writing “" + shortName + "” to the local folder…");
+          await yieldToUi();
+          const diskResult = await writeActiveFileToLocalDisk(projectName, filePath);
+          if (diskResult && diskResult.saved) {
+            diskNote =
+              " and local folder" +
+              (diskResult.folderName ? " “" + diskResult.folderName + "”" : "");
+          } else {
+            diskReason = (diskResult && diskResult.reason) || "unbound";
           }
 
           if (localOk) {
             setStatus(
-              "Saved “" +
-                shortName +
-                "” in this browser" +
-                diskNote +
-                (bound ? "." : ". Tip: Import project to also write to disk.")
+              diskNote
+                ? "Saved “" + shortName + "” in this browser" + diskNote + "."
+                : "Saved “" + shortName + "”." + diskSkipHint(diskReason)
             );
           } else if (diskNote) {
             setStatus(
@@ -4501,28 +4599,20 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
 
-          // Offline desktop: also write back through the linked folder handle when present.
+          // Offline desktop: always write to a local folder (prompt to link if needed).
           let diskNote = "";
+          let diskReason = "";
           const localProjectName = getActiveProjectName();
-          const bound =
-            localProjectName &&
-            localDesktopAllowed() &&
-            window.UndertwigLocalFs &&
-            (await UndertwigLocalFs.hasBoundDirectory(localProjectName));
-          if (bound) {
+          if (localProjectName && localDesktopAllowed() && window.UndertwigLocalFs) {
             setStatus("Writing project files to the local folder…");
             await yieldToUi();
-            const diskResult = await UndertwigLocalFs.saveProjectToDirectory(
+            const diskResult = await writeProjectToLocalDisk(
               localProjectName,
-              state,
-              {
-                base64ToBytes: base64ToBytes,
-                signal: abortController.signal,
-                onProgress: function (done, total) {
-                  setStatus(
-                    "Writing to local folder… " + done + "/" + total + " files"
-                  );
-                },
+              abortController.signal,
+              function (done, total) {
+                setStatus(
+                  "Writing to local folder… " + done + "/" + total + " files"
+                );
               }
             );
             if (abortController.signal.aborted) {
@@ -4538,14 +4628,18 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 " file" +
                 (diskResult.written === 1 ? "" : "s") +
                 ")";
+            } else {
+              diskReason = (diskResult && diskResult.reason) || "unbound";
             }
           }
 
           if (localOk) {
             setStatus(
-              "Saved in this browser" +
-                diskNote +
-                (bound ? "." : ". Tip: use Import project to also save to disk.")
+              diskNote
+                ? "Saved in this browser" + diskNote + "."
+                : localDesktopAllowed()
+                  ? "Saved in this browser." + diskSkipHint(diskReason)
+                  : "Saved in this browser."
             );
             restoreSaveButtonTitle();
           } else if (diskNote) {
@@ -5699,7 +5793,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             } else {
               event.stopPropagation();
             }
-            saveProjectNow();
+            if (localDesktopAllowed()) {
+              saveCurrentFileNow();
+            } else {
+              saveProjectNow();
+            }
             return;
           }
           if ((key === "Enter" || key === "NumpadEnter") && !event.shiftKey) {
@@ -10782,7 +10880,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               updateMeta();
             },
             onSave: function () {
-              saveProjectNow();
+              if (localDesktopAllowed()) {
+                saveCurrentFileNow();
+              } else {
+                saveProjectNow();
+              }
             },
             onConvert: function () {
               compileProject();
