@@ -1370,66 +1370,8 @@
         padding: 0 14px;
       }
 
-      .local-path-field-label {
-        display: block;
-        margin: 0 0 6px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .local-path-input {
-        display: block;
-        width: 100%;
-        box-sizing: border-box;
-        margin: 0 0 16px;
-        min-height: 36px;
-        padding: 0 10px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--panel-soft);
-        color: var(--text);
-        font: 13px/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-      }
-
-      .local-path-warning {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 8px 14px;
-        border-top: 1px solid #6a4a2e;
-        background: #2a2118;
-        color: #f0d2a8;
-        font-size: 12px;
-        line-height: 1.4;
-      }
-
-      .local-path-warning.hidden {
-        display: none;
-      }
-
-      .local-path-warning-text {
-        min-width: 0;
-        flex: 1 1 auto;
-        white-space: pre-wrap;
-      }
-
-      .local-path-warning-actions {
-        display: flex;
-        flex: 0 0 auto;
-        gap: 6px;
-      }
-
-      .local-path-warning-actions button {
-        min-height: 28px;
-        padding: 0 10px;
-        font-size: 12px;
-      }
-
       @media (max-width: 1180px) {
-        #localConsoleButton,
-        #saveFile,
-        .local-path-warning {
+        #saveFile {
           display: none !important;
         }
       }
@@ -2951,9 +2893,6 @@
             <button class="toolbar-button save-file-button hidden" id="saveFile" type="button" hidden title="Save only the open file in this browser and the linked local folder">
               Save file
             </button>
-            <button class="toolbar-button console-button hidden" id="localConsoleButton" type="button" hidden title="Open your system terminal in the Work desk project folder">
-              Console
-            </button>
             </div>
             <div class="topbar-convert-cluster">
               <button class="convert-button" id="convert" type="button">Convert</button>
@@ -3208,8 +3147,8 @@
     <script src="auth.js?v=20260729e"></script>
     <script src="cloud-storage.js?v=20260730q"></script>
     <script src="invite.js?v=20260728q"></script>
-    <script src="local-project-fs.js?v=20260730f"></script>
-    <script src="local-desktop.js?v=20260730f"></script>
+    <script src="local-project-fs.js?v=20260730g"></script>
+    <script src="local-desktop.js?v=20260730g"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260729a"></script>
@@ -3597,19 +3536,17 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         let bound = false;
         try {
           const projectName = getActiveProjectName();
-          if (window.UndertwigLocalFs && projectName) {
-            const meta = UndertwigLocalFs.getProjectMeta(projectName);
-            bound = Boolean(
-              (meta && meta.absolutePath) ||
-                (await UndertwigLocalFs.hasBoundDirectory(projectName))
-            );
-          }
+          bound = Boolean(
+            window.UndertwigLocalFs &&
+              projectName &&
+              (await UndertwigLocalFs.hasBoundDirectory(projectName))
+          );
         } catch (_error) {
           bound = false;
         }
         saveButton.title = bound
-          ? "Save in this browser and the linked local folder"
-          : "Save in this browser";
+          ? "Save project in this browser and the linked local folder"
+          : "Save project in this browser";
       }
 
       function localDesktopAllowed() {
@@ -4343,12 +4280,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         let diskNote = "";
         try {
-          const meta =
-            window.UndertwigLocalFs && UndertwigLocalFs.getProjectMeta(projectName);
-          const handleBound =
+          if (
             window.UndertwigLocalFs &&
-            (await UndertwigLocalFs.hasBoundDirectory(projectName));
-          if (handleBound && UndertwigLocalFs.saveFileToDirectory) {
+            (await UndertwigLocalFs.hasBoundDirectory(projectName))
+          ) {
             const diskResult = await UndertwigLocalFs.saveFileToDirectory(
               projectName,
               filePath,
@@ -4356,31 +4291,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               { base64ToBytes: base64ToBytes }
             );
             if (diskResult && diskResult.saved) {
-              diskNote =
-                " and local folder" +
-                (diskResult.folderName ? " “" + diskResult.folderName + "”" : "");
-            }
-          } else if (
-            meta &&
-            meta.absolutePath &&
-            window.UndertwigLocalDesktop &&
-            (await UndertwigLocalDesktop.hostHealth())
-          ) {
-            const prefix = projectName + "/";
-            if (!filePath.startsWith(prefix)) {
-              throw new Error("File is not in the current project.");
-            }
-            const diskResult = await UndertwigLocalDesktop.writeProjectViaHost(
-              meta.absolutePath,
-              [
-                {
-                  relativePath: filePath.slice(prefix.length),
-                  binary: Boolean(state.files[filePath].binary),
-                  content: state.files[filePath].content || "",
-                },
-              ]
-            );
-            if (diskResult && diskResult.ok) {
               diskNote =
                 " and local folder" +
                 (diskResult.folderName ? " “" + diskResult.folderName + "”" : "");
@@ -4397,6 +4307,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const shortName = filePath.split("/").pop() || filePath;
         if (localOk) {
           setStatus("Saved “" + shortName + "” in this browser" + diskNote + ".");
+        } else if (diskNote) {
+          setStatus(
+            "Saved “" + shortName + "” to the local folder (browser storage is full)."
+          );
         } else {
           setStatusStorageFull({ force: true });
         }
@@ -4524,71 +4438,47 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
 
-          // Offline desktop: also write back to the memorized OS folder when present.
+          // Offline desktop: also write back through the linked folder handle when present.
           let diskNote = "";
           const localProjectName = getActiveProjectName();
-          if (localProjectName && localDesktopAllowed() && window.UndertwigLocalFs) {
-            const meta = UndertwigLocalFs.getProjectMeta(localProjectName);
-            const handleBound = await UndertwigLocalFs.hasBoundDirectory(localProjectName);
-            if ((meta && meta.absolutePath) || handleBound) {
-              setStatus("Saving “" + localProjectName + "” to the local folder…");
-              let diskResult = null;
-              if (handleBound) {
-                diskResult = await UndertwigLocalFs.saveProjectToDirectory(
-                  localProjectName,
-                  state,
-                  { base64ToBytes: base64ToBytes }
-                );
-              } else if (
-                meta &&
-                meta.absolutePath &&
-                window.UndertwigLocalDesktop &&
-                (await UndertwigLocalDesktop.hostHealth())
-              ) {
-                const prefix = localProjectName + "/";
-                const payload = Object.keys(state.files || {})
-                  .filter(function (path) {
-                    return path.startsWith(prefix);
-                  })
-                  .map(function (path) {
-                    const file = state.files[path];
-                    return {
-                      relativePath: path.slice(prefix.length),
-                      binary: Boolean(file && file.binary),
-                      content: file ? file.content : "",
-                    };
-                  });
-                diskResult = await UndertwigLocalDesktop.writeProjectViaHost(
-                  meta.absolutePath,
-                  payload
-                );
-                if (diskResult) {
-                  diskResult.saved = true;
-                }
-              }
-              if (abortController.signal.aborted) {
-                setStatus("Save cancelled.");
-                return;
-              }
-              if (diskResult && diskResult.saved) {
-                diskNote =
-                  " and local folder" +
-                  (diskResult.folderName ? " “" + diskResult.folderName + "”" : "") +
-                  " (" +
-                  diskResult.written +
-                  " file" +
-                  (diskResult.written === 1 ? "" : "s") +
-                  ")";
-              }
+          if (
+            localProjectName &&
+            localDesktopAllowed() &&
+            window.UndertwigLocalFs &&
+            (await UndertwigLocalFs.hasBoundDirectory(localProjectName))
+          ) {
+            setStatus("Saving “" + localProjectName + "” to the local folder…");
+            const diskResult = await UndertwigLocalFs.saveProjectToDirectory(
+              localProjectName,
+              state,
+              { base64ToBytes: base64ToBytes }
+            );
+            if (abortController.signal.aborted) {
+              setStatus("Save cancelled.");
+              return;
+            }
+            if (diskResult && diskResult.saved) {
+              diskNote =
+                " and local folder" +
+                (diskResult.folderName ? " “" + diskResult.folderName + "”" : "") +
+                " (" +
+                diskResult.written +
+                " file" +
+                (diskResult.written === 1 ? "" : "s") +
+                ")";
             }
           }
 
           if (localOk) {
             setStatus("Saved in this browser" + diskNote + ".");
             restoreSaveButtonTitle();
-            if (window.UndertwigLocalDesktop) {
-              UndertwigLocalDesktop.refreshLocalPathWarning();
-            }
+          } else if (diskNote) {
+            setStatus(
+              "Saved “" +
+                localProjectName +
+                "” to the local folder (browser storage is full)."
+            );
+            restoreSaveButtonTitle();
           } else {
             setStatusStorageFull({ force: true });
           }
@@ -5613,8 +5503,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       document.getElementById("newProject").addEventListener("click", createProject);
       document.getElementById("importProject").addEventListener("click", () => {
-        if (localDesktopAllowed() && window.UndertwigLocalDesktop) {
-          importProjectForDesktop();
+        if (
+          localDesktopAllowed() &&
+          window.UndertwigLocalFs &&
+          UndertwigLocalFs.supportsDirectoryPicker()
+        ) {
+          importNewProjectFromDirectoryPicker();
           return;
         }
         if (!supportsFolderUpload()) {
@@ -6496,9 +6390,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
         }
         restoreSaveButtonTitle();
-        if (window.UndertwigLocalDesktop) {
-          UndertwigLocalDesktop.refreshLocalPathWarning();
-        }
         if (previous && previous !== name) {
           setStatus(
             "Work desk is now “" +
@@ -9684,24 +9575,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return candidate;
       }
 
-      async function bindRememberedLocalPath(projectName, absolutePath, directoryHandle) {
-        if (!window.UndertwigLocalFs || !localDesktopAllowed()) {
-          return;
-        }
-        if (!absolutePath && !directoryHandle) {
-          return;
-        }
-        await UndertwigLocalFs.bindProject(
-          projectName,
-          directoryHandle || null,
-          absolutePath || ""
-        );
-        restoreSaveButtonTitle();
-        if (window.UndertwigLocalDesktop) {
-          UndertwigLocalDesktop.refreshLocalPathWarning();
-        }
-      }
-
       async function finishImportedLocalProject(
         projectName,
         imported,
@@ -9728,23 +9601,19 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         state.activeFile = state.files[mainPath] ? mainPath : firstImportedPath;
         setCurrentProject(projectName, { keepActiveFile: true });
 
-        if (options && (options.absolutePath || options.directoryHandle)) {
-          await bindRememberedLocalPath(
-            projectName,
-            options.absolutePath || "",
-            options.directoryHandle || null
-          );
+        if (options && options.directoryHandle && window.UndertwigLocalFs) {
+          try {
+            await UndertwigLocalFs.putHandle(projectName, options.directoryHandle);
+            restoreSaveButtonTitle();
+          } catch (_error) {
+            // Import still succeeded in the browser.
+          }
         }
 
-        const meta =
-          window.UndertwigLocalFs && UndertwigLocalFs.getProjectMeta(projectName);
-        let pathNote = "";
-        if (meta && meta.absolutePath) {
-          pathNote = " Local path remembered for Console.";
-        } else if (options && options.directoryHandle && localDesktopAllowed()) {
-          pathNote =
-            " Linked for Save. For Console / automatic path, install Undertwig Local once (Download installer from Console).";
-        }
+        const linkedNote =
+          options && options.directoryHandle
+            ? " Linked so Save writes back to that folder."
+            : "";
 
         if (failures.length) {
           setStatus(
@@ -9758,7 +9627,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               failures.length +
               " could not be added. " +
               failures[0] +
-              pathNote,
+              linkedNote,
             true
           );
           return;
@@ -9772,161 +9641,69 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             " file" +
             (imported === 1 ? "" : "s") +
             ")." +
-            pathNote
+            linkedNote
         );
-      }
-
-      async function importProjectViaLocalHelper() {
-        setStatus("Choose the local project folder…");
-        const picked = await UndertwigLocalDesktop.importProjectViaHost();
-        const active = state.files[state.activeFile];
-        if (active && !active.binary) {
-          active.content = UndertwigEditor.getValue();
-        }
-
-        const preferredRoot = picked.folderName || "Project";
-        const projectName = uniqueImportedProjectName(preferredRoot);
-        let imported = 0;
-        const failures = [];
-        let firstImportedPath = "";
-
-        addFolder(projectName);
-
-        for (let i = 0; i < picked.files.length; i += 1) {
-          const entry = picked.files[i];
-          const label = entry.relativePath || entry.name || "file";
-          try {
-            const rel = normalizePath(String(entry.relativePath || ""));
-            if (!rel) {
-              failures.push(label + " (invalid path)");
-              continue;
-            }
-            const filePath = normalizePath(projectName + "/" + rel);
-            if (!filePath || filePath === projectName) {
-              continue;
-            }
-            ensureFoldersForPath(filePath);
-            const binary = !isTextFile(filePath);
-            const bytes = base64ToBytes(entry.base64 || "");
-            const content = binary
-              ? bytesToBase64(bytes)
-              : new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-            state.files[filePath] = {
-              name: entry.name || rel.split("/").pop(),
-              content: content,
-              binary: binary,
-            };
-            imported += 1;
-            if (!firstImportedPath) {
-              firstImportedPath = filePath;
-            }
-          } catch (error) {
-            failures.push(label + ": " + explainUploadError(error));
-          }
-        }
-
-        await finishImportedLocalProject(
-          projectName,
-          imported,
-          failures,
-          firstImportedPath,
-          { absolutePath: picked.absolutePath }
-        );
-        render();
       }
 
       async function importNewProjectFromDirectoryPicker() {
-        setStatus("Choose the local project folder…");
-        const dirHandle = await UndertwigLocalFs.pickProjectDirectory();
-        const allowed = await UndertwigLocalFs.ensureReadWritePermission(dirHandle);
-        if (!allowed) {
-          setStatus("Permission to open that folder was denied.", true);
-          return;
-        }
-
-        const active = state.files[state.activeFile];
-        if (active && !active.binary) {
-          active.content = UndertwigEditor.getValue();
-        }
-
-        const preferredRoot = dirHandle.name || "Project";
-        const projectName = uniqueImportedProjectName(preferredRoot);
-        const entries = await UndertwigLocalFs.collectFiles(dirHandle, "");
-        let imported = 0;
-        const failures = [];
-        let firstImportedPath = "";
-
-        addFolder(projectName);
-
-        for (let i = 0; i < entries.length; i += 1) {
-          const entry = entries[i];
-          const label = entry.relativePath || entry.name || "file";
-          try {
-            const path = normalizePath(projectName + "/" + entry.relativePath);
-            if (!path || path === projectName) {
-              continue;
-            }
-            ensureFoldersForPath(path);
-            const binary = !isTextFile(path);
-            const content = binary
-              ? bytesToBase64(new Uint8Array(await entry.file.arrayBuffer()))
-              : await entry.file.text();
-            state.files[path] = {
-              name: entry.name,
-              content: content,
-              binary: binary,
-            };
-            imported += 1;
-            if (!firstImportedPath) {
-              firstImportedPath = path;
-            }
-          } catch (error) {
-            failures.push(label + ": " + explainUploadError(error));
-          }
-        }
-
-        // If the helper is up, also ask it for the absolute path (second native
-        // dialog only when we already imported without one — skip that).
-        // Browser pickers never expose absolute paths; Console needs the helper import for that.
-        await finishImportedLocalProject(
-          projectName,
-          imported,
-          failures,
-          firstImportedPath,
-          { directoryHandle: dirHandle }
-        );
-        render();
-      }
-
-      async function importProjectForDesktop() {
         try {
-          if (window.UndertwigLocalDesktop) {
-            if (!(await UndertwigLocalDesktop.hostHealth())) {
-              await UndertwigLocalDesktop.wakeCompanion();
-            }
-            if (await UndertwigLocalDesktop.hostHealth()) {
-              await importProjectViaLocalHelper();
-              return;
-            }
-          }
-
-          // Companion optional for importing files; needed only for automatic absolute paths.
-          if (
-            window.UndertwigLocalFs &&
-            UndertwigLocalFs.supportsDirectoryPicker()
-          ) {
-            await importNewProjectFromDirectoryPicker();
+          setStatus("Choose the local project folder…");
+          const dirHandle = await UndertwigLocalFs.pickProjectDirectory();
+          const allowed = await UndertwigLocalFs.ensureReadWritePermission(dirHandle);
+          if (!allowed) {
+            setStatus("Permission to open that folder was denied.", true);
             return;
           }
 
-          if (!supportsFolderUpload()) {
-            setStatus(
-              "Importing a project folder is not supported in this browser. Try Chrome or Edge.",
-              true
-            );
-            return;
+          const active = state.files[state.activeFile];
+          if (active && !active.binary) {
+            active.content = UndertwigEditor.getValue();
           }
-          projectFolderInput.click();
+
+          const preferredRoot = dirHandle.name || "Project";
+          const projectName = uniqueImportedProjectName(preferredRoot);
+          const entries = await UndertwigLocalFs.collectFiles(dirHandle, "");
+          let imported = 0;
+          const failures = [];
+          let firstImportedPath = "";
+
+          addFolder(projectName);
+
+          for (let i = 0; i < entries.length; i += 1) {
+            const entry = entries[i];
+            const label = entry.relativePath || entry.name || "file";
+            try {
+              const path = normalizePath(projectName + "/" + entry.relativePath);
+              if (!path || path === projectName) {
+                continue;
+              }
+              ensureFoldersForPath(path);
+              const binary = !isTextFile(path);
+              const content = binary
+                ? bytesToBase64(new Uint8Array(await entry.file.arrayBuffer()))
+                : await entry.file.text();
+              state.files[path] = {
+                name: entry.name,
+                content: content,
+                binary: binary,
+              };
+              imported += 1;
+              if (!firstImportedPath) {
+                firstImportedPath = path;
+              }
+            } catch (error) {
+              failures.push(label + ": " + explainUploadError(error));
+            }
+          }
+
+          await finishImportedLocalProject(
+            projectName,
+            imported,
+            failures,
+            firstImportedPath,
+            { directoryHandle: dirHandle }
+          );
+          render();
         } catch (error) {
           if (error && error.name === "AbortError") {
             setStatus("Project import cancelled.");
@@ -10785,11 +10562,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         UndertwigLocalDesktop.init({
           isLoggedIn: function () {
             return UndertwigAuth.isLoggedIn();
-          },
-          getActiveProjectName: getActiveProjectName,
-          setStatus: setStatus,
-          onBindingChanged: function () {
-            restoreSaveButtonTitle();
           },
           onVisibilityChange: function () {
             refreshSaveFileButtonVisibility();
