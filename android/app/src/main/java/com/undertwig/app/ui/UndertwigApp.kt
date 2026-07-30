@@ -61,6 +61,7 @@ fun UndertwigApp(
                 },
                 onEditorChange = viewModel::onEditorChange,
                 onSave = { viewModel.saveActive(activity) },
+                onLoadFile = { path -> viewModel.loadFileFromDrive(activity, path) },
                 onConvert = viewModel::convert,
                 onBibliography = viewModel::updateBibliography,
                 onCancelBusy = viewModel::cancelBusy,

@@ -64,6 +64,77 @@ class DriveSyncRepository(
     }
 
     /**
+     * Download one project-relative file from the linked Drive folder into the local mirror.
+     */
+    suspend fun pullFile(
+        accessToken: String,
+        projectId: String,
+        projectName: String,
+        relativePath: String,
+    ) = withContext(Dispatchers.IO) {
+        val clean = relativePath.trim().trimStart('/').replace('\\', '/')
+        require(clean.isNotEmpty()) { "Missing file path." }
+        require(!clean.contains("..")) { "Invalid file path." }
+
+        val folderId = resolveProjectFolderId(accessToken, projectId, projectName)
+            ?: error(
+                "This project is not linked to Google Drive yet. Save it once, or open it from Cloud first.",
+            )
+
+        val parts = clean.split('/').filter { it.isNotEmpty() }
+        require(parts.isNotEmpty()) { "Missing file path." }
+        var parentId = folderId
+        for (i in 0 until parts.lastIndex) {
+            val child = findNamedChild(
+                accessToken,
+                parentId,
+                parts[i],
+                mimeType = "application/vnd.google-apps.folder",
+            ) ?: error("Drive folder “${parts.take(i + 1).joinToString("/")}” was not found.")
+            parentId = child.getString("id")
+        }
+        val fileName = parts.last()
+        val remote = findNamedChild(accessToken, parentId, fileName, mimeType = null)
+            ?: error("“$clean” was not found on Google Drive.")
+        val mime = remote.optString("mimeType")
+        if (mime == "application/vnd.google-apps.folder" ||
+            (mime.startsWith("application/vnd.google-apps.") && mime != "application/vnd.google-apps.folder")
+        ) {
+            error("“$clean” is not a downloadable file on Google Drive.")
+        }
+        val fileId = remote.optString("id").takeIf { it.isNotBlank() }
+            ?: error("“$clean” is missing a Drive file id.")
+        val bytes = downloadDriveFile(accessToken, fileId)
+        projects.writeFileBytes(projectId, clean, bytes)
+    }
+
+    private fun resolveProjectFolderId(
+        accessToken: String,
+        projectId: String,
+        projectName: String,
+    ): String? {
+        val linked = projects.listProjects()
+            .firstOrNull { it.id == projectId }
+            ?.driveFolderId
+            ?.takeIf { it.isNotBlank() }
+        if (!linked.isNullOrBlank() && isLiveFolder(accessToken, linked)) {
+            return linked
+        }
+        val name = projectName.trim()
+        if (name.isEmpty()) return null
+        val rootId = runCatching { ensureUndertwigFolder(accessToken) }.getOrNull() ?: return null
+        val child = findNamedChild(
+            accessToken,
+            rootId,
+            name,
+            mimeType = "application/vnd.google-apps.folder",
+        ) ?: return null
+        val id = child.optString("id").takeIf { it.isNotBlank() } ?: return null
+        projects.setDriveLink(projectId, id, role = "owner")
+        return id
+    }
+
+    /**
      * Owned projects = children of My Drive / Undertwig /.
      * Invited projects = folders shared with the user that live under someone else's Undertwig /
      * (or children of a shared Undertwig root).

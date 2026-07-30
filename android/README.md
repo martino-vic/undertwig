@@ -21,6 +21,7 @@ This is **not** a Chrome Custom Tab / TWA wrapper of the website.
 - Compiler log sheet
 - Google Sign-In on home and editor (session stored on device)
 - When logged in, **Save** writes locally and syncs the project to Google Drive (`Undertwig/<project>/`)
+- When logged in, **Load** (cloud icon, or long-press a file → Load) pulls that one file’s latest content from Drive
 - Home list shows on-device projects, Drive projects under your `Undertwig/` folder (cool tint), and shared projects that live under someone else’s `Undertwig/` (warm tint)
 
 ## Not in this build yet

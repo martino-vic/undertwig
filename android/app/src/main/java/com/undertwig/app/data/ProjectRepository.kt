@@ -334,6 +334,18 @@ class ProjectRepository(context: Context) {
         touch(dir)
     }
 
+    fun writeFileBytes(projectId: String, relativePath: String, bytes: ByteArray) {
+        val clean = normalizePath(relativePath)
+        require(clean.isNotEmpty()) { "Invalid file path" }
+        require(!clean.contains("..")) { "Invalid file path" }
+        val dir = projectDir(projectId)
+        val out = File(dir, clean)
+        require(!out.isDirectory) { "A folder already exists at “$clean”" }
+        out.parentFile?.mkdirs()
+        out.writeBytes(bytes)
+        touch(dir)
+    }
+
     fun createFile(projectId: String, relativePath: String, content: String = "") {
         val clean = normalizePath(relativePath)
         require(clean.isNotEmpty()) { "Invalid file path" }

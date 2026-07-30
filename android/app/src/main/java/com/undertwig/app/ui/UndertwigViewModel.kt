@@ -58,6 +58,7 @@ data class EditorUiState(
     val dirty: Boolean = false,
     val status: String = "Ready.",
     val busy: EditorBusy = EditorBusy.Idle,
+    val loadingFile: Boolean = false,
     val lastLog: String = "",
     val pdfPath: String? = null,
     /** Increments on each successful Convert so PdfScreen reloads overwritten main.pdf. */
@@ -81,6 +82,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private var statusTickerJob: Job? = null
     private var statusFlashJob: Job? = null
     private var saveJob: Job? = null
+    private var loadFileJob: Job? = null
     private var cloudJob: Job? = null
     private var openCloudJob: Job? = null
     @Volatile private var latestBusyStatus: String? = null
@@ -506,6 +508,107 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 Toast.makeText(getApplication(), "Save failed: $detail", Toast.LENGTH_LONG).show()
             },
         )
+    }
+
+    /** Pull one file from Google Drive into the local project (active file by default). */
+    fun loadFileFromDrive(activity: Activity, relativePath: String? = null) {
+        val state = _editor.value
+        if (state.projectId.isEmpty()) {
+            _editor.update {
+                it.copy(status = "Nothing to load", error = "Open a project first.")
+            }
+            return
+        }
+        if (_auth.value.user == null) {
+            Toast.makeText(
+                getApplication(),
+                "Log in to load files from Google Drive.",
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        val path = (relativePath ?: state.activePath).trim().trimStart('/')
+        if (path.isEmpty()) {
+            _editor.update {
+                it.copy(status = "Nothing to load", error = "Select a file first.")
+            }
+            return
+        }
+        if (loadFileJob?.isActive == true) return
+
+        loadFileJob = viewModelScope.launch {
+            _editor.update {
+                it.copy(
+                    loadingFile = true,
+                    status = "Loading “$path” from Drive…",
+                    error = null,
+                )
+            }
+            try {
+                val token = authRepo.ensureDriveAccessToken(activity)
+                driveSync.pullFile(token, state.projectId, state.projectName, path)
+                val files = repo.listFiles(state.projectId)
+                val folders = repo.listFolders(state.projectId)
+                val active = _editor.value.activePath
+                if (active == path && path in files) {
+                    val file = repo.readFile(state.projectId, path)
+                    _editor.update {
+                        it.copy(
+                            files = files,
+                            folders = folders,
+                            editorText = editorDisplayText(file),
+                            dirty = false,
+                            loadingFile = false,
+                            error = null,
+                        )
+                    }
+                } else {
+                    _editor.update {
+                        it.copy(
+                            files = files,
+                            folders = folders,
+                            loadingFile = false,
+                            error = null,
+                        )
+                    }
+                }
+                flashStatus("Loaded “$path” from Drive")
+                Toast.makeText(
+                    getApplication(),
+                    "Loaded $path from Google Drive",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } catch (e: AuthRepository.SignInCancelledException) {
+                _editor.update { it.copy(loadingFile = false) }
+                Toast.makeText(
+                    getApplication(),
+                    "Drive permission was cancelled.",
+                    Toast.LENGTH_LONG,
+                ).show()
+                restoreEditingStatus()
+            } catch (e: CancellationException) {
+                _editor.update { it.copy(loadingFile = false) }
+                throw e
+            } catch (e: Exception) {
+                authRepo.clearDriveToken()
+                _editor.update {
+                    it.copy(
+                        loadingFile = false,
+                        status = "Load failed",
+                        error = e.message ?: "Could not load file from Google Drive.",
+                    )
+                }
+                Toast.makeText(
+                    getApplication(),
+                    e.message ?: "Could not load file from Google Drive.",
+                    Toast.LENGTH_LONG,
+                ).show()
+                delay(STATUS_FLASH_MS)
+                if (_editor.value.status == "Load failed") {
+                    restoreEditingStatus()
+                }
+            }
+        }
     }
 
     private fun flashStatus(message: String) {

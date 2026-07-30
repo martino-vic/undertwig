@@ -24,8 +24,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -86,6 +88,7 @@ fun EditorScreen(
     onSelectFile: (String) -> Unit,
     onEditorChange: (String) -> Unit,
     onSave: () -> Unit,
+    onLoadFile: (String?) -> Unit,
     onConvert: () -> Unit,
     onBibliography: () -> Unit,
     onCancelBusy: () -> Unit,
@@ -205,6 +208,24 @@ fun EditorScreen(
                     }
                     IconButton(onClick = onSave) {
                         Icon(Icons.Default.Save, contentDescription = "Save")
+                    }
+                    if (authUser != null) {
+                        IconButton(
+                            onClick = { onLoadFile(null) },
+                            enabled = !state.loadingFile && state.activePath.isNotBlank(),
+                        ) {
+                            if (state.loadingFile) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.CloudDownload,
+                                    contentDescription = "Load active file from Google Drive",
+                                )
+                            }
+                        }
                     }
                     IconButton(
                         onClick = {
@@ -481,7 +502,15 @@ fun EditorScreen(
         AlertDialog(
             onDismissRequest = { actionTarget = null },
             title = { Text(label) },
-            text = { Text("Delete or rename this ${if (target.isFolder) "folder" else "file"}?") },
+            text = {
+                Text(
+                    if (target.isFolder) {
+                        "Delete or rename this folder?"
+                    } else {
+                        "Load this file from Google Drive, or delete / rename it?"
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -493,6 +522,16 @@ fun EditorScreen(
             },
             dismissButton = {
                 Row {
+                    if (!target.isFolder && authUser != null) {
+                        TextButton(
+                            onClick = {
+                                val path = target.path
+                                actionTarget = null
+                                onLoadFile(path)
+                            },
+                            enabled = !state.loadingFile,
+                        ) { Text("Load") }
+                    }
                     TextButton(
                         onClick = {
                             actionTarget = null
