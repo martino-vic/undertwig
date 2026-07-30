@@ -383,7 +383,7 @@ fun EditorScreen(
             }
             if (state.writingRoomAvailable && !state.inWritingRoom && state.writingRoomOccupiedMessage == null) {
                 Text(
-                    "Editor locked — enter the writing room to edit. Live collaboration is not supported yet.",
+                    "Editor locked — enter the writing room to edit.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -755,7 +755,7 @@ fun EditorScreen(
                 title = { Text("Enter writing room") },
                 text = {
                     Text(
-                        "Live collaboration is not supported yet. The writing room has space for only one person at a time — this door keeps the whole project locked until you enter. While you are inside, collaborators see “${prompt.projectName}” as read-only. Exit when you are done.",
+                        "The writing room has space for only one person at a time. Cross this door to claim it — until then, the project stays locked. While you are inside, collaborators see project “${prompt.projectName}” as read-only. Exit when you are done.",
                     )
                 },
                 confirmButton = {
