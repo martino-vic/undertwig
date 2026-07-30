@@ -17,10 +17,9 @@
   const LOCK_DIR_NAME = ".undertwig-locks";
   const PROJECT_LOCK_FILE = "project.json";
   const DEVICE_ID_KEY = "undertwig-device-id-v1";
-  // Abandoned rooms free after this long without a heartbeat. Must stay above
-  // typical browser background-tab timer throttling (~1 min) so phone clients
-  // do not steal a live desktop writing room.
-  const LOCK_HEARTBEAT_STALE_MS = 2 * 60 * 1000;
+  // Only take over a foreign lock after this long without Drive updates.
+  // Live holders heartbeat every 20s — they must never be overwritten.
+  const LOCK_HEARTBEAT_STALE_MS = 10 * 60 * 1000;
 
   const TOKEN_REQUEST_TIMEOUT_MS = 8000;
   const SILENT_TOKEN_TIMEOUT_MS = 4000;
@@ -3408,7 +3407,17 @@
     const parts = lockRel.split("/");
     const fileName = parts.pop();
     const parentId = await ensurePathFolders(folderId, parts.join("/"));
-    const existing = await findNamedChild(parentId, fileName, null);
+    const existingMeta = await findNamedChild(parentId, fileName, null);
+    if (existingMeta && existingMeta.id) {
+      // Never overwrite a foreign live lock — read content first.
+      const existing = await readFileLock(projectName);
+      if (existing && !isLockHeldByMe(existing) && !isLockStale(existing)) {
+        throw new Error(
+          lockHolderLabel(existing) +
+            " is currently in the writing room. The writing room has space for one person only at the time."
+        );
+      }
+    }
     const entry = {
       content: JSON.stringify(payload, null, 2),
       binary: false,
@@ -3417,7 +3426,7 @@
       parentId,
       fileName,
       entry,
-      existing && existing.id
+      existingMeta && existingMeta.id
     );
   }
 
@@ -3431,7 +3440,8 @@
       return { ok: false, lock: null, message: "Choose a project first." };
     }
     const existing = await readFileLock(name);
-    if (existing && !isLockStale(existing) && !isLockHeldByMe(existing)) {
+    // Hard rule: foreign lock that is not abandoned → occupied. Never overwrite.
+    if (existing && !isLockHeldByMe(existing) && !isLockStale(existing)) {
       return {
         ok: false,
         lock: existing,
@@ -3444,6 +3454,16 @@
     const saved = await writeFileLock(name, payload);
     const again = await readFileLock(name);
     if (again && !isLockHeldByMe(again) && !isLockStale(again)) {
+      return {
+        ok: false,
+        lock: again,
+        message:
+          lockHolderLabel(again) +
+          " is currently in the writing room. The writing room has space for one person only at the time.",
+      };
+    }
+    if (again && !isLockHeldByMe(again)) {
+      // Lost the race to another device.
       return {
         ok: false,
         lock: again,

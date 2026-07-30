@@ -1164,7 +1164,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
     /**
      * Trash our lock file without needing an Activity (cached Drive token).
-     * Stale heartbeat (~2 min) is the fallback if this fails (force-kill, offline, expired token).
+     * Stale/abandoned lock (~10 min without Drive updates) is the fallback if this fails
+     * (force-kill, offline, expired token).
      */
     private suspend fun releaseHeldWritingRoomBestEffort() {
         val snapshot = takeHeldWritingRoomSnapshot() ?: return

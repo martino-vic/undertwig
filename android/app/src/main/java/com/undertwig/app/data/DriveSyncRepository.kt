@@ -115,6 +115,8 @@ class DriveSyncRepository(
         val heartbeat: String?,
         val fileId: String? = null,
         val parentId: String? = null,
+        /** Drive server modifiedTime — used for abandonment, not phone clock vs heartbeat. */
+        val modifiedTimeMs: Long = 0L,
     ) {
         fun holderLabel(): String {
             val name = holderName?.trim().orEmpty()
@@ -126,20 +128,20 @@ class DriveSyncRepository(
                 else -> "Someone"
             }
         }
-
-        fun isStale(nowMs: Long = System.currentTimeMillis()): Boolean {
-            val hb = heartbeat?.trim().orEmpty()
-            if (hb.isEmpty()) return true
-            // Unparseable heartbeat: do NOT treat as stale — stealing a live room is worse.
-            val ms = parseLockTimestampMs(hb) ?: return false
-            return nowMs - ms > LOCK_STALE_MS
-        }
     }
 
     data class FileLockResult(
         val ok: Boolean,
         val lock: FileEditLock? = null,
         val message: String? = null,
+    )
+
+    /** A lock file on Drive, even when its JSON body could not be read. */
+    private data class LockFileRef(
+        val fileId: String,
+        val parentId: String,
+        val modifiedTimeMs: Long,
+        val lock: FileEditLock?,
     )
 
     fun deviceId(): String {
@@ -161,6 +163,26 @@ class DriveSyncRepository(
         return isHeldByThisDevice(lock)
     }
 
+    /**
+     * A foreign lock blocks entry unless Drive says the file has not been touched for
+     * [LOCK_ABANDONED_MS] (crash / force-quit recovery only). Live desktop holders
+     * heartbeating every 20s must never be overwritten.
+     */
+    private fun isAbandonedLock(ref: LockFileRef): Boolean {
+        val modified = ref.modifiedTimeMs.takeIf { it > 0 }
+            ?: ref.lock?.let { parseLockTimestampMs(it.heartbeat) }
+            ?: return false
+        return System.currentTimeMillis() - modified > LOCK_ABANDONED_MS
+    }
+
+    private fun foreignLockBlocksEntry(ref: LockFileRef): Boolean {
+        val lock = ref.lock
+        // File exists but unreadable → treat as occupied. Never overwrite blindly.
+        if (lock == null) return true
+        if (isHeldByThisDevice(lock)) return false
+        return !isAbandonedLock(ref)
+    }
+
     suspend fun peekFileLock(
         accessToken: String,
         projectId: String,
@@ -168,9 +190,20 @@ class DriveSyncRepository(
         holderEmail: String? = null,
     ): FileEditLock? = withContext(Dispatchers.IO) {
         val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext null
-        val existing = readProjectLockFile(accessToken, folderId) ?: return@withContext null
-        if (existing.isStale() || isHeldByMe(existing, holderEmail)) return@withContext null
-        existing
+        val blocker = listProjectLockFiles(accessToken, folderId)
+            .firstOrNull { foreignLockBlocksEntry(it) }
+            ?: return@withContext null
+        blocker.lock ?: FileEditLock(
+            path = ".",
+            holderEmail = null,
+            holderName = null,
+            deviceId = "unknown",
+            since = null,
+            heartbeat = null,
+            fileId = blocker.fileId,
+            parentId = blocker.parentId,
+            modifiedTimeMs = blocker.modifiedTimeMs,
+        )
     }
 
     /** Returns the lock even when we hold it (for resume-after-reload). */
@@ -180,9 +213,23 @@ class DriveSyncRepository(
         projectName: String,
     ): FileEditLock? = withContext(Dispatchers.IO) {
         val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext null
-        val existing = readProjectLockFile(accessToken, folderId) ?: return@withContext null
-        if (existing.isStale()) return@withContext null
-        existing
+        val refs = listProjectLockFiles(accessToken, folderId)
+        if (refs.isEmpty()) return@withContext null
+        refs.firstOrNull { foreignLockBlocksEntry(it) }?.let { blocker ->
+            return@withContext blocker.lock ?: FileEditLock(
+                path = ".",
+                holderEmail = null,
+                holderName = null,
+                deviceId = "unknown",
+                since = null,
+                heartbeat = null,
+                fileId = blocker.fileId,
+                parentId = blocker.parentId,
+                modifiedTimeMs = blocker.modifiedTimeMs,
+            )
+        }
+        refs.mapNotNull { it.lock }.firstOrNull { isHeldByThisDevice(it) }
+            ?: refs.mapNotNull { it.lock }.firstOrNull()
     }
 
     suspend fun acquireFileLock(
@@ -197,27 +244,39 @@ class DriveSyncRepository(
                 ok = false,
                 message = "Project is not linked to Google Drive yet. Save once first.",
             )
-        var existing = readProjectLockFile(accessToken, folderId)
-        if (existing != null && !isHeldByMe(existing, holderEmail)) {
-            if (!existing.isStale()) {
-                return@withContext occupiedResult(existing)
-            }
-            // Appears abandoned — re-check so a throttled desktop heartbeat can land first.
+
+        // Hard rule: if any lock file belongs to someone else (or is unreadable), do not enter.
+        var refs = listProjectLockFiles(accessToken, folderId)
+        var blocker = refs.firstOrNull { foreignLockBlocksEntry(it) }
+        if (blocker != null) {
+            // Brief pause + re-list in case Drive listing was briefly inconsistent.
             delay(LOCK_STEAL_RECHECK_MS)
-            existing = readProjectLockFile(accessToken, folderId)
-            if (existing != null && !isHeldByMe(existing, holderEmail) && !existing.isStale()) {
-                return@withContext occupiedResult(existing)
+            refs = listProjectLockFiles(accessToken, folderId)
+            blocker = refs.firstOrNull { foreignLockBlocksEntry(it) }
+            if (blocker != null) {
+                return@withContext occupiedResult(
+                    blocker.lock ?: FileEditLock(
+                        path = ".",
+                        holderEmail = null,
+                        holderName = null,
+                        deviceId = "unknown",
+                        since = null,
+                        heartbeat = null,
+                        fileId = blocker.fileId,
+                        parentId = blocker.parentId,
+                        modifiedTimeMs = blocker.modifiedTimeMs,
+                    ),
+                )
             }
         }
-        val payload = buildLockJson(
-            holderEmail,
-            holderName,
-            since = if (existing != null && isHeldByMe(existing, holderEmail)) existing.since else null,
-        )
+
+        val ours = refs.mapNotNull { it.lock }.firstOrNull { isHeldByThisDevice(it) }
+        val payload = buildLockJson(holderEmail, holderName, since = ours?.since)
         if (!writeProjectLockFile(accessToken, folderId, payload)) {
-            val blocker = readProjectLockFile(accessToken, folderId)
-            return@withContext if (blocker != null) {
-                occupiedResult(blocker)
+            val again = listProjectLockFiles(accessToken, folderId)
+                .firstOrNull { foreignLockBlocksEntry(it) }
+            return@withContext if (again?.lock != null) {
+                occupiedResult(again.lock)
             } else {
                 FileLockResult(
                     ok = false,
@@ -252,29 +311,33 @@ class DriveSyncRepository(
     ): FileLockResult = withContext(Dispatchers.IO) {
         val folderId = resolveProjectFolderId(accessToken, projectId, projectName)
             ?: return@withContext FileLockResult(ok = false, message = "Not linked to Drive.")
-        val existing = readProjectLockFile(accessToken, folderId)
-        if (existing == null) {
-            return@withContext acquireFileLock(
-                accessToken, projectId, projectName, holderEmail, holderName,
+        val refs = listProjectLockFiles(accessToken, folderId)
+        val blocker = refs.firstOrNull { foreignLockBlocksEntry(it) }
+        if (blocker != null) {
+            return@withContext occupiedResult(
+                blocker.lock ?: FileEditLock(
+                    path = ".",
+                    holderEmail = null,
+                    holderName = null,
+                    deviceId = "unknown",
+                    since = null,
+                    heartbeat = null,
+                    fileId = blocker.fileId,
+                    parentId = blocker.parentId,
+                    modifiedTimeMs = blocker.modifiedTimeMs,
+                ),
             )
         }
-        if (!isHeldByMe(existing, holderEmail)) {
-            if (!existing.isStale()) {
-                return@withContext occupiedResult(existing)
-            }
-            delay(LOCK_STEAL_RECHECK_MS)
-            val retry = readProjectLockFile(accessToken, folderId)
-            if (retry != null && !isHeldByMe(retry, holderEmail) && !retry.isStale()) {
-                return@withContext occupiedResult(retry)
-            }
+        val existing = refs.mapNotNull { it.lock }.firstOrNull { isHeldByThisDevice(it) }
+        if (existing == null) {
+            // Our lock vanished — do not steal; try a clean acquire (still refuses foreign locks).
             return@withContext acquireFileLock(
                 accessToken, projectId, projectName, holderEmail, holderName,
             )
         }
         val payload = buildLockJson(holderEmail, holderName, since = existing.since)
         if (!writeProjectLockFile(accessToken, folderId, payload)) {
-            val blocker = readProjectLockFile(accessToken, folderId)
-            return@withContext if (blocker != null) occupiedResult(blocker) else FileLockResult(
+            return@withContext FileLockResult(
                 ok = false,
                 message = "Someone is currently in the writing room. The writing room has space for one person only at the time.",
             )
@@ -290,17 +353,25 @@ class DriveSyncRepository(
     ): Boolean = withContext(Dispatchers.IO) {
         val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext false
         val existing = readProjectLockFile(accessToken, folderId) ?: return@withContext true
-        if (!isHeldByMe(existing, holderEmail) && !existing.isStale()) return@withContext false
         val fileId = existing.fileId ?: return@withContext false
-        // Match web: owners can trash; writers in shared folders must removeParents.
+        val parentId = existing.parentId ?: return@withContext false
+        val ref = LockFileRef(
+            fileId = fileId,
+            parentId = parentId,
+            modifiedTimeMs = existing.modifiedTimeMs,
+            lock = existing,
+        )
+        // Only trash our own lock, or a clearly abandoned foreign lock.
+        if (!isHeldByThisDevice(existing) && !isAbandonedLock(ref)) {
+            return@withContext false
+        }
         removeDriveItemFromProject(
             accessToken = accessToken,
             fileId = fileId,
-            parentId = existing.parentId,
+            parentId = parentId,
         )
-        // Confirm the lock is gone (trashed files must not still look held).
-        val stillThere = readProjectLockFile(accessToken, folderId)
-        stillThere == null || stillThere.isStale() || !isHeldByMe(stillThere, holderEmail)
+        val after = readProjectLockFile(accessToken, folderId)
+        after == null || isHeldByThisDevice(after)
     }
 
     /**
@@ -364,23 +435,47 @@ class DriveSyncRepository(
             .put("heartbeat", now)
     }
 
-    /**
-     * Read the project writing-room lock. Scans every `.undertwig-locks` folder in case
-     * Drive has duplicates, and prefers a live (non-stale) lock from another device.
-     */
+    /** Prefer a blocking foreign lock, else ours, else any parsed lock. */
     private fun readProjectLockFile(
         accessToken: String,
         projectFolderId: String,
     ): FileEditLock? {
+        val refs = listProjectLockFiles(accessToken, projectFolderId)
+        if (refs.isEmpty()) return null
+        refs.firstOrNull { foreignLockBlocksEntry(it) }?.let { blocker ->
+            return blocker.lock ?: FileEditLock(
+                path = ".",
+                holderEmail = null,
+                holderName = null,
+                deviceId = "unknown",
+                since = null,
+                heartbeat = null,
+                fileId = blocker.fileId,
+                parentId = blocker.parentId,
+                modifiedTimeMs = blocker.modifiedTimeMs,
+            )
+        }
+        return refs.mapNotNull { it.lock }.firstOrNull { isHeldByThisDevice(it) }
+            ?: refs.mapNotNull { it.lock }.firstOrNull()
+    }
+
+    /**
+     * List every `.undertwig-locks/project.json`. Files whose JSON cannot be read still
+     * appear here with lock=null and block entry — never overwrite blindly.
+     */
+    private fun listProjectLockFiles(
+        accessToken: String,
+        projectFolderId: String,
+    ): List<LockFileRef> {
         val lockDirs = findNamedChildren(
             accessToken,
             projectFolderId,
             LOCK_DIR_NAME,
             mimeType = "application/vnd.google-apps.folder",
         )
-        if (lockDirs.isEmpty()) return null
+        if (lockDirs.isEmpty()) return emptyList()
 
-        val locks = mutableListOf<FileEditLock>()
+        val out = mutableListOf<LockFileRef>()
         for (dir in lockDirs) {
             val parentId = dir.optString("id").takeIf { it.isNotBlank() } ?: continue
             val remotes = findNamedChildren(accessToken, parentId, PROJECT_LOCK_FILE, mimeType = null)
@@ -388,57 +483,64 @@ class DriveSyncRepository(
                 val mime = remote.optString("mimeType")
                 if (mime == "application/vnd.google-apps.folder") continue
                 val fileId = remote.optString("id").takeIf { it.isNotBlank() } ?: continue
+                val modifiedTimeMs = parseDriveTime(remote.optString("modifiedTime"))
                 val bytes = runCatching { downloadDriveFile(accessToken, fileId) }.getOrNull()
-                    ?: continue
-                val json = runCatching { JSONObject(String(bytes, StandardCharsets.UTF_8)) }.getOrNull()
-                    ?: continue
-                locks += FileEditLock(
-                    path = json.optString("path").ifBlank { "." },
-                    holderEmail = json.optString("holderEmail").takeIf { it.isNotBlank() },
-                    holderName = json.optString("holderName").takeIf { it.isNotBlank() },
-                    deviceId = json.optString("deviceId").takeIf { it.isNotBlank() },
-                    since = json.optString("since").takeIf { it.isNotBlank() },
-                    heartbeat = json.optString("heartbeat").takeIf { it.isNotBlank() },
+                val json = bytes?.let {
+                    runCatching { JSONObject(String(it, StandardCharsets.UTF_8)) }.getOrNull()
+                }
+                val lock = json?.let {
+                    FileEditLock(
+                        path = it.optString("path").ifBlank { "." },
+                        holderEmail = it.optString("holderEmail").takeIf { v -> v.isNotBlank() },
+                        holderName = it.optString("holderName").takeIf { v -> v.isNotBlank() },
+                        deviceId = it.optString("deviceId").takeIf { v -> v.isNotBlank() },
+                        since = it.optString("since").takeIf { v -> v.isNotBlank() },
+                        heartbeat = it.optString("heartbeat").takeIf { v -> v.isNotBlank() },
+                        fileId = fileId,
+                        parentId = parentId,
+                        modifiedTimeMs = modifiedTimeMs,
+                    )
+                }
+                out += LockFileRef(
                     fileId = fileId,
                     parentId = parentId,
+                    modifiedTimeMs = modifiedTimeMs,
+                    lock = lock,
                 )
             }
         }
-        if (locks.isEmpty()) return null
-
-        // Prefer a live lock held by someone else — that is the exclusivity signal.
-        locks.firstOrNull { !it.isStale() && !isHeldByThisDevice(it) }?.let { return it }
-        // Else our own live lock (resume).
-        locks.firstOrNull { !it.isStale() && isHeldByThisDevice(it) }?.let { return it }
-        // Else newest by heartbeat / since.
-        return locks.maxByOrNull { lock ->
-            parseLockTimestampMs(lock.heartbeat)
-                ?: parseLockTimestampMs(lock.since)
-                ?: 0L
-        }
+        return out
     }
 
+    /**
+     * Write our lock. Never overwrites a foreign/unreadable lock.
+     * Never uses a bare name lookup for existingId (that kicked out desktop holders).
+     */
     private fun writeProjectLockFile(
         accessToken: String,
         projectFolderId: String,
         payload: JSONObject,
     ): Boolean {
-        // Reuse an existing lock file/folder when present so we never create a parallel room.
-        val existingLock = readProjectLockFile(accessToken, projectFolderId)
-        if (existingLock != null && !isHeldByThisDevice(existingLock) && !existingLock.isStale()) {
-            // Someone else still holds the room — never overwrite.
+        val refs = listProjectLockFiles(accessToken, projectFolderId)
+        if (refs.any { foreignLockBlocksEntry(it) }) {
             return false
         }
+        val ours = refs.firstOrNull { ref -> ref.lock != null && isHeldByThisDevice(ref.lock) }
+        val abandoned = refs.firstOrNull { ref ->
+            val lock = ref.lock
+            lock != null && !isHeldByThisDevice(lock) && isAbandonedLock(ref)
+        }
+        val target = ours ?: abandoned
         val parentId: String
         val existingId: String?
-        if (existingLock?.fileId != null && existingLock.parentId != null) {
-            parentId = existingLock.parentId
-            existingId = existingLock.fileId
-        } else {
+        if (target != null) {
+            parentId = target.parentId
+            existingId = target.fileId
+        } else if (refs.isEmpty()) {
             parentId = ensureChildFolder(accessToken, projectFolderId, LOCK_DIR_NAME)
-            existingId = findNamedChild(accessToken, parentId, PROJECT_LOCK_FILE, mimeType = null)
-                ?.optString("id")
-                ?.takeIf { it.isNotBlank() }
+            existingId = null
+        } else {
+            return false
         }
         val tmp = File.createTempFile("undertwig-lock-", ".json")
         try {
@@ -1366,9 +1468,9 @@ class DriveSyncRepository(
         private const val LEGACY_APPDATA_REGISTRY_NAME = "undertwig-invited-projects-v1.json"
         private const val LOCK_DIR_NAME = ".undertwig-locks"
         private const val PROJECT_LOCK_FILE = "project.json"
-        // Must outlast browser background-tab timer throttling (~1 min) or Android
-        // will steal a live desktop writing room. Heartbeat is every 20s.
-        private const val LOCK_STALE_MS = 2 * 60 * 1000L
+        // Only allow takeover of a *foreign* lock after this long with no Drive updates.
+        // Live desktop holders heartbeat every 20s — far below this — so they cannot be kicked.
+        private const val LOCK_ABANDONED_MS = 10 * 60 * 1000L
         private const val LOCK_STEAL_RECHECK_MS = 1_500L
         private const val DRIVE_API = "https://www.googleapis.com/drive/v3"
         private const val DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3"
