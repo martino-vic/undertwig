@@ -7272,6 +7272,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           if (generation !== fileLockStatusGeneration) {
             return;
           }
+          const wasOccupiedHere = Boolean(
+            fileLockOccupied && fileLockOccupied.projectName === projectName
+          );
           if (lock && !UndertwigCloud.isLockStale(lock) && UndertwigCloud.isLockHeldByMe(lock)) {
             // User just exited — finish releasing instead of reclaiming the room.
             if (writingRoomSuppressResumeKey === projectName) {
@@ -7316,6 +7319,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 " is currently in the writing room. The writing room has space for one person only at the time.",
             };
           } else {
+            // Room became free (e.g. holder exited on the app). Do not pop the
+            // Enter dialog — empty is fine; users click Enter when they want in.
+            if (wasOccupiedHere) {
+              writingRoomGateDismissedKey = "enter:" + projectName;
+              if (writingRoomDialogMode === "occupied") {
+                closeWritingRoomDialog("cancel");
+              }
+            }
             fileLockOccupied = null;
           }
         } catch (_error) {
