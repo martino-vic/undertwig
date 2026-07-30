@@ -641,7 +641,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
     /**
      * Run a Drive API call with an access token. On invalid/expired credentials, clear the
-     * local cache, force a fresh authorize, and retry once.
+     * Play Services token cache, force a fresh authorize (may show consent), and retry once.
      */
     private suspend fun <T> withDriveAccess(activity: Activity, block: suspend (String) -> T): T {
         val firstToken = authRepo.ensureDriveAccessToken(activity, forceRefresh = false)
@@ -656,7 +656,18 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             }
             authRepo.clearDriveToken()
             val freshToken = authRepo.ensureDriveAccessToken(activity, forceRefresh = true)
-            block(freshToken)
+            try {
+                block(freshToken)
+            } catch (retryError: Exception) {
+                if (isInvalidDriveCredentials(retryError)) {
+                    authRepo.clearDriveToken()
+                    throw AuthRepository.InvalidDriveCredentialsException(
+                        "Google Drive login expired. Log out and log in again, then retry.",
+                        retryError,
+                    )
+                }
+                throw retryError
+            }
         }
     }
 

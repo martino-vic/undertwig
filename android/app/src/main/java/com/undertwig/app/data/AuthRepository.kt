@@ -15,6 +15,7 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
+import com.google.android.gms.auth.GoogleAuthUtil
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.Scope
@@ -22,8 +23,10 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import android.util.Base64
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -115,27 +118,60 @@ class AuthRepository(context: Context) {
      * Returns a Google Drive OAuth access token for the signed-in user.
      * May show a consent UI the first time Drive access is needed.
      *
-     * @param forceRefresh skip the local cache and ask Google Play Services for a fresh token
-     * (used after Drive returns 401 invalid credentials).
+     * @param forceRefresh clear Play Services' cached access token and request a new one
+     * (required after Drive returns 401 invalid credentials — otherwise authorize() can keep
+     * handing back the same dead token).
      */
     suspend fun ensureDriveAccessToken(activity: Activity, forceRefresh: Boolean = false): String {
         if (!forceRefresh) {
             val cached = prefs.getString(KEY_DRIVE_TOKEN, null)
             val expiresAt = prefs.getLong(KEY_DRIVE_EXPIRES, 0L)
-            // Keep the local cache short — Google may invalidate tokens before our estimate.
             if (!cached.isNullOrBlank() && expiresAt > System.currentTimeMillis() + 30_000L) {
                 return cached
             }
         } else {
+            val stale = prefs.getString(KEY_DRIVE_TOKEN, null)
             clearDriveToken()
+            if (!stale.isNullOrBlank()) {
+                clearPlayServicesToken(activity, stale)
+            }
         }
 
         val email = currentUser()?.email
+            ?: throw IllegalStateException("Log in before connecting Google Drive.")
         val builder = AuthorizationRequest.builder()
             .setRequestedScopes(listOf(Scope(DRIVE_SCOPE)))
-        if (!email.isNullOrBlank()) {
-            builder.setAccount(Account(email, "com.google"))
+            .setAccount(Account(email, "com.google"))
+        // Tie the token to our web OAuth client so Drive accepts it the same way as the website.
+        runCatching { builder.requestOfflineAccess(WEB_CLIENT_ID) }
+        // When refreshing after 401, force the consent prompt so GPS cannot reuse a revoked token.
+        if (forceRefresh) {
+            runCatching {
+                val promptClass = Class.forName(
+                    "com.google.android.gms.auth.api.identity.AuthorizationRequest\$Prompt",
+                )
+                val consent = promptClass.fields
+                    .firstOrNull { it.name == "CONSENT" }
+                    ?.get(null)
+                if (consent is Int) {
+                    val setPrompt = builder.javaClass.methods.firstOrNull { method ->
+                        method.name == "setPrompt" && method.parameterCount == 1
+                    }
+                    setPrompt?.invoke(builder, consent)
+                }
+            }
+            runCatching {
+                // Older play-services-auth: force a new server auth code / consent.
+                val method = builder.javaClass.methods.firstOrNull { method ->
+                    method.name == "requestOfflineAccess" &&
+                        method.parameterTypes.size == 2 &&
+                        method.parameterTypes[0] == String::class.java &&
+                        method.parameterTypes[1] == Boolean::class.javaPrimitiveType
+                }
+                method?.invoke(builder, WEB_CLIENT_ID, true)
+            }
         }
+
         val request = builder.build()
         val client = Identity.getAuthorizationClient(activity)
         val first = client.authorize(request).await()
@@ -150,7 +186,6 @@ class AuthRepository(context: Context) {
         }
         val token = result.accessToken?.takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("Google Drive access was not granted.")
-        // Prefer Google's expiry when available; otherwise cache briefly.
         val expiresAtMs = driveTokenExpiryMs(result)
         prefs.edit()
             .putString(KEY_DRIVE_TOKEN, token)
@@ -159,9 +194,37 @@ class AuthRepository(context: Context) {
         return token
     }
 
+    private suspend fun clearPlayServicesToken(activity: Activity, token: String) {
+        withContext(Dispatchers.IO) {
+            // Newer Play services: AuthorizationClient.clearToken(ClearTokenRequest).
+            runCatching {
+                val requestClass = Class.forName(
+                    "com.google.android.gms.auth.api.identity.ClearTokenRequest",
+                )
+                val builderMethod = requestClass.getMethod("builder")
+                val builder = builderMethod.invoke(null)
+                val setToken = builder.javaClass.methods.first { method ->
+                    method.name == "setToken" && method.parameterCount == 1
+                }
+                setToken.invoke(builder, token)
+                val clearRequest = builder.javaClass.getMethod("build").invoke(builder)
+                val client = Identity.getAuthorizationClient(activity)
+                val clearMethod = client.javaClass.methods.first { method ->
+                    method.name == "clearToken" && method.parameterCount == 1
+                }
+                val task = clearMethod.invoke(client, clearRequest)
+                @Suppress("UNCHECKED_CAST")
+                (task as com.google.android.gms.tasks.Task<Void>).await()
+            }
+            // Always also clear via GoogleAuthUtil so authorize() cannot reuse a revoked token.
+            runCatching {
+                GoogleAuthUtil.clearToken(appContext, token)
+            }
+        }
+    }
+
     private fun driveTokenExpiryMs(result: com.google.android.gms.auth.api.identity.AuthorizationResult): Long {
         val now = System.currentTimeMillis()
-        // AuthorizationResult#getAccessTokenExpirationTime exists on newer Play services.
         val fromApi = runCatching {
             val method = result.javaClass.methods.firstOrNull { method ->
                 method.name == "getAccessTokenExpirationTime" && method.parameterCount == 0
@@ -278,8 +341,8 @@ class AuthRepository(context: Context) {
         private const val KEY_NAME = "name"
         private const val KEY_PICTURE = "picture"
         private const val KEY_ID_TOKEN = "id_token"
-        private const val KEY_DRIVE_TOKEN = "drive_access_token"
-        private const val KEY_DRIVE_EXPIRES = "drive_access_expires"
+        private const val KEY_DRIVE_TOKEN = "drive_access_token_v2"
+        private const val KEY_DRIVE_EXPIRES = "drive_access_expires_v2"
 
         fun isInvalidCredentialsMessage(message: String?): Boolean {
             val text = message.orEmpty()
