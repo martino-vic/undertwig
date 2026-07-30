@@ -9635,10 +9635,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         const meta =
           window.UndertwigLocalFs && UndertwigLocalFs.getProjectMeta(projectName);
-        const pathNote =
-          meta && meta.absolutePath
-            ? " Local path remembered for Console."
-            : "";
+        let pathNote = "";
+        if (meta && meta.absolutePath) {
+          pathNote = " Local path remembered for Console.";
+        } else if (options && options.directoryHandle && localDesktopAllowed()) {
+          pathNote =
+            " Linked for Save. For Console, start the local helper (node local-console-host.mjs) and Import project again so the full path is stored.";
+        }
 
         if (failures.length) {
           setStatus(
@@ -9729,16 +9732,96 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         render();
       }
 
+      async function importNewProjectFromDirectoryPicker() {
+        setStatus("Choose the local project folder…");
+        const dirHandle = await UndertwigLocalFs.pickProjectDirectory();
+        const allowed = await UndertwigLocalFs.ensureReadWritePermission(dirHandle);
+        if (!allowed) {
+          setStatus("Permission to open that folder was denied.", true);
+          return;
+        }
+
+        const active = state.files[state.activeFile];
+        if (active && !active.binary) {
+          active.content = UndertwigEditor.getValue();
+        }
+
+        const preferredRoot = dirHandle.name || "Project";
+        const projectName = uniqueImportedProjectName(preferredRoot);
+        const entries = await UndertwigLocalFs.collectFiles(dirHandle, "");
+        let imported = 0;
+        const failures = [];
+        let firstImportedPath = "";
+
+        addFolder(projectName);
+
+        for (let i = 0; i < entries.length; i += 1) {
+          const entry = entries[i];
+          const label = entry.relativePath || entry.name || "file";
+          try {
+            const path = normalizePath(projectName + "/" + entry.relativePath);
+            if (!path || path === projectName) {
+              continue;
+            }
+            ensureFoldersForPath(path);
+            const binary = !isTextFile(path);
+            const content = binary
+              ? bytesToBase64(new Uint8Array(await entry.file.arrayBuffer()))
+              : await entry.file.text();
+            state.files[path] = {
+              name: entry.name,
+              content: content,
+              binary: binary,
+            };
+            imported += 1;
+            if (!firstImportedPath) {
+              firstImportedPath = path;
+            }
+          } catch (error) {
+            failures.push(label + ": " + explainUploadError(error));
+          }
+        }
+
+        // If the helper is up, also ask it for the absolute path (second native
+        // dialog only when we already imported without one — skip that).
+        // Browser pickers never expose absolute paths; Console needs the helper import for that.
+        await finishImportedLocalProject(
+          projectName,
+          imported,
+          failures,
+          firstImportedPath,
+          { directoryHandle: dirHandle }
+        );
+        render();
+      }
+
       async function importProjectForDesktop() {
         try {
-          if (await UndertwigLocalDesktop.hostHealth()) {
+          if (
+            window.UndertwigLocalDesktop &&
+            (await UndertwigLocalDesktop.hostHealth())
+          ) {
             await importProjectViaLocalHelper();
             return;
           }
-          setStatus(
-            "Start the local helper to import with an automatic folder path: node local-console-host.mjs",
-            true
-          );
+
+          // Helper is optional for importing files; required only for automatic absolute paths.
+          if (
+            window.UndertwigLocalFs &&
+            UndertwigLocalFs.supportsDirectoryPicker()
+          ) {
+            await importNewProjectFromDirectoryPicker();
+            return;
+          }
+
+          if (!supportsFolderUpload()) {
+            setStatus(
+              "Importing a project folder is not supported in this browser. Try Chrome or Edge.",
+              true
+            );
+            return;
+          }
+          projectFolderInput.click();
         } catch (error) {
           if (error && error.name === "AbortError") {
             setStatus("Project import cancelled.");
