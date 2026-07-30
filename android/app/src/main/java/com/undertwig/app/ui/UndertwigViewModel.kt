@@ -376,11 +376,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
         return items.sortedWith(
             compareBy<HomeProjectItem> {
-                when (it.origin) {
-                    ProjectOrigin.Local -> 0
-                    ProjectOrigin.Drive -> 1
-                    ProjectOrigin.Invited -> 2
-                }
+                // Drive + invited first (mixed by date); plain local mirrors last.
+                if (it.origin == ProjectOrigin.Local) 1 else 0
             }.thenByDescending { it.updatedAt },
         )
     }

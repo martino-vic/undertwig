@@ -172,14 +172,11 @@ fun HomeScreen(
                 }
             }
             else -> {
+                val cloudProjects = remember(projects) {
+                    projects.filter { it.origin != ProjectOrigin.Local }
+                }
                 val localProjects = remember(projects) {
                     projects.filter { it.origin == ProjectOrigin.Local }
-                }
-                val driveProjects = remember(projects) {
-                    projects.filter { it.origin == ProjectOrigin.Drive }
-                }
-                val invitedProjects = remember(projects) {
-                    projects.filter { it.origin == ProjectOrigin.Invited }
                 }
                 LazyColumn(
                     modifier = Modifier
@@ -211,64 +208,27 @@ fun HomeScreen(
                             }
                         }
                     }
-                    if (localProjects.isNotEmpty()) {
-                        item(key = "header-local") {
-                            HomeSectionHeader("On this device")
-                        }
-                        items(localProjects, key = { it.key }) { project ->
-                            ProjectCard(
-                                project = project,
-                                opening = openingKey == project.key,
-                                onOpen = { onOpen(project) },
-                                onDelete = {
-                                    val id = project.localId
-                                    if (id != null) onDelete(id)
-                                },
-                            )
-                        }
+                    items(cloudProjects, key = { it.key }) { project ->
+                        ProjectCard(
+                            project = project,
+                            opening = openingKey == project.key,
+                            onOpen = { onOpen(project) },
+                            onDelete = {
+                                val id = project.localId
+                                if (id != null) onDelete(id)
+                            },
+                        )
                     }
-                    if (driveProjects.isNotEmpty()) {
-                        item(key = "header-drive") {
-                            HomeSectionHeader("Google Drive (yours)")
-                        }
-                        items(driveProjects, key = { it.key }) { project ->
-                            ProjectCard(
-                                project = project,
-                                opening = openingKey == project.key,
-                                onOpen = { onOpen(project) },
-                                onDelete = {
-                                    val id = project.localId
-                                    if (id != null) onDelete(id)
-                                },
-                            )
-                        }
-                    }
-                    if (invitedProjects.isNotEmpty() || (authUser != null && !cloudLoading)) {
-                        item(key = "header-invited") {
-                            HomeSectionHeader("Invited projects")
-                        }
-                        if (invitedProjects.isEmpty()) {
-                            item(key = "invited-empty") {
-                                Text(
-                                    "Projects shared with you via Undertwig appear here (inside someone’s Undertwig folder).",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                                )
-                            }
-                        } else {
-                            items(invitedProjects, key = { it.key }) { project ->
-                                ProjectCard(
-                                    project = project,
-                                    opening = openingKey == project.key,
-                                    onOpen = { onOpen(project) },
-                                    onDelete = {
-                                        val id = project.localId
-                                        if (id != null) onDelete(id)
-                                    },
-                                )
-                            }
-                        }
+                    items(localProjects, key = { it.key }) { project ->
+                        ProjectCard(
+                            project = project,
+                            opening = openingKey == project.key,
+                            onOpen = { onOpen(project) },
+                            onDelete = {
+                                val id = project.localId
+                                if (id != null) onDelete(id)
+                            },
+                        )
                     }
                 }
             }
@@ -323,17 +283,6 @@ fun HomeScreen(
             },
         )
     }
-}
-
-@Composable
-private fun HomeSectionHeader(title: String) {
-    Text(
-        title,
-        style = MaterialTheme.typography.labelLarge,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
-        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp, start = 2.dp),
-    )
 }
 
 @Composable
