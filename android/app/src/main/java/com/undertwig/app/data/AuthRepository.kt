@@ -1,7 +1,13 @@
 package com.undertwig.app.data
 
+import android.accounts.Account
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -9,11 +15,18 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.api.Scope
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import android.util.Base64
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 data class AuthUser(
     val id: String,
@@ -43,6 +56,8 @@ class AuthRepository(context: Context) {
         )
     }
 
+    fun isLoggedIn(): Boolean = currentUser() != null
+
     suspend fun signInWithGoogle(activity: Activity): AuthUser {
         val option = GetSignInWithGoogleOption.Builder(WEB_CLIENT_ID).build()
         val request = GetCredentialRequest.Builder()
@@ -67,7 +82,6 @@ class AuthRepository(context: Context) {
                     pictureUrl = google.profilePictureUri?.toString(),
                     idToken = google.idToken,
                 ).let { base ->
-                    // GoogleIdTokenCredential.id is usually the email; prefer JWT claims when present.
                     val claims = decodeJwtClaims(google.idToken)
                     base.copy(
                         id = claims?.optString("sub")?.takeIf { it.isNotBlank() } ?: base.id,
@@ -78,6 +92,8 @@ class AuthRepository(context: Context) {
                     )
                 }
                 persist(user)
+                // Prompt for Drive once at login so later Saves can sync without a second identity step.
+                runCatching { ensureDriveAccessToken(activity) }
                 return user
             }
             throw IllegalStateException("Unexpected credential type from Google Sign-In.")
@@ -95,11 +111,89 @@ class AuthRepository(context: Context) {
         }
     }
 
+    /**
+     * Returns a Google Drive OAuth access token for the signed-in user.
+     * May show a consent UI the first time Drive access is needed.
+     */
+    suspend fun ensureDriveAccessToken(activity: Activity): String {
+        val cached = prefs.getString(KEY_DRIVE_TOKEN, null)
+        val expiresAt = prefs.getLong(KEY_DRIVE_EXPIRES, 0L)
+        if (!cached.isNullOrBlank() && expiresAt > System.currentTimeMillis() + 60_000L) {
+            return cached
+        }
+
+        val email = currentUser()?.email
+        val builder = AuthorizationRequest.builder()
+            .setRequestedScopes(listOf(Scope(DRIVE_SCOPE)))
+        if (!email.isNullOrBlank()) {
+            builder.setAccount(Account(email, "com.google"))
+        }
+        val request = builder.build()
+        val client = Identity.getAuthorizationClient(activity)
+        val first = client.authorize(request).await()
+        val result = if (first.hasResolution()) {
+            val pending = first.pendingIntent
+                ?: throw IllegalStateException("Google Drive permission UI is unavailable.")
+            launchAuthorizationResolution(activity, pending.intentSender).let { data ->
+                client.getAuthorizationResultFromIntent(data)
+            }
+        } else {
+            first
+        }
+        val token = result.accessToken?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("Google Drive access was not granted.")
+        // Access tokens typically last ~1h; refresh via authorize() on next Save.
+        prefs.edit()
+            .putString(KEY_DRIVE_TOKEN, token)
+            .putLong(KEY_DRIVE_EXPIRES, System.currentTimeMillis() + 55 * 60_000L)
+            .apply()
+        return token
+    }
+
+    fun clearDriveToken() {
+        prefs.edit()
+            .remove(KEY_DRIVE_TOKEN)
+            .remove(KEY_DRIVE_EXPIRES)
+            .apply()
+    }
+
     suspend fun signOut() {
         runCatching {
             credentialManager.clearCredentialState(ClearCredentialStateRequest())
         }
         prefs.edit().clear().apply()
+    }
+
+    private suspend fun launchAuthorizationResolution(
+        activity: Activity,
+        intentSender: android.content.IntentSender,
+    ): Intent {
+        val component = activity as? ComponentActivity
+            ?: throw IllegalStateException("Drive authorization requires an Activity.")
+        return suspendCancellableCoroutine { cont ->
+            val key = "undertwig_drive_auth_${System.nanoTime()}"
+            lateinit var launcher: ActivityResultLauncher<IntentSenderRequest>
+            launcher = component.activityResultRegistry.register(
+                key,
+                ActivityResultContracts.StartIntentSenderForResult(),
+            ) { activityResult ->
+                launcher.unregister()
+                if (activityResult.resultCode == Activity.RESULT_OK && activityResult.data != null) {
+                    cont.resume(activityResult.data!!)
+                } else {
+                    cont.resumeWithException(SignInCancelledException())
+                }
+            }
+            cont.invokeOnCancellation {
+                runCatching { launcher.unregister() }
+            }
+            try {
+                launcher.launch(IntentSenderRequest.Builder(intentSender).build())
+            } catch (e: Exception) {
+                runCatching { launcher.unregister() }
+                cont.resumeWithException(e)
+            }
+        }
     }
 
     private fun persist(user: AuthUser) {
@@ -149,11 +243,15 @@ class AuthRepository(context: Context) {
         const val WEB_CLIENT_ID =
             "800443995990-dejumfn1f6254h326ln6d1hr16l017fu.apps.googleusercontent.com"
 
+        const val DRIVE_SCOPE = "https://www.googleapis.com/auth/drive"
+
         private const val PREFS = "undertwig_auth"
         private const val KEY_ID = "id"
         private const val KEY_EMAIL = "email"
         private const val KEY_NAME = "name"
         private const val KEY_PICTURE = "picture"
         private const val KEY_ID_TOKEN = "id_token"
+        private const val KEY_DRIVE_TOKEN = "drive_access_token"
+        private const val KEY_DRIVE_EXPIRES = "drive_access_expires"
     }
 }

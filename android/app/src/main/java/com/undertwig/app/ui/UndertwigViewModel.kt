@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.undertwig.app.data.AuthRepository
 import com.undertwig.app.data.AuthUser
 import com.undertwig.app.data.BibToolId
+import com.undertwig.app.data.DriveSyncRepository
 import com.undertwig.app.data.EnginePrefs
 import com.undertwig.app.data.LatexEngineId
 import com.undertwig.app.data.ProjectDownloadInfo
@@ -69,9 +70,12 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private val repo = ProjectRepository(application)
     private val enginePrefs = EnginePrefs(application)
     private val authRepo = AuthRepository(application)
+    private val driveSync = DriveSyncRepository(application, repo)
     private val engine = LatexEngine()
     private var busyJob: Job? = null
     private var statusTickerJob: Job? = null
+    private var statusFlashJob: Job? = null
+    private var saveJob: Job? = null
     @Volatile private var latestBusyStatus: String? = null
     @Volatile private var busyStatusStartedAtMs: Long = 0L
 
@@ -225,7 +229,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         _editor.update { it.copy(editorText = text, dirty = true) }
     }
 
-    fun saveActive() {
+    fun saveActive(activity: Activity) {
         val state = _editor.value
         if (state.projectId.isEmpty()) {
             _editor.update {
@@ -242,11 +246,17 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             }
             return
         }
+        if (saveJob?.isActive == true) return
+
         val path = state.activePath.ifBlank { "main.tex" }
         val where = "${state.projectName}/$path"
+        val projectId = state.projectId
+        val projectName = state.projectName
+        val loggedIn = _auth.value.user != null
+
         runCatching {
-            repo.writeFile(state.projectId, path, state.editorText)
-            val written = repo.readFile(state.projectId, path)
+            repo.writeFile(projectId, path, state.editorText)
+            val written = repo.readFile(projectId, path)
             check(!written.binary && written.content == state.editorText) {
                 "Saved file could not be verified."
             }
@@ -255,18 +265,57 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 _editor.update {
                     it.copy(
                         dirty = false,
-                        status = "Saved successfully",
                         error = null,
-                        files = repo.listFiles(state.projectId),
-                        folders = repo.listFolders(state.projectId),
+                        files = repo.listFiles(projectId),
+                        folders = repo.listFolders(projectId),
                     )
                 }
-                Toast.makeText(
-                    getApplication(),
-                    "Saved successfully to this app",
-                    Toast.LENGTH_SHORT,
-                ).show()
                 refreshProjects()
+
+                if (!loggedIn) {
+                    flashStatus("Saved successfully")
+                    Toast.makeText(
+                        getApplication(),
+                        "Saved successfully to this app",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    return@fold
+                }
+
+                saveJob = viewModelScope.launch {
+                    _editor.update { it.copy(status = "Saving to Drive…") }
+                    try {
+                        val token = authRepo.ensureDriveAccessToken(activity)
+                        driveSync.uploadProject(token, projectId, projectName)
+                        flashStatus("Saved successfully")
+                    } catch (e: AuthRepository.SignInCancelledException) {
+                        flashStatus("Saved locally")
+                        Toast.makeText(
+                            getApplication(),
+                            "Saved on this device. Drive permission was cancelled.",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        authRepo.clearDriveToken()
+                        _editor.update {
+                            it.copy(
+                                status = "Drive save failed",
+                                error = e.message ?: "Could not save to Google Drive.",
+                            )
+                        }
+                        Toast.makeText(
+                            getApplication(),
+                            "Saved on this device, but Drive failed: ${e.message ?: "unknown error"}",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        delay(STATUS_FLASH_MS)
+                        if (_editor.value.status == "Drive save failed") {
+                            restoreEditingStatus()
+                        }
+                    }
+                }
             },
             onFailure = { error ->
                 val detail = error.message ?: "Could not save $where."
@@ -279,6 +328,29 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 Toast.makeText(getApplication(), "Save failed: $detail", Toast.LENGTH_LONG).show()
             },
         )
+    }
+
+    private fun flashStatus(message: String) {
+        statusFlashJob?.cancel()
+        _editor.update { it.copy(status = message, error = null) }
+        statusFlashJob = viewModelScope.launch {
+            delay(STATUS_FLASH_MS)
+            if (_editor.value.status == message) {
+                restoreEditingStatus()
+            }
+        }
+    }
+
+    private fun restoreEditingStatus() {
+        val path = _editor.value.activePath
+        _editor.update {
+            it.copy(
+                status = when {
+                    path.isNotBlank() -> "Editing $path"
+                    else -> "Ready."
+                },
+            )
+        }
     }
 
     fun projectDownloadInfo(): ProjectDownloadInfo? {
@@ -753,6 +825,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
     companion object {
         private const val STATUS_TICK_MS = 10_000L
+        private const val STATUS_FLASH_MS = 2_500L
     }
 
     /**

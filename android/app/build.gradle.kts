@@ -12,8 +12,8 @@ android {
         applicationId = "com.undertwig.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 36
-        versionName = "0.1.35"
+        versionCode = 37
+        versionName = "0.1.36"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -70,6 +70,8 @@ dependencies {
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

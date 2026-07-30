@@ -51,7 +51,7 @@ fun UndertwigApp(
                     }
                 },
                 onEditorChange = viewModel::onEditorChange,
-                onSave = viewModel::saveActive,
+                onSave = { viewModel.saveActive(activity) },
                 onConvert = viewModel::convert,
                 onBibliography = viewModel::updateBibliography,
                 onCancelBusy = viewModel::cancelBusy,

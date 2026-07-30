@@ -325,6 +325,13 @@ class ProjectRepository(context: Context) {
         }.getOrNull()
     }
 
+    /** Any existing project file (including empty), for Drive sync. */
+    fun existingFile(projectId: String, relativePath: String): File? {
+        return runCatching {
+            resolve(projectId, relativePath).takeIf { it.isFile }
+        }.getOrNull()
+    }
+
     fun projectDownloadInfo(projectId: String): ProjectDownloadInfo {
         val dir = projectDir(projectId)
         val files = exportableFiles(dir)

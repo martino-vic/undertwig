@@ -20,10 +20,11 @@ This is **not** a Chrome Custom Tab / TWA wrapper of the website.
 - View generated PDF
 - Compiler log sheet
 - Google Sign-In (editor top bar **Log in**; session stored on device)
+- When logged in, **Save** writes locally and syncs the project to Google Drive (`Undertwig/<project>/`)
 
 ## Not in this build yet
 
-- Google Drive Save–Load
+- Google Drive load / open from Drive
 - Collaborate / invites
 - Monaco editor
 
@@ -38,9 +39,11 @@ In Google Cloud Console for that project, also create an **Android** OAuth clien
 
 Without that Android client, Sign-In fails with a developer/configuration error.
 
+Drive Save requests the same Drive scope as the website (`https://www.googleapis.com/auth/drive`) after login / on first Save.
+
 ## Package
 
-`com.undertwig.app` · version `0.1.34`
+`com.undertwig.app` · version `0.1.36`
 
 ## Store assets
 
