@@ -6,14 +6,14 @@ plugins {
 
 android {
     namespace = "com.undertwig.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.undertwig.app"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 53
-        versionName = "0.1.52"
+        targetSdk = 36
+        versionCode = 54
+        versionName = "0.1.53"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
