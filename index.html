@@ -6678,7 +6678,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       async function openCloudProject(projectName) {
         const name = String(projectName || "").trim();
-        if (!name || cloudOpenInFlight) {
+        if (!name) {
+          return;
+        }
+        // Same Cancel control as Load.
+        if (syncAbortController || syncInFlight || cloudOpenInFlight) {
+          syncCurrentProjectFromDrive();
           return;
         }
         if (!UndertwigAuth.isLoggedIn() || !UndertwigCloud.isAvailable()) {
@@ -6714,15 +6719,25 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           active.content = UndertwigEditor.getValue();
         }
 
+        const abortController = new AbortController();
+        syncAbortController = abortController;
         cloudOpenInFlight = true;
         startSyncSpinner();
         setStatus("Opening “" + name + "” from Google Drive…");
         try {
           const pulled = await UndertwigCloud.pullProjectFromDrive(name, {
+            signal: abortController.signal,
             onProgress: function (message) {
+              if (abortController.signal.aborted) {
+                return;
+              }
               setStatus(message || "Opening from Google Drive…");
             },
           });
+          if (abortController.signal.aborted) {
+            setStatus("Load cancelled.");
+            return;
+          }
           applyPulledProject(pulled);
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -6735,8 +6750,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           setStatus("Opened “" + name + "” from Google Drive.");
           refreshCloudProjectsList();
         } catch (error) {
+          if (error && error.name === "AbortError") {
+            setStatus("Load cancelled.");
+            return;
+          }
           setStatus((error && error.message) || "Could not open cloud project.", true);
         } finally {
+          if (syncAbortController === abortController) {
+            syncAbortController = null;
+          }
           cloudOpenInFlight = false;
           stopSyncSpinner();
         }
@@ -7629,11 +7651,23 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       async function syncCurrentProjectFromDrive() {
         if (syncAbortController) {
-          syncAbortController.abort();
-          setStatus("Cancelling…");
+          if (!syncAbortController.signal.aborted) {
+            syncAbortController.abort();
+            setStatus("Cancelling…");
+          } else {
+            // Abort already signaled but UI stuck — force recovery.
+            syncAbortController = null;
+            cloudOpenInFlight = false;
+            stopSyncSpinner();
+            setStatus("Load cancelled.");
+          }
           return;
         }
         if (syncInFlight) {
+          // Spinner without a controller (should not happen) — reset UI.
+          cloudOpenInFlight = false;
+          stopSyncSpinner();
+          setStatus("Load cancelled.");
           return;
         }
         if (!UndertwigAuth.isLoggedIn() || !UndertwigCloud.isAvailable()) {

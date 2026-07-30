@@ -33,7 +33,7 @@
   let activeOperationSignal = null;
 
   function createAbortError(message) {
-    const error = new Error(message || "Upload cancelled.");
+    const error = new Error(message || "Cancelled.");
     error.name = "AbortError";
     return error;
   }
@@ -43,6 +43,33 @@
     if (active && active.aborted) {
       throw createAbortError();
     }
+  }
+
+  /** Reject when `signal` aborts; used to cancel waits that ignore fetch signals. */
+  function abortablePromise(promise, signal) {
+    const active = signal || activeOperationSignal;
+    if (!active) {
+      return promise;
+    }
+    if (active.aborted) {
+      return Promise.reject(createAbortError());
+    }
+    return new Promise(function (resolve, reject) {
+      const onAbort = function () {
+        reject(createAbortError());
+      };
+      active.addEventListener("abort", onAbort, { once: true });
+      promise.then(
+        function (value) {
+          active.removeEventListener("abort", onAbort);
+          resolve(value);
+        },
+        function (error) {
+          active.removeEventListener("abort", onAbort);
+          reject(error);
+        }
+      );
+    });
   }
 
   function auth() {
@@ -612,24 +639,25 @@
   }
 
   async function driveFetch(url, init, retried) {
-    throwIfAborted(init && init.signal);
-    const token = await getAccessToken();
-    throwIfAborted(init && init.signal);
-    const headers = Object.assign({}, (init && init.headers) || {}, {
+    const requestInit = init || {};
+    const userSignal = requestInit.signal || activeOperationSignal;
+    throwIfAborted(userSignal);
+    const token = await abortablePromise(getAccessToken(), userSignal);
+    throwIfAborted(userSignal);
+    const headers = Object.assign({}, requestInit.headers || {}, {
       Authorization: "Bearer " + token,
     });
     const timeout =
       typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
         ? AbortSignal.timeout(FETCH_TIMEOUT_MS)
         : null;
-    const userSignal = (init && init.signal) || activeOperationSignal;
     const signal = timeout || userSignal ? mergeAbortSignals([timeout, userSignal].filter(Boolean)) : undefined;
 
     let response;
     try {
       const request = fetch(
         url,
-        Object.assign({}, init, { headers: headers, credentials: "omit", signal: signal })
+        Object.assign({}, requestInit, { headers: headers, credentials: "omit", signal: signal })
       );
       response = timeout
         ? await request
@@ -649,8 +677,11 @@
 
     if (response.status === 401 && !retried) {
       forgetAccessToken();
-      await getAccessToken({ forcePrompt: false, timeoutMs: SILENT_TOKEN_TIMEOUT_MS });
-      return driveFetch(url, init, true);
+      await abortablePromise(
+        getAccessToken({ forcePrompt: false, timeoutMs: SILENT_TOKEN_TIMEOUT_MS }),
+        userSignal
+      );
+      return driveFetch(url, requestInit, true);
     }
 
     if (response.status === 403) {
@@ -698,11 +729,12 @@
    * List direct children of a folder. Used for shared invite folders too — do not
    * constrain with spaces=drive (that can hide shared-with-me children).
    */
-  async function listChildren(folderId) {
+  async function listChildren(folderId, signal) {
     const all = [];
     let pageToken = "";
     const query = "'" + folderId + "' in parents and trashed = false";
     do {
+      throwIfAborted(signal);
       let url =
         DRIVE_API +
         "/files?supportsAllDrives=true&includeItemsFromAllDrives=true" +
@@ -716,7 +748,7 @@
       if (pageToken) {
         url += "&pageToken=" + encodeURIComponent(pageToken);
       }
-      const response = await driveFetch(url, { method: "GET" });
+      const response = await driveFetch(url, { method: "GET", signal: signal || undefined });
       if (!response.ok) {
         throw new Error(await readDriveError(response, "Could not list Google Drive folder contents."));
       }
@@ -1538,10 +1570,11 @@
     return saveChain;
   }
 
-  async function listFolderTree(folderId, prefix) {
+  async function listFolderTree(folderId, prefix, signal) {
     const entries = [];
-    const children = await listChildren(folderId);
+    const children = await listChildren(folderId, signal);
     for (let i = 0; i < children.length; i += 1) {
+      throwIfAborted(signal);
       const child = children[i];
       const path = prefix ? prefix + "/" + child.name : child.name;
       if (child.mimeType === "application/vnd.google-apps.folder") {
@@ -1553,7 +1586,7 @@
           name: child.name,
           owners: child.owners || [],
         });
-        const nested = await listFolderTree(child.id, path);
+        const nested = await listFolderTree(child.id, path, signal);
         entries.push.apply(entries, nested);
       } else if (child.mimeType && child.mimeType.indexOf("application/vnd.google-apps.") === 0) {
         // Skip Google Docs/Sheets/etc. — Undertwig stores plain project files.
@@ -1573,18 +1606,23 @@
     return entries;
   }
 
-  async function downloadDriveFile(fileId, asBinary) {
+  async function downloadDriveFile(fileId, asBinary, signal) {
     const response = await driveFetch(
       DRIVE_API + "/files/" + encodeURIComponent(fileId) + "?alt=media&supportsAllDrives=true",
-      { method: "GET" }
+      { method: "GET", signal: signal || undefined }
     );
+    throwIfAborted(signal);
     if (!response.ok) {
       throw new Error(await readDriveError(response, "Could not download Drive file."));
     }
     if (asBinary) {
-      return blobToBase64(await response.blob());
+      const blob = await abortablePromise(response.blob(), signal);
+      throwIfAborted(signal);
+      return blobToBase64(blob);
     }
-    return response.text();
+    const text = await abortablePromise(response.text(), signal);
+    throwIfAborted(signal);
+    return text;
   }
 
   function isBinaryMime(mimeType, path) {
@@ -1650,7 +1688,7 @@
     const name = projectName || meta.name || "SharedProject";
 
     notify("Listing files in Google Drive / " + name + "…");
-    const entries = await listFolderTree(folderId, "");
+    const entries = await listFolderTree(folderId, "", signal);
     throwIfAborted(signal);
     const folders = [];
     const files = {};
@@ -1683,7 +1721,8 @@
       notify("Downloading " + (i + 1) + "/" + fileEntries.length + ": " + item.entry.name + "…");
       const binary = isBinaryMime(item.entry.mimeType, item.entry.path);
       try {
-        const content = await downloadDriveFile(item.entry.id, binary);
+        const content = await downloadDriveFile(item.entry.id, binary, signal);
+        throwIfAborted(signal);
         files[item.fullPath] = {
           name: item.entry.name,
           content: content,
@@ -1901,7 +1940,7 @@
         try {
           const rootId = await ensureUndertwigFolder();
           throwIfAborted(signal);
-          const children = await listChildren(rootId);
+          const children = await listChildren(rootId, signal);
           throwIfAborted(signal);
           for (let i = 0; i < children.length; i += 1) {
             const child = children[i];
