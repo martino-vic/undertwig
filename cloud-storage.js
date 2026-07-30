@@ -1844,9 +1844,10 @@
     }
     rememberPendingInvite(id);
     await connect();
-    writeActiveFolderId(id);
     let meta = null;
     try {
+      // Resolve access before remembering this folder as active — otherwise a failed
+      // invite leaves Drive status stuck on an inaccessible id.
       meta = await refreshProjectMeta(id);
     } catch (error) {
       const message = (error && error.message) || "";
@@ -1861,11 +1862,13 @@
     }
     if (!meta) {
       const accessError = new Error(
-        "Could not open the shared project folder. Make sure the owner shared it with your Google account, then reopen the invite link. If this keeps failing, log out and sign in again to refresh Google Drive permissions."
+        "Could not open the shared project folder. Ask the owner to click Copy invitation link (or Send invite) again so Google Drive grants link access, then reopen this invite."
       );
       accessError.code = "shared-folder-unavailable";
       throw accessError;
     }
+
+    writeActiveFolderId(id);
 
     // Mark invitee before download so the tree label is correct as soon as files land.
     const role = isOwnerEmail(meta) ? "owner" : "writer";
@@ -2349,6 +2352,71 @@
     return { folderId: folderId, email: email, role: role || "writer", name: meta.name };
   }
 
+  /**
+   * Grant "anyone with the link" access so Copy invitation link works without a prior email share.
+   * Email invites still add a per-user permission; this makes the URL itself usable.
+   */
+  async function ensureInviteLinkAccess(folderId, role) {
+    const id = String(folderId || "").trim();
+    if (!id) {
+      throw new Error("Missing project folder.");
+    }
+    await connect();
+    const wantRole = role || "writer";
+
+    const listResponse = await driveFetch(
+      DRIVE_API +
+        "/files/" +
+        encodeURIComponent(id) +
+        "/permissions?supportsAllDrives=true&fields=permissions(id,type,role)",
+      { method: "GET" }
+    );
+    if (listResponse.ok) {
+      const payload = await listResponse.json();
+      const permissions = (payload && payload.permissions) || [];
+      for (let i = 0; i < permissions.length; i += 1) {
+        const permission = permissions[i];
+        if (!permission || permission.type !== "anyone") {
+          continue;
+        }
+        if (
+          permission.role === "writer" ||
+          permission.role === "owner" ||
+          (wantRole === "reader" && permission.role === "reader")
+        ) {
+          return { folderId: id, alreadyShared: true, role: permission.role };
+        }
+      }
+    }
+
+    const response = await driveFetch(
+      DRIVE_API +
+        "/files/" +
+        encodeURIComponent(id) +
+        "/permissions?supportsAllDrives=true&fields=id,type,role",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "anyone",
+          role: wantRole,
+          allowFileDiscovery: false,
+        }),
+      }
+    );
+    if (!response.ok) {
+      const detail = await readDriveError(
+        response,
+        "Could not create a shareable invitation link for this project."
+      );
+      if (/already|exists/i.test(detail)) {
+        return { folderId: id, alreadyShared: true, role: wantRole };
+      }
+      throw new Error(detail);
+    }
+    return { folderId: id, alreadyShared: false, role: wantRole };
+  }
+
   async function probeConnection() {
     if (!isAvailable()) {
       return { connected: false, fileId: null, role: null, reason: "not-signed-in" };
@@ -2357,9 +2425,16 @@
       await connect();
       const activeId = getProjectFolderId();
       if (activeId) {
-        const meta = await refreshProjectMeta(activeId);
-        if (meta) {
-          return { connected: true, fileId: activeId, role: cachedRole, reason: "ok" };
+        try {
+          const meta = await refreshProjectMeta(activeId);
+          if (meta) {
+            return { connected: true, fileId: activeId, role: cachedRole, reason: "ok" };
+          }
+        } catch (_metaError) {
+          // Inaccessible / stale active folder (failed invite, revoked share) — keep probing.
+          if (cachedActiveFolderId === activeId) {
+            writeActiveFolderId(null);
+          }
         }
       }
       // Stale collaborator role without a usable shared folder — fall back to owner workspace.
@@ -2371,7 +2446,7 @@
       return { connected: true, fileId: rootId, role: "owner", reason: "ready-no-project" };
     } catch (error) {
       const message = (error && error.message) || "connection-failed";
-      if (/File not found|not found|404/i.test(message)) {
+      if (/File not found|not found|404|insufficientPermissions|403/i.test(message)) {
         try {
           clearFolderCaches();
           clearCollaboratorState();
@@ -2767,6 +2842,7 @@
     listUndertwigProjects,
     listSharedUndertwigProjects,
     shareProjectWithEmail,
+    ensureInviteLinkAccess,
     ensureProjectFolder,
     refreshProjectMeta,
     probeConnection,

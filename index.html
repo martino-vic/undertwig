@@ -4725,6 +4725,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           cancelled.name = "AbortError";
           throw cancelled;
         }
+        if (UndertwigCloud.ensureInviteLinkAccess) {
+          setInviteStatus("Enabling invitation link access on Google Drive…");
+          await UndertwigCloud.ensureInviteLinkAccess(folderId, "writer");
+        }
+        if (signal && signal.aborted) {
+          const cancelled = new Error("Cancelled.");
+          cancelled.name = "AbortError";
+          throw cancelled;
+        }
         if (UndertwigCloud.setActiveProjectByName) {
           UndertwigCloud.setActiveProjectByName(projectName);
         }
@@ -4953,6 +4962,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           await UndertwigCloud.shareProjectWithEmail(email, "writer", projectName);
           if (controller.signal.aborted) {
             throw Object.assign(new Error("Cancelled."), { name: "AbortError" });
+          }
+          if (UndertwigCloud.ensureInviteLinkAccess) {
+            await UndertwigCloud.ensureInviteLinkAccess(
+              UndertwigCloud.getProjectFileId(),
+              "writer"
+            );
           }
           if (UndertwigCloud.setActiveProjectByName) {
             UndertwigCloud.setActiveProjectByName(projectName);
@@ -6055,6 +6070,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           const isCurrentInit = function () {
             return initGeneration === cloudInitGeneration;
           };
+          let inviteOpenError = null;
           try {
             if (sharedProjectId) {
               try {
@@ -6166,9 +6182,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                   setStatus(message + " Click Retry under the file tree.", true);
                   return;
                 }
-                renderCloudStatus("disconnected");
-                setStatus(message, true);
-                return;
+                // Invite open failed, but own Drive may still work — continue to verify so
+                // Retry is not stuck Disconnected while Save still uploads.
+                inviteOpenError = message;
               }
             }
 
@@ -6285,7 +6301,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               "connected",
               UndertwigCloud.getProjectFileId() || probe.fileId || verify.fileId
             );
-            setStatus("Connected to Google Drive.");
+            if (inviteOpenError) {
+              setStatus(
+                inviteOpenError +
+                  " Your Google Drive is connected — ask the owner to copy a fresh invitation link, then click Retry.",
+                true
+              );
+            } else {
+              setStatus("Connected to Google Drive.");
+            }
             if (typeof refreshCloudProjectsList === "function") {
               refreshCloudProjectsList();
             }
