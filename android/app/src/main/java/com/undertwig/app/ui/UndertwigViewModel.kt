@@ -275,6 +275,15 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                                 ownerEmail = item.ownerEmail,
                             )
                         }
+                        // Ensure Save keeps writing to the owner's folder (not a local Undertwig copy).
+                        runCatching {
+                            repo.setDriveLink(
+                                localId,
+                                folderId,
+                                role = "writer",
+                                ownerEmail = item.ownerEmail,
+                            )
+                        }
                     }
                     localId
                 }
@@ -480,7 +489,10 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 refreshProjects()
 
                 if (!loggedIn) {
-                    flashStatus("Saved successfully")
+                    statusFlashJob?.cancel()
+                    _editor.update {
+                        it.copy(status = "Saved successfully on this device.", error = null)
+                    }
                     Toast.makeText(
                         getApplication(),
                         "Saved successfully to this app",
@@ -495,9 +507,21 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                         withDriveAccess(activity) { token ->
                             driveSync.uploadProject(token, projectId, projectName)
                         }
-                        flashStatus("Saved successfully")
+                        statusFlashJob?.cancel()
+                        _editor.update {
+                            it.copy(
+                                status = "Saved successfully to Google Drive.",
+                                error = null,
+                            )
+                        }
                     } catch (e: AuthRepository.SignInCancelledException) {
-                        flashStatus("Saved locally")
+                        statusFlashJob?.cancel()
+                        _editor.update {
+                            it.copy(
+                                status = "Saved on this device (Drive cancelled).",
+                                error = null,
+                            )
+                        }
                         Toast.makeText(
                             getApplication(),
                             "Saved on this device. Drive permission was cancelled.",

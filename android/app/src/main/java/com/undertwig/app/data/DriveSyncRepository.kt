@@ -36,9 +36,33 @@ class DriveSyncRepository(
         val name = projectName.trim()
         require(name.isNotEmpty()) { "Missing project name." }
 
-        val rootId = ensureUndertwigFolder(accessToken)
-        val projectFolderId = ensureChildFolder(accessToken, rootId, name)
-        projects.setDriveLink(projectId, projectFolderId, role = "owner")
+        val summary = projects.listProjects().firstOrNull { it.id == projectId }
+        val role = summary?.driveRole?.trim()?.lowercase().orEmpty()
+        val linkedId = summary?.driveFolderId?.takeIf { it.isNotBlank() }
+
+        val projectFolderId: String
+        val savedRole: String
+        if (role == "writer" || role == "reader") {
+            // Invited projects must write into the owner's shared folder — never create
+            // Undertwig/<name> under the invitee's own Drive.
+            val sharedId = linkedId?.takeIf { isLiveFolder(accessToken, it) }
+                ?: error(
+                    "Missing shared project folder. Open the invited project from the home screen again.",
+                )
+            projectFolderId = sharedId
+            savedRole = role
+            projects.setDriveLink(
+                projectId,
+                projectFolderId,
+                role = savedRole,
+                ownerEmail = summary?.ownerEmail,
+            )
+        } else {
+            val rootId = ensureUndertwigFolder(accessToken)
+            projectFolderId = ensureChildFolder(accessToken, rootId, name)
+            savedRole = "owner"
+            projects.setDriveLink(projectId, projectFolderId, role = "owner")
+        }
 
         for (folder in projects.listFolders(projectId)) {
             ensurePathFolders(accessToken, projectFolderId, folder)
