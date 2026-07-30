@@ -4024,6 +4024,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let writingRoomSuppressResumeKey = null;
       /** True when the work-desk project changed in this writing-room session since Load/Save. */
       let writingRoomSessionDirty = false;
+      /** Blocks cloud autosave during Discard → Load so Drive is not overwritten mid-exit. */
+      let suppressCloudAutosave = false;
       let writingRoomIdleTimer = null;
       let writingRoomIdlePromptOpen = false;
       let cloudStatusMode = "logged-out";
@@ -5617,9 +5619,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           file.content = value;
           if (fileLockHeldProject && fileLockHeldProject === getActiveProjectName()) {
             writingRoomSessionDirty = true;
+            // Local only while in the writing room. Cloud autosave would make
+            // Discard impossible (Load would just pull the edits already uploaded).
+            persistProject({ skipCloud: true });
+          } else {
+            persistProject();
           }
           noteWritingRoomActivity();
-          persistProject();
           updateMeta();
         },
         onSave: function () {
@@ -6582,19 +6588,28 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return true;
       }
 
-      function scheduleCloudSave(immediate) {
+      function cancelScheduledCloudSave() {
         if (cloudSaveTimer) {
           clearTimeout(cloudSaveTimer);
           cloudSaveTimer = null;
         }
+      }
+
+      function scheduleCloudSave(immediate) {
+        cancelScheduledCloudSave();
 
         const run = async () => {
+          if (suppressCloudAutosave) {
+            return;
+          }
           if (cloudSaveInFlight) {
             scheduleCloudSave(false);
             return;
           }
-          // Don't push Drive autosaves unless we're inside the writing room for the active project.
-          if (fileLocksEnabled() && fileLockHeldProject !== getActiveProjectName()) {
+          // Drive-linked projects use the writing room: no background cloud autosave.
+          // Explicit Save / "Save to cloud" on exit are the only uploads — otherwise
+          // Discard → Load would just re-download edits already pushed to Drive.
+          if (fileLocksEnabled()) {
             return;
           }
           if (
@@ -7439,6 +7454,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       async function reloadCurrentProjectFromDrive(projectName, options) {
         const opts = options || {};
         const discardLocalEdits = Boolean(opts.discardLocalEdits);
+        const forceEditor = Boolean(opts.forceEditor);
         const name = String(projectName || getActiveProjectName() || "").trim();
         if (!name || !UndertwigCloud.pullProjectFromDrive) {
           return false;
@@ -7468,13 +7484,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         collapsedFolders.delete(name);
         persistCollapsedFolders();
         render();
-        // Ensure the visible editor matches Drive even if Monaco skipped a no-op setValue.
+        // Ensure the visible editor matches Drive (force after Discard even if Monaco
+        // thinks the string is unchanged).
         const path = state.activeFile;
         const file = state.files[path];
         if (UndertwigEditor && UndertwigEditor.setValue) {
           UndertwigEditor.setValue(
             file && !file.binary ? file.content : "",
-            path || ""
+            path || "",
+            { force: forceEditor || discardLocalEdits }
           );
         }
         writingRoomSessionDirty = false;
@@ -7539,8 +7557,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                   "”. Loading from Google Drive…"
               );
               // Same as Discard: Load restores the work desk; edits live only in the copy.
-              await reloadCurrentProjectFromDrive(projectName, { discardLocalEdits: true });
+              suppressCloudAutosave = true;
+              cancelScheduledCloudSave();
+              await reloadCurrentProjectFromDrive(projectName, {
+                discardLocalEdits: true,
+                forceEditor: true,
+              });
             } catch (error) {
+              suppressCloudAutosave = false;
               setStatus(
                 "Could not save a local copy: " +
                   ((error && error.message) || "unknown error"),
@@ -7552,8 +7576,21 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             setStatus("Discarding unsaved changes and loading from Google Drive…");
             try {
               writingRoomSessionDirty = false;
-              await reloadCurrentProjectFromDrive(projectName, { discardLocalEdits: true });
+              suppressCloudAutosave = true;
+              cancelScheduledCloudSave();
+              // Wait out any in-flight autosave started before this fix / race.
+              for (let i = 0; i < 50 && cloudSaveInFlight; i += 1) {
+                await new Promise(function (resolve) {
+                  setTimeout(resolve, 100);
+                });
+              }
+              // Same path as the Load button: replace editor with Drive (no upload).
+              await reloadCurrentProjectFromDrive(projectName, {
+                discardLocalEdits: true,
+                forceEditor: true,
+              });
             } catch (error) {
+              suppressCloudAutosave = false;
               setStatus(
                 "Could not reload from Drive: " +
                   ((error && error.message) || "unknown error") +
@@ -7580,6 +7617,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           : null;
         await releaseHeldFileLock();
         writingRoomSessionDirty = false;
+        suppressCloudAutosave = false;
         setWritingRoomBusy(false);
         await refreshWritingRoomStatus();
         if (projectName) {

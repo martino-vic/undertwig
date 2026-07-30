@@ -390,9 +390,9 @@
           getValue: function () {
             return editor.getValue();
           },
-          setValue: function (text) {
+          setValue: function (text, force) {
             const next = text == null ? "" : String(text);
-            if (editor.getValue() !== next) {
+            if (force || editor.getValue() !== next) {
               suppressChange = true;
               editor.setValue(next);
               suppressChange = false;
@@ -685,9 +685,9 @@
         getValue: function () {
           return view.state.doc.toString();
         },
-        setValue: function (text) {
+        setValue: function (text, force) {
           const next = text == null ? "" : String(text);
-          if (view.state.doc.toString() === next) {
+          if (!force && view.state.doc.toString() === next) {
             return;
           }
           suppressChange = true;
@@ -729,15 +729,16 @@
     return impl ? impl.getValue() : pendingValue;
   }
 
-  function setValue(text, path) {
+  function setValue(text, path, options) {
     pendingValue = text == null ? "" : String(text);
     if (path != null) {
       pendingPath = String(path || "");
     }
+    const force = Boolean(options && options.force);
     if (!impl) {
       return;
     }
-    impl.setValue(pendingValue);
+    impl.setValue(pendingValue, force);
     if (impl.setLanguageForPath) {
       impl.setLanguageForPath(pendingPath);
     }
