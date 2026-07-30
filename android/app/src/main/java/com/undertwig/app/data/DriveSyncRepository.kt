@@ -59,9 +59,22 @@ class DriveSyncRepository(
             )
         } else {
             val rootId = ensureUndertwigFolder(accessToken)
+            require(!name.equals(CLOUD_FOLDER_NAME, ignoreCase = true)) {
+                "Project name cannot be \"$CLOUD_FOLDER_NAME\"."
+            }
             projectFolderId = ensureChildFolder(accessToken, rootId, name)
+            require(projectFolderId != rootId) {
+                "Refusing to save into the Undertwig root folder."
+            }
             savedRole = "owner"
             projects.setDriveLink(projectId, projectFolderId, role = "owner")
+        }
+
+        // Never sync file content against the Undertwig root (would touch every project).
+        runCatching { ensureUndertwigFolder(accessToken) }.getOrNull()?.let { rootId ->
+            require(projectFolderId != rootId) {
+                "Refusing to save into the Undertwig root folder. Re-open the project and try again."
+            }
         }
 
         for (folder in projects.listFolders(projectId)) {
@@ -494,16 +507,10 @@ class DriveSyncRepository(
                 continue
             }
 
-            // Project folder shared directly. Invitees often cannot read the parent
-            // Undertwig folder — keep those when the folder looks like a LaTeX project.
+            // Project folder shared directly. Identity = child of Undertwig.
+            // Invitees often cannot read the parent Undertwig folder — still keep those.
             val meta = folderMetaWithParents(accessToken, id) ?: child
-            when (undertwigInviteStatus(accessToken, meta, me)) {
-                InviteStatus.FOREIGN_UNDERTWIG -> Unit
-                InviteStatus.UNKNOWN -> {
-                    if (!looksLikeUndertwigProject(accessToken, id)) continue
-                }
-                InviteStatus.NOT_UNDERTWIG -> continue
-            }
+            if (!isInvitedSharedProjectFolder(accessToken, meta, me)) continue
             invitedIds += id
             invited += DriveRemoteProject(
                 folderId = id,
@@ -535,7 +542,7 @@ class DriveSyncRepository(
     }
 
     /**
-     * Classify a shared folder for Cloud (invited):
+     * Classify by Undertwig parent folder only (never by LaTeX file contents):
      * - FOREIGN_UNDERTWIG: parent is Undertwig not owned by me
      * - NOT_UNDERTWIG: readable parents exist and none is a foreign Undertwig
      * - UNKNOWN: parents missing or unreadable (typical for project-only invites)
@@ -574,24 +581,20 @@ class DriveSyncRepository(
         return if (readableParents > 0) InviteStatus.NOT_UNDERTWIG else InviteStatus.UNKNOWN
     }
 
-    /** Soft check when the Undertwig parent cannot be read (invitee ACL). */
-    private fun looksLikeUndertwigProject(accessToken: String, folderId: String): Boolean {
-        return runCatching {
-            for (child in listChildren(accessToken, folderId)) {
-                val name = child.optString("name").lowercase()
-                if (name.isBlank()) continue
-                if (name == "main.tex" ||
-                    name.endsWith(".tex") ||
-                    name.endsWith(".bib") ||
-                    name.endsWith(".sty") ||
-                    name.endsWith(".cls") ||
-                    name.endsWith(".bst")
-                ) {
-                    return true
-                }
-            }
-            false
-        }.getOrDefault(false)
+    /**
+     * True for a shared project folder under someone else's Undertwig, or when the parent
+     * cannot be read (typical for invitees who only received the project folder).
+     * False only when every readable parent is confirmed not to be a foreign Undertwig.
+     */
+    private fun isInvitedSharedProjectFolder(
+        accessToken: String,
+        folderMeta: JSONObject,
+        me: String,
+    ): Boolean {
+        return when (undertwigInviteStatus(accessToken, folderMeta, me)) {
+            InviteStatus.FOREIGN_UNDERTWIG, InviteStatus.UNKNOWN -> true
+            InviteStatus.NOT_UNDERTWIG -> false
+        }
     }
 
     private fun folderMetaWithParents(accessToken: String, folderId: String): JSONObject? {
@@ -644,13 +647,10 @@ class DriveSyncRepository(
             val id = entry.optString("id").takeIf { it.isNotBlank() } ?: continue
             val meta = folderMetaWithParents(accessToken, id) ?: continue
             if (meta.optString("mimeType") != "application/vnd.google-apps.folder") continue
-            when (undertwigInviteStatus(accessToken, meta, me)) {
-                InviteStatus.NOT_UNDERTWIG -> continue
-                InviteStatus.UNKNOWN -> {
-                    // Avoid re-listing random Shared-with-me folders that older builds stored.
-                    if (!looksLikeUndertwigProject(accessToken, id)) continue
-                }
-                InviteStatus.FOREIGN_UNDERTWIG -> Unit
+            // Registry entries were accepted through Undertwig; keep unless parents
+            // prove this folder is not under a foreign Undertwig.
+            if (undertwigInviteStatus(accessToken, meta, me) == InviteStatus.NOT_UNDERTWIG) {
+                continue
             }
             kept += entry
             out += DriveRemoteProject(

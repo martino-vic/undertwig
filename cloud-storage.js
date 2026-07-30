@@ -151,6 +151,27 @@
   function loadProjectMap() {
     const map = readJsonStorage(PROJECT_MAP_KEY, {});
     projectFolderMap = map && typeof map === "object" ? map : {};
+    // Scrub bad mappings from older builds that pointed a project at Undertwig itself.
+    let changed = false;
+    Object.keys(projectFolderMap).forEach(function (key) {
+      if (String(key || "").toLowerCase() === String(CLOUD_FOLDER_NAME).toLowerCase()) {
+        delete projectFolderMap[key];
+        changed = true;
+        return;
+      }
+      const entry = normalizeMapEntry(projectFolderMap[key]);
+      if (
+        entry &&
+        cachedUndertwigFolderId &&
+        String(entry.id) === String(cachedUndertwigFolderId)
+      ) {
+        delete projectFolderMap[key];
+        changed = true;
+      }
+    });
+    if (changed) {
+      persistProjectMap();
+    }
   }
 
   function persistProjectMap() {
@@ -184,6 +205,18 @@
     const key = String(name || "").trim();
     const folderId = String(id || "").trim();
     if (!key || !folderId) {
+      return;
+    }
+    // Never treat the Undertwig root as a project folder — that makes Save try to
+    // sync/delete every project under Drive / Undertwig /.
+    if (key.toLowerCase() === String(CLOUD_FOLDER_NAME).toLowerCase()) {
+      return;
+    }
+    if (cachedUndertwigFolderId && String(cachedUndertwigFolderId) === folderId) {
+      return;
+    }
+    // Do not demote an owned project mapping to a shared/writer mapping.
+    if (isSharedProjectRole(role) && getMappedRole(key) === "owner") {
       return;
     }
     projectFolderMap[key] = {
@@ -830,6 +863,7 @@
     if (cachedUndertwigFolderId) {
       const meta = await fetchDriveFileMeta(cachedUndertwigFolderId, "id,trashed,mimeType");
       if (isDriveFolderMeta(meta)) {
+        scrubProjectMapAgainstRoot(cachedUndertwigFolderId);
         return cachedUndertwigFolderId;
       }
       cachedUndertwigFolderId = null;
@@ -849,6 +883,7 @@
     if (cachedUndertwigFolderId) {
       const meta = await fetchDriveFileMeta(cachedUndertwigFolderId, "id,trashed,mimeType");
       if (isDriveFolderMeta(meta)) {
+        scrubProjectMapAgainstRoot(cachedUndertwigFolderId);
         return cachedUndertwigFolderId;
       }
       cachedUndertwigFolderId = null;
@@ -876,7 +911,34 @@
     } catch (_error) {
       // Ignore.
     }
+    scrubProjectMapAgainstRoot(cachedUndertwigFolderId);
     return cachedUndertwigFolderId;
+  }
+
+  function scrubProjectMapAgainstRoot(rootId) {
+    const root = String(rootId || "").trim();
+    if (!root) {
+      return;
+    }
+    let changed = false;
+    Object.keys(projectFolderMap).forEach(function (key) {
+      if (String(key || "").toLowerCase() === String(CLOUD_FOLDER_NAME).toLowerCase()) {
+        delete projectFolderMap[key];
+        changed = true;
+        return;
+      }
+      const entry = normalizeMapEntry(projectFolderMap[key]);
+      if (entry && String(entry.id) === root) {
+        delete projectFolderMap[key];
+        changed = true;
+      }
+    });
+    if (cachedActiveFolderId && String(cachedActiveFolderId) === root) {
+      writeActiveFolderId(null);
+    }
+    if (changed) {
+      persistProjectMap();
+    }
   }
 
   async function ensureChildFolder(parentId, name) {
@@ -1497,23 +1559,44 @@
     const opts = options || {};
     const signal = opts.signal;
     const notify = typeof opts.onProgress === "function" ? opts.onProgress : null;
-    const relativeFiles = filesForProject(state, projectName);
-    const relativeFolders = foldersForProject(state, projectName);
+    const name = String(projectName || "").trim();
+    const targetId = String(folderId || "").trim();
+    if (!name || !targetId) {
+      throw new Error("Missing project folder for Google Drive save.");
+    }
+    if (name.toLowerCase() === String(CLOUD_FOLDER_NAME).toLowerCase()) {
+      throw new Error('Project name cannot be "' + CLOUD_FOLDER_NAME + '".');
+    }
+    // Hard guard: never sync against the Undertwig root (would touch every project).
+    let rootId = cachedUndertwigFolderId;
+    try {
+      rootId = await ensureUndertwigFolder();
+    } catch (_error) {
+      // Keep cached id if ensure fails mid-save.
+    }
+    if (rootId && String(rootId) === targetId) {
+      removeMappedProject(name);
+      throw new Error(
+        "Refusing to save into the Undertwig root folder. Re-open the project and try again."
+      );
+    }
+    const relativeFiles = filesForProject(state, name);
+    const relativeFolders = foldersForProject(state, name);
 
     throwIfAborted(signal);
 
     // Refresh owner email so transfers/deletes work for shared projects.
     try {
-      await refreshProjectMeta(folderId);
+      await refreshProjectMeta(targetId);
     } catch (_error) {
       // Continue; ownership helpers will no-op without an owner email.
     }
     throwIfAborted(signal);
-    await reclaimSharedOwnershipUnderFolder(folderId);
+    await reclaimSharedOwnershipUnderFolder(targetId);
     throwIfAborted(signal);
 
     if (opts.deleteMissing) {
-      const deletions = await findDriveDeletions(folderId, state, projectName);
+      const deletions = await findDriveDeletions(targetId, state, name);
       for (let i = 0; i < deletions.length; i += 1) {
         throwIfAborted(signal);
         await removeDriveItemFromProject(deletions[i]);
@@ -1522,7 +1605,7 @@
 
     for (let i = 0; i < relativeFolders.length; i += 1) {
       throwIfAborted(signal);
-      await ensurePathFolders(folderId, relativeFolders[i]);
+      await ensurePathFolders(targetId, relativeFolders[i]);
     }
 
     const paths = Object.keys(relativeFiles);
@@ -1532,7 +1615,7 @@
       if (notify) {
         notify(
           "Uploading “" +
-            projectName +
+            name +
             "” to Google Drive (" +
             (i + 1) +
             "/" +
@@ -1543,13 +1626,13 @@
       }
       const parts = relPath.split("/");
       const fileName = parts.pop();
-      const parentId = await ensurePathFolders(folderId, parts.join("/"));
+      const parentId = await ensurePathFolders(targetId, parts.join("/"));
       const existing = await findNamedChild(parentId, fileName, null);
       await uploadFileToFolder(parentId, fileName, relativeFiles[relPath], existing && existing.id);
     }
 
-    writeActiveFolderId(folderId);
-    return folderId;
+    writeActiveFolderId(targetId);
+    return targetId;
   }
 
   async function syncOneProject(state, projectName, options) {
@@ -2052,24 +2135,14 @@
     return (await undertwigInviteStatus(folderMeta, me)) === "foreign-undertwig";
   }
 
-  /** Soft check when the Undertwig parent cannot be read (invitee ACL). */
-  async function looksLikeUndertwigProject(folderId) {
-    try {
-      const children = await listChildren(folderId);
-      for (let i = 0; i < children.length; i += 1) {
-        const child = children[i];
-        const name = String((child && child.name) || "").toLowerCase();
-        if (!name) {
-          continue;
-        }
-        if (name === "main.tex" || /\.(tex|bib|sty|cls|bst)$/.test(name)) {
-          return true;
-        }
-      }
-    } catch (_error) {
-      return false;
-    }
-    return false;
+  /**
+   * True for a shared project under someone else's Undertwig, or when the parent
+   * cannot be read (typical project-only invites). Identity is the Undertwig parent,
+   * never LaTeX file contents.
+   */
+  async function isInvitedSharedProjectFolder(folderMeta, me) {
+    const status = await undertwigInviteStatus(folderMeta, me);
+    return status === "foreign-undertwig" || status === "unknown";
   }
 
   /**
@@ -2159,8 +2232,8 @@
         continue;
       }
 
-      // Project folder shared directly. Invitees often cannot read the parent
-      // Undertwig folder — keep those when the folder looks like a LaTeX project.
+      // Project folder shared directly. Identity = child of Undertwig.
+      // Invitees often cannot read the parent — still keep those shares.
       const meta =
         (await fetchDriveFileMeta(
           id,
@@ -2169,11 +2242,7 @@
       if (!isDriveFolderMeta(meta)) {
         continue;
       }
-      const inviteStatus = await undertwigInviteStatus(meta, me);
-      if (inviteStatus === "not-undertwig") {
-        continue;
-      }
-      if (inviteStatus === "unknown" && !(await looksLikeUndertwigProject(id))) {
+      if (!(await isInvitedSharedProjectFolder(meta, me))) {
         continue;
       }
       invitedIds[id] = true;
@@ -2198,14 +2267,10 @@
       if (!entry || !entry.id || ownedIds[entry.id] || entry.id === rootId) {
         continue;
       }
+      // Registry entries were accepted through Undertwig; drop only when parents
+      // prove the folder is not under a foreign Undertwig.
       if (entry._inviteStatus === "not-undertwig") {
         continue;
-      }
-      if (entry._inviteStatus === "unknown") {
-        // Avoid re-listing random Shared-with-me folders that older builds stored.
-        if (!(await looksLikeUndertwigProject(entry.id))) {
-          continue;
-        }
       }
       cleanRegistry.push({
         id: entry.id,
