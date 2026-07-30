@@ -3903,6 +3903,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       const cloudStatusText = document.getElementById("cloudStatusText");
       let dragSourcePath = null;
       let dragSourceProject = null;
+      let treeRenderDeferred = false;
       let cloudProjectsCache = [];
       let cloudInvitedRemoteCache = [];
       let cloudProjectsLoading = false;
@@ -5954,24 +5955,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
         }
         if (previous && previous !== name) {
-          const previousDest = !UndertwigAuth.isLoggedIn()
-            ? "Other"
-            : isInvitedProjectName(previous)
-              ? "Cloud (invited)"
-              : UndertwigCloud.getMappedFolderId && UndertwigCloud.getMappedFolderId(previous)
-                ? "Cloud (own)"
-                : cloudProjectsCache.some(function (project) {
-                      return project && project.name === previous;
-                    })
-                  ? "Cloud (own)"
-                  : "Other";
           setStatus(
             "Current project is now “" +
               name +
               "”. “" +
               previous +
               "” moved to " +
-              previousDest +
+              sectionLabelForProject(previous) +
               "."
           );
         } else {
@@ -6515,6 +6505,84 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return names;
       }
 
+      /** Own Drive project: listed under Undertwig/ or mapped as owner (not invited). */
+      function isOwnCloudProjectName(projectName, invitedNames) {
+        const name = String(projectName || "").trim();
+        if (!name) {
+          return false;
+        }
+        if (invitedNames && invitedNames.has(name)) {
+          return false;
+        }
+        if (isInvitedProjectName(name)) {
+          return false;
+        }
+        if (
+          (cloudProjectsCache || []).some(function (project) {
+            return project && project.name === name;
+          })
+        ) {
+          return true;
+        }
+        return Boolean(
+          UndertwigCloud.getMappedRole && UndertwigCloud.getMappedRole(name) === "owner"
+        );
+      }
+
+      function ownedCloudProjectNames(invitedNames) {
+        const names = new Set();
+        (cloudProjectsCache || []).forEach(function (project) {
+          if (project && project.name && !(invitedNames && invitedNames.has(project.name))) {
+            names.add(project.name);
+          }
+        });
+        listLocalRootProjects(state).forEach(function (name) {
+          if (isOwnCloudProjectName(name, invitedNames)) {
+            names.add(name);
+          }
+        });
+        return names;
+      }
+
+      /** Where a project lands after leaving Current. */
+      function sectionLabelForProject(projectName) {
+        if (!UndertwigAuth.isLoggedIn()) {
+          return "Other";
+        }
+        const invitedNames = invitedProjectNames();
+        if (invitedNames.has(projectName) || isInvitedProjectName(projectName)) {
+          return "Cloud (invited)";
+        }
+        if (isOwnCloudProjectName(projectName, invitedNames)) {
+          return "Cloud (own)";
+        }
+        return "Other";
+      }
+
+      function readDraggedProjectName(event) {
+        let raw = "";
+        try {
+          raw = (event && event.dataTransfer && event.dataTransfer.getData("text/plain")) || "";
+        } catch (_error) {
+          raw = "";
+        }
+        if (raw.indexOf("project:") === 0) {
+          return String(raw.slice("project:".length) || "").trim();
+        }
+        return String(dragSourceProject || "").trim();
+      }
+
+      function flushDeferredTreeRender() {
+        if (!treeRenderDeferred) {
+          return;
+        }
+        if (dragSourceProject || dragSourcePath) {
+          return;
+        }
+        treeRenderDeferred = false;
+        renderTree();
+      }
+
       function appendCloudSectionLabel(labelEl, title, affix) {
         labelEl.textContent = "";
         labelEl.appendChild(document.createTextNode(title + " "));
@@ -6551,6 +6619,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       function renderTree() {
+        // Rebuilding the DOM mid-drag cancels the browser drag session and drops "randomly" fail.
+        if (dragSourceProject || dragSourcePath) {
+          treeRenderDeferred = true;
+          return;
+        }
+        treeRenderDeferred = false;
         tree.textContent = "";
         const root = buildTree();
         const currentName = getActiveProjectName();
@@ -6559,15 +6633,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           UndertwigCloud.isAvailable &&
           UndertwigCloud.isAvailable();
         const invitedNames = showCloudSection ? invitedProjectNames() : new Set();
-        const cloudOwnNames = new Set(
-          (cloudProjectsCache || [])
-            .map(function (project) {
-              return project && project.name;
-            })
-            .filter(function (name) {
-              return name && !invitedNames.has(name);
-            })
-        );
+        const cloudOwnNames = showCloudSection
+          ? ownedCloudProjectNames(invitedNames)
+          : new Set();
         const currentNode = currentName
           ? root.children.find((node) => node.type === "folder" && node.path === currentName)
           : null;
@@ -6616,33 +6684,46 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         currentSection.appendChild(currentBody);
 
-        currentSection.addEventListener("dragover", (event) => {
+        // Capture phase: nested Current rows/buttons otherwise never preventDefault for
+        // project drags, so the browser rejects the drop over file tree contents.
+        function allowProjectDropOnCurrent(event) {
           if (!dragSourceProject || dragSourceProject === currentName) {
-            return;
+            return false;
           }
           event.preventDefault();
           event.stopPropagation();
-          event.dataTransfer.dropEffect = "move";
+          if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = "move";
+          }
           currentSection.classList.add("is-project-drop");
-        });
-        currentSection.addEventListener("dragleave", (event) => {
-          if (!currentSection.contains(event.relatedTarget)) {
+          return true;
+        }
+        currentSection.addEventListener("dragenter", allowProjectDropOnCurrent, true);
+        currentSection.addEventListener("dragover", allowProjectDropOnCurrent, true);
+        currentSection.addEventListener(
+          "dragleave",
+          (event) => {
+            if (!currentSection.contains(event.relatedTarget)) {
+              currentSection.classList.remove("is-project-drop");
+            }
+          },
+          true
+        );
+        currentSection.addEventListener(
+          "drop",
+          (event) => {
+            const next = readDraggedProjectName(event);
+            if (!next || next === currentName) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
             currentSection.classList.remove("is-project-drop");
-          }
-        });
-        currentSection.addEventListener("drop", (event) => {
-          if (!dragSourceProject) {
-            return;
-          }
-          event.preventDefault();
-          event.stopPropagation();
-          currentSection.classList.remove("is-project-drop");
-          const next = dragSourceProject;
-          dragSourceProject = null;
-          if (next && next !== getActiveProjectName()) {
+            dragSourceProject = null;
             promoteProjectToCurrent(next);
-          }
-        });
+          },
+          true
+        );
 
         tree.appendChild(currentSection);
 
@@ -6714,28 +6795,33 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             cloudOwnBody.classList.add("is-empty");
             cloudOwnBody.textContent = cloudProjectsError;
           } else {
-            const cloudOwnNodes = cloudProjectsCache
-              .filter(function (project) {
-                return (
-                  project &&
-                  project.name &&
-                  project.name !== currentName &&
-                  !invitedNames.has(project.name)
-                );
+            const ownedFolderIds = {};
+            (cloudProjectsCache || []).forEach(function (project) {
+              if (project && project.name && project.id) {
+                ownedFolderIds[project.name] = project.id;
+              }
+            });
+            const cloudOwnNodes = Array.from(cloudOwnNames)
+              .filter(function (name) {
+                return name && name !== currentName && !invitedNames.has(name);
               })
-              .map(function (project) {
+              .sort(function (a, b) {
+                return a.localeCompare(b);
+              })
+              .map(function (name) {
                 const localNode = root.children.find(
-                  (node) => node.type === "folder" && node.path === project.name
+                  (node) => node.type === "folder" && node.path === name
                 );
                 if (localNode) {
                   return localNode;
                 }
                 return {
-                  name: project.name,
-                  path: project.name,
+                  name: name,
+                  path: name,
                   type: "folder",
                   children: [],
                   cloudOnly: true,
+                  driveFolderId: ownedFolderIds[name] || null,
                 };
               });
 
@@ -7167,6 +7253,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               tree.querySelectorAll(".tree-section-current.is-project-drop").forEach((el) => {
                 el.classList.remove("is-project-drop");
               });
+              flushDeferredTreeRender();
             });
           }
         } else {
@@ -7211,11 +7298,19 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             dragSourcePath = null;
             row.classList.remove("dragging");
             clearDropIndicators();
+            flushDeferredTreeRender();
           });
         }
 
         row.addEventListener("dragover", (event) => {
           if (dragSourceProject) {
+            // Project promote is handled by Current's capture listeners.
+            if (opts.section === "current") {
+              event.preventDefault();
+              if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = "move";
+              }
+            }
             return;
           }
           if (!dragSourcePath) return;
@@ -7234,7 +7329,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         });
 
         row.addEventListener("drop", (event) => {
-          if (dragSourceProject) {
+          if (dragSourceProject || readDraggedProjectName(event)) {
+            // Let Current capture handler promote the project.
             return;
           }
           if (!dragSourcePath) return;
