@@ -70,6 +70,66 @@
     };
   }
 
+  /**
+   * Native folder dialog via the local helper — returns absolute path + file bytes.
+   * Browsers cannot expose this path from their own pickers.
+   */
+  async function importProjectViaHost() {
+    const response = await fetch(HOST_URL + "/import-project", {
+      method: "POST",
+      mode: "cors",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    let data;
+    try {
+      data = await response.json();
+    } catch (_error) {
+      throw new Error("Local helper returned an invalid response.");
+    }
+    if (data && data.cancelled) {
+      const error = new Error("Project import cancelled.");
+      error.name = "AbortError";
+      throw error;
+    }
+    if (!response.ok || !data || !data.ok) {
+      throw new Error(
+        (data && data.error) || "Could not import the project folder."
+      );
+    }
+    return {
+      absolutePath: data.path,
+      folderName: data.folderName || "",
+      files: Array.isArray(data.files) ? data.files : [],
+    };
+  }
+
+  async function writeProjectViaHost(absolutePath, files) {
+    const response = await fetch(HOST_URL + "/write-project", {
+      method: "POST",
+      mode: "cors",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cwd: absolutePath,
+        files: files || [],
+      }),
+    });
+    let data;
+    try {
+      data = await response.json();
+    } catch (_error) {
+      throw new Error("Local helper returned an invalid response.");
+    }
+    if (!response.ok || !data || !data.ok) {
+      throw new Error(
+        (data && data.error) || "Could not save to the local folder."
+      );
+    }
+    return data;
+  }
+
   function ensureWarningBanner() {
     if (warningEl) return warningEl;
     const workspace = document.querySelector("section.workspace");
@@ -274,36 +334,22 @@
       return;
     }
 
-    let meta = UndertwigLocalFs.getProjectMeta(project);
-    if (!meta || !meta.absolutePath) {
-      const pathValue = await promptAbsolutePath({
-        title: "Local folder path",
-        message:
-          "Enter the full path of “" +
-          project +
-          "” on this computer. Console will open your system terminal there.",
-        folderName: (meta && meta.folderName) || project,
-        initial: "",
-      });
-      if (!pathValue) {
-        if (typeof deps.setStatus === "function") {
-          deps.setStatus("Console cancelled.");
-        }
-        return;
-      }
-      const handle = await UndertwigLocalFs.getHandle(project);
-      await UndertwigLocalFs.bindProject(project, handle, pathValue);
-      meta = UndertwigLocalFs.getProjectMeta(project);
-      if (typeof deps.onBindingChanged === "function") {
-        deps.onBindingChanged(project);
-      }
-    }
-
     const ok = await hostHealth();
     if (!ok) {
       if (typeof deps.setStatus === "function") {
         deps.setStatus(
           "Start the local helper first: node local-console-host.mjs",
+          true
+        );
+      }
+      return;
+    }
+
+    let meta = UndertwigLocalFs.getProjectMeta(project);
+    if (!meta || !meta.absolutePath) {
+      if (typeof deps.setStatus === "function") {
+        deps.setStatus(
+          "No local path is remembered for this project. Use Import project while the local helper is running.",
           true
         );
       }
@@ -383,6 +429,8 @@
     refreshLocalPathWarning: refreshLocalPathWarning,
     promptAbsolutePath: promptAbsolutePath,
     openSystemConsole: openSystemConsole,
+    importProjectViaHost: importProjectViaHost,
+    writeProjectViaHost: writeProjectViaHost,
     isFeatureAllowed: isFeatureAllowed,
     hostPathInfo: hostPathInfo,
     hostHealth: hostHealth,
