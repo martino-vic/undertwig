@@ -1922,7 +1922,7 @@
     }
     try {
       throwIfAborted(signal);
-      await connect();
+      await abortablePromise(connect(), signal);
       throwIfAborted(signal);
 
       let folderId = getMappedFolderId(name) || null;
