@@ -294,6 +294,12 @@
         user-select: none;
       }
 
+      .tree-section-label-affix {
+        text-transform: none;
+        letter-spacing: 0.02em;
+        font-weight: 600;
+      }
+
       .tree-section-body {
         min-width: 0;
         padding-bottom: 4px;
@@ -5905,7 +5911,26 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           renderCloudStatus("connected", UndertwigCloud.getProjectFileId());
         }
         if (previous && previous !== name) {
-          setStatus("Current project is now “" + name + "”. “" + previous + "” moved to Other.");
+          const previousDest = !UndertwigAuth.isLoggedIn()
+            ? "Other"
+            : isInvitedProjectName(previous)
+              ? "Cloud (invited)"
+              : UndertwigCloud.getMappedFolderId && UndertwigCloud.getMappedFolderId(previous)
+                ? "Cloud (own)"
+                : cloudProjectsCache.some(function (project) {
+                      return project && project.name === previous;
+                    })
+                  ? "Cloud (own)"
+                  : "Other";
+          setStatus(
+            "Current project is now “" +
+              name +
+              "”. “" +
+              previous +
+              "” moved to " +
+              previousDest +
+              "."
+          );
         } else {
           setStatus("Current project is “" + name + "”.");
         }
@@ -6406,30 +6431,79 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         activeFileMeta.textContent = `${file.binary ? "Asset" : "Text"} file, ${formatBytes(size)}`;
       }
 
+      function isInvitedProjectName(projectName) {
+        const name = String(projectName || "").trim();
+        if (!name) {
+          return false;
+        }
+        if (UndertwigCloud.getMappedRole) {
+          const role = UndertwigCloud.getMappedRole(name);
+          if (role === "writer" || role === "reader") {
+            return true;
+          }
+          if (role === "owner") {
+            return false;
+          }
+        }
+        return Boolean(
+          UndertwigCloud.isCurrentProjectShared && UndertwigCloud.isCurrentProjectShared(name)
+        );
+      }
+
+      function invitedProjectNames() {
+        const names = new Set();
+        if (UndertwigCloud.listInvitedProjects) {
+          UndertwigCloud.listInvitedProjects().forEach(function (project) {
+            if (project && project.name) {
+              names.add(project.name);
+            }
+          });
+        }
+        listLocalRootProjects(state).forEach(function (name) {
+          if (isInvitedProjectName(name)) {
+            names.add(name);
+          }
+        });
+        return names;
+      }
+
+      function appendCloudSectionLabel(labelEl, title, affix) {
+        labelEl.textContent = "";
+        labelEl.appendChild(document.createTextNode(title + " "));
+        const affixEl = document.createElement("span");
+        affixEl.className = "tree-section-label-affix";
+        affixEl.textContent = affix;
+        labelEl.appendChild(affixEl);
+      }
+
       function renderTree() {
         tree.textContent = "";
         const root = buildTree();
         const currentName = getActiveProjectName();
-        const cloudNames = new Set(
-          (cloudProjectsCache || [])
-            .map(function (project) {
-              return project && project.name;
-            })
-            .filter(Boolean)
-        );
         const showCloudSection =
           UndertwigAuth.isLoggedIn() &&
           UndertwigCloud.isAvailable &&
           UndertwigCloud.isAvailable();
+        const invitedNames = showCloudSection ? invitedProjectNames() : new Set();
+        const cloudOwnNames = new Set(
+          (cloudProjectsCache || [])
+            .map(function (project) {
+              return project && project.name;
+            })
+            .filter(function (name) {
+              return name && !invitedNames.has(name);
+            })
+        );
         const currentNode = currentName
           ? root.children.find((node) => node.type === "folder" && node.path === currentName)
           : null;
-        // When Cloud is visible, Drive-backed locals live under Cloud (not Other).
+        // Drive-owned and invited locals live under their Cloud sections, not Other.
         const otherNodes = root.children.filter(
           (node) =>
             node.type === "folder" &&
             node.path !== currentName &&
-            !(showCloudSection && cloudNames.has(node.path))
+            !(showCloudSection && cloudOwnNames.has(node.path)) &&
+            !(showCloudSection && invitedNames.has(node.path))
         );
 
         const currentSection = document.createElement("div");
@@ -6524,27 +6598,32 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         tree.appendChild(otherSection);
 
         if (showCloudSection) {
-          const cloudDivider = document.createElement("hr");
-          cloudDivider.className = "tree-section-divider";
-          cloudDivider.setAttribute("aria-hidden", "true");
-          tree.appendChild(cloudDivider);
+          const cloudOwnDivider = document.createElement("hr");
+          cloudOwnDivider.className = "tree-section-divider";
+          cloudOwnDivider.setAttribute("aria-hidden", "true");
+          tree.appendChild(cloudOwnDivider);
 
-          const cloudSection = document.createElement("div");
-          cloudSection.className = "tree-section tree-section-cloud";
-          const cloudLabel = document.createElement("div");
-          cloudLabel.className = "tree-section-label";
-          cloudLabel.textContent = "Cloud";
-          cloudSection.appendChild(cloudLabel);
+          const cloudOwnSection = document.createElement("div");
+          cloudOwnSection.className = "tree-section tree-section-cloud tree-section-cloud-own";
+          const cloudOwnLabel = document.createElement("div");
+          cloudOwnLabel.className = "tree-section-label";
+          appendCloudSectionLabel(cloudOwnLabel, "Cloud", "(own)");
+          cloudOwnSection.appendChild(cloudOwnLabel);
 
-          const cloudBody = document.createElement("div");
-          cloudBody.className = "tree-section-body";
+          const cloudOwnBody = document.createElement("div");
+          cloudOwnBody.className = "tree-section-body";
 
           if (cloudProjectsLoading && !cloudProjectsCache.length) {
-            cloudBody.classList.add("is-empty");
-            cloudBody.textContent = "Loading Google Drive…";
+            cloudOwnBody.classList.add("is-empty");
+            cloudOwnBody.textContent = "Loading Google Drive…";
           } else if (cloudProjectsNeedConnect && !cloudProjectsCache.length) {
-            cloudBody.classList.add("is-empty");
-            cloudBody.textContent = "Connect Google Drive to list cloud projects.";
+            cloudOwnBody.classList.remove("is-empty");
+            cloudOwnBody.textContent = "";
+            const hint = document.createElement("div");
+            hint.className = "tree-section-body is-empty";
+            hint.style.paddingBottom = "0";
+            hint.textContent = "Connect Google Drive to list your cloud projects.";
+            cloudOwnBody.appendChild(hint);
             const connectRow = document.createElement("button");
             connectRow.type = "button";
             connectRow.className = "tree-row";
@@ -6557,22 +6636,19 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               event.stopPropagation();
               refreshCloudProjectsList({ interactive: true });
             });
-            // Keep Connect as a normal row under the empty hint.
-            cloudBody.classList.remove("is-empty");
-            cloudBody.textContent = "";
-            const hint = document.createElement("div");
-            hint.className = "tree-section-body is-empty";
-            hint.style.paddingBottom = "0";
-            hint.textContent = "Connect Google Drive to list cloud projects.";
-            cloudBody.appendChild(hint);
-            cloudBody.appendChild(connectRow);
+            cloudOwnBody.appendChild(connectRow);
           } else if (cloudProjectsError && !cloudProjectsCache.length) {
-            cloudBody.classList.add("is-empty");
-            cloudBody.textContent = cloudProjectsError;
+            cloudOwnBody.classList.add("is-empty");
+            cloudOwnBody.textContent = cloudProjectsError;
           } else {
-            const cloudNodes = cloudProjectsCache
+            const cloudOwnNodes = cloudProjectsCache
               .filter(function (project) {
-                return project && project.name && project.name !== currentName;
+                return (
+                  project &&
+                  project.name &&
+                  project.name !== currentName &&
+                  !invitedNames.has(project.name)
+                );
               })
               .map(function (project) {
                 const localNode = root.children.find(
@@ -6581,7 +6657,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 if (localNode) {
                   return localNode;
                 }
-                // Drive-only stub until dragged to Current / opened.
                 return {
                   name: project.name,
                   path: project.name,
@@ -6591,14 +6666,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 };
               });
 
-            if (!cloudNodes.length) {
-              cloudBody.classList.add("is-empty");
-              cloudBody.textContent = cloudProjectsLoading
+            if (!cloudOwnNodes.length) {
+              cloudOwnBody.classList.add("is-empty");
+              cloudOwnBody.textContent = cloudProjectsLoading
                 ? "Refreshing…"
-                : "No projects in Google Drive yet";
+                : "No projects in your Google Drive yet";
             } else {
-              cloudNodes.forEach(function (node) {
-                cloudBody.appendChild(
+              cloudOwnNodes.forEach(function (node) {
+                cloudOwnBody.appendChild(
                   renderNode(node, 0, {
                     section: "cloud",
                     projectDraggable: true,
@@ -6611,12 +6686,69 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 loading.className = "tree-section-body is-empty";
                 loading.style.paddingTop = "2px";
                 loading.textContent = "Refreshing…";
-                cloudBody.appendChild(loading);
+                cloudOwnBody.appendChild(loading);
               }
             }
           }
-          cloudSection.appendChild(cloudBody);
-          tree.appendChild(cloudSection);
+          cloudOwnSection.appendChild(cloudOwnBody);
+          tree.appendChild(cloudOwnSection);
+
+          const cloudInvitedDivider = document.createElement("hr");
+          cloudInvitedDivider.className = "tree-section-divider";
+          cloudInvitedDivider.setAttribute("aria-hidden", "true");
+          tree.appendChild(cloudInvitedDivider);
+
+          const cloudInvitedSection = document.createElement("div");
+          cloudInvitedSection.className =
+            "tree-section tree-section-cloud tree-section-cloud-invited";
+          const cloudInvitedLabel = document.createElement("div");
+          cloudInvitedLabel.className = "tree-section-label";
+          appendCloudSectionLabel(cloudInvitedLabel, "Cloud", "(invited)");
+          cloudInvitedSection.appendChild(cloudInvitedLabel);
+
+          const cloudInvitedBody = document.createElement("div");
+          cloudInvitedBody.className = "tree-section-body";
+          const invitedNodes = Array.from(invitedNames)
+            .filter(function (name) {
+              return name && name !== currentName;
+            })
+            .sort(function (a, b) {
+              return a.localeCompare(b);
+            })
+            .map(function (name) {
+              const localNode = root.children.find(
+                (node) => node.type === "folder" && node.path === name
+              );
+              if (localNode) {
+                return localNode;
+              }
+              return {
+                name: name,
+                path: name,
+                type: "folder",
+                children: [],
+                cloudOnly: true,
+                invited: true,
+              };
+            });
+
+          if (!invitedNodes.length) {
+            cloudInvitedBody.classList.add("is-empty");
+            cloudInvitedBody.textContent = "No invited projects yet";
+          } else {
+            invitedNodes.forEach(function (node) {
+              cloudInvitedBody.appendChild(
+                renderNode(node, 0, {
+                  section: "cloud",
+                  projectDraggable: true,
+                  cloudOnly: Boolean(node.cloudOnly),
+                  invited: Boolean(node.invited) || isInvitedProjectName(node.path),
+                })
+              );
+            });
+          }
+          cloudInvitedSection.appendChild(cloudInvitedBody);
+          tree.appendChild(cloudInvitedSection);
         }
       }
 
@@ -6743,20 +6875,37 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         startSyncSpinner();
         setStatus("Opening “" + name + "” from Google Drive…");
         try {
-          const pulled = await UndertwigCloud.pullProjectFromDrive(name, {
-            signal: abortController.signal,
-            onProgress: function (message) {
+          const invited = isInvitedProjectName(name);
+          const invitedFolderId =
+            UndertwigCloud.getMappedFolderId && UndertwigCloud.getMappedFolderId(name);
+          let pulled;
+          if (invited && invitedFolderId && UndertwigCloud.syncFromDrive) {
+            pulled = await UndertwigCloud.syncFromDrive(invitedFolderId, function (message) {
               if (abortController.signal.aborted) {
                 return;
               }
-              setStatus(message || "Opening from Google Drive…");
-            },
-          });
+              setStatus(message || "Opening invited project from Google Drive…");
+            });
+          } else {
+            pulled = await UndertwigCloud.pullProjectFromDrive(name, {
+              signal: abortController.signal,
+              onProgress: function (message) {
+                if (abortController.signal.aborted) {
+                  return;
+                }
+                setStatus(message || "Opening from Google Drive…");
+              },
+            });
+          }
           if (abortController.signal.aborted) {
             setStatus("Load cancelled.");
             return;
           }
-          applyPulledProject(pulled);
+          if (invited) {
+            adoptSharedProjectAsCurrent(pulled);
+          } else {
+            applyPulledProject(pulled);
+          }
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
           } catch (_error) {
@@ -6765,7 +6914,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           collapsedFolders.delete(name);
           persistCollapsedFolders();
           render();
-          setStatus("Opened “" + name + "” from Google Drive.");
+          setStatus(
+            invited
+              ? "Opened invited project “" + name + "” from Google Drive."
+              : "Opened “" + name + "” from Google Drive."
+          );
           refreshCloudProjectsList();
         } catch (error) {
           if (error && error.name === "AbortError") {

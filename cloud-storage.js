@@ -2387,6 +2387,29 @@
     }
   }
 
+  function listInvitedProjects() {
+    const out = [];
+    Object.keys(projectFolderMap || {}).forEach(function (name) {
+      const role = getMappedRole(name);
+      if (!isSharedProjectRole(role)) {
+        return;
+      }
+      const id = getMappedFolderId(name);
+      if (!id) {
+        return;
+      }
+      out.push({
+        name: name,
+        id: id,
+        role: role,
+      });
+    });
+    out.sort(function (a, b) {
+      return a.name.localeCompare(b.name);
+    });
+    return out;
+  }
+
   function isAvailable() {
     return Boolean(auth() && auth().isLoggedIn() && auth().getConfig().googleClientId);
   }
@@ -2412,6 +2435,10 @@
     verifyDriveAccess,
     isCollaborator,
     isCurrentProjectShared,
+    isSharedProjectRole,
+    getMappedRole,
+    getMappedFolderId,
+    listInvitedProjects,
     connect,
     getAccessToken,
     acceptTokenResponse,
