@@ -261,8 +261,59 @@ class DriveSyncRepository(
         val existing = readProjectLockFile(accessToken, folderId) ?: return@withContext true
         if (!isHeldByMe(existing, holderEmail) && !existing.isStale()) return@withContext false
         val fileId = existing.fileId ?: return@withContext false
-        trashDriveFile(accessToken, fileId)
-        true
+        // Match web: owners can trash; writers in shared folders must removeParents.
+        removeDriveItemFromProject(
+            accessToken = accessToken,
+            fileId = fileId,
+            parentId = existing.parentId,
+        )
+        // Confirm the lock is gone (trashed files must not still look held).
+        val stillThere = readProjectLockFile(accessToken, folderId)
+        stillThere == null || stillThere.isStale() || !isHeldByMe(stillThere, holderEmail)
+    }
+
+    /**
+     * Remove a Drive file from a project folder. Prefer trash when allowed; otherwise
+     * detach via removeParents (required for non-owners in shared Undertwig folders).
+     */
+    private fun removeDriveItemFromProject(
+        accessToken: String,
+        fileId: String,
+        parentId: String?,
+    ) {
+        val trashed = runCatching {
+            trashDriveFile(accessToken, fileId)
+            true
+        }.getOrElse { false }
+        if (trashed) return
+        val parent = parentId?.takeIf { it.isNotBlank() }
+            ?: error("Could not release the writing room lock (no parent folder).")
+        removeDriveParents(accessToken, fileId, parent)
+    }
+
+    private fun removeDriveParents(accessToken: String, fileId: String, parentId: String) {
+        val url =
+            "$DRIVE_API/files/${Uri.encode(fileId)}" +
+                "?supportsAllDrives=true" +
+                "&removeParents=${Uri.encode(parentId)}" +
+                "&fields=id,parents"
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "PATCH"
+            doOutput = true
+            connectTimeout = 30_000
+            readTimeout = 60_000
+            setRequestProperty("Authorization", "Bearer $accessToken")
+            setRequestProperty("Content-Length", "0")
+        }
+        try {
+            connection.outputStream.use { /* empty body */ }
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                throwDriveHttpError(code, connection, "Could not release edit lock.")
+            }
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun buildLockJson(

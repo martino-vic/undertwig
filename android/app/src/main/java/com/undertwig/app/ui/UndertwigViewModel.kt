@@ -126,6 +126,8 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
      * desktop `writingRoomSessionDirty`.
      */
     private var writingRoomSessionDirty: Boolean = false
+    /** Set by [handleEditorBack]; invoked after a successful writing-room exit. */
+    private var pendingNavigateBackAfterExit: (() -> Unit)? = null
 
     private var heldWritingRoomProjectId: String? = null
     /** After View only / OK, don't re-popup the door until the user asks or the project changes. */
@@ -882,7 +884,29 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     // Fall through to best-effort cached-token trash.
                 }
                 if (!released) {
-                    runCatching { trashWritingRoomLock(snapshot) }
+                    runCatching {
+                        trashWritingRoomLock(snapshot)
+                        released = true
+                    }
+                }
+                // One more verified pass — desktop must see the room free.
+                if (released) {
+                    runCatching {
+                        withDriveAccess(activity) { token ->
+                            driveSync.releaseFileLock(
+                                accessToken = token,
+                                projectId = snapshot.projectId,
+                                projectName = snapshot.projectName,
+                                holderEmail = snapshot.holderEmail,
+                            )
+                        }
+                    }
+                } else {
+                    Toast.makeText(
+                        getApplication(),
+                        "Could not fully release the writing room on Drive. It should free within about a minute.",
+                        Toast.LENGTH_LONG,
+                    ).show()
                 }
             }
             _editor.update {
@@ -894,7 +918,23 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 )
             }
             refreshWritingRoomStatus(activity)
+            val navigateBack = pendingNavigateBackAfterExit
+            pendingNavigateBackAfterExit = null
+            navigateBack?.invoke()
         }
+    }
+
+    /**
+     * Back from the editor: if inside the writing room, run the same Exit flow as the
+     * writing-room button (dialogs included), then navigate home after a successful leave.
+     */
+    fun handleEditorBack(activity: Activity, navigateBack: () -> Unit) {
+        if (_editor.value.inWritingRoom || heldWritingRoomProjectId != null) {
+            pendingNavigateBackAfterExit = navigateBack
+            exitWritingRoom(activity, skipConfirm = false)
+            return
+        }
+        navigateBack()
     }
 
     fun resolveUnsavedWritingRoomExit(activity: Activity, choice: UnsavedExitChoice) {
@@ -1123,8 +1163,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                 // Stay in the room — restart the idle watch.
                 resetWritingRoomIdleWatch()
             }
-            is WritingRoomPrompt.ExitUnsaved -> {
-                // Stay — keep editing.
+            is WritingRoomPrompt.Exit, is WritingRoomPrompt.ExitUnsaved -> {
+                // Stay — cancel a Back-triggered leave.
+                pendingNavigateBackAfterExit = null
                 resetWritingRoomIdleWatch()
             }
             else -> Unit

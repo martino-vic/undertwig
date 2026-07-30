@@ -49,7 +49,11 @@ fun UndertwigApp(
                 state = editor,
                 authUser = auth.user,
                 signingIn = auth.signingIn,
-                onBack = { navController.popBackStack() },
+                onBack = {
+                    viewModel.handleEditorBack(activity) {
+                        navController.popBackStack()
+                    }
+                },
                 onSelectFile = { path ->
                     if (path.endsWith(".pdf", ignoreCase = true)) {
                         if (viewModel.openPdfPreview(path)) {
