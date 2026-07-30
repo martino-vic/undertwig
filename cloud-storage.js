@@ -16,7 +16,8 @@
   const LEGACY_FILE_KEYS = ["undertwig-drive-file-v1", "undertwig-drive-folder-v1"];
   const LOCK_DIR_NAME = ".undertwig-locks";
   const DEVICE_ID_KEY = "undertwig-device-id-v1";
-  const LOCK_HEARTBEAT_STALE_MS = 2 * 60 * 1000;
+  // Abandoned rooms free quickly so a closed tab / crashed client does not brick collaborators.
+  const LOCK_HEARTBEAT_STALE_MS = 45 * 1000;
 
   const TOKEN_REQUEST_TIMEOUT_MS = 8000;
   const SILENT_TOKEN_TIMEOUT_MS = 4000;
@@ -3197,16 +3198,15 @@
     if (!lock) {
       return false;
     }
-    const me = currentSessionEmail();
     const device = getDeviceId();
     if (lock.deviceId && lock.deviceId === device) {
       return true;
     }
+    // Same Google account may reclaim (phone vs laptop / cleared site data).
+    // Different people are still exclusive via holderEmail mismatch.
+    const me = currentSessionEmail();
     if (me && lock.holderEmail && String(lock.holderEmail).toLowerCase() === me) {
-      // Same Google account on another device still counts as "me" for take-over?
-      // Per-file exclusivity is per person+device: another device of mine should wait
-      // unless stale. Only same deviceId may refresh without steal.
-      return false;
+      return true;
     }
     return false;
   }

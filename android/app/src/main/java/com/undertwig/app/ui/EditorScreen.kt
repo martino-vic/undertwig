@@ -372,7 +372,15 @@ fun EditorScreen(
             }
             if (state.writingRoomAvailable && !state.inWritingRoom && state.writingRoomOccupiedMessage == null) {
                 Text(
-                    "Enter the writing room to edit. Live collaboration is not supported yet — one person at a time.",
+                    "Enter the writing room before saving this file to Google Drive. Live collaboration is not supported yet — one person at a time.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+            if (state.writingRoomAvailable && state.inWritingRoom) {
+                Text(
+                    "You are in the writing room. Exit when you are done so others can edit.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -736,7 +744,7 @@ fun EditorScreen(
                 title = { Text("Enter writing room") },
                 text = {
                     Text(
-                        "Live collaboration is not supported yet. The writing room has space for only one person at a time — while you are inside, collaborators see “${prompt.path}” as read-only. Exit the writing room when you are done.",
+                        "Live collaboration is not supported yet. The writing room has space for only one person at a time — while you are inside, collaborators see “${prompt.path}” as read-only for Drive saves. Enter before saving to Google Drive, and exit when you are done.",
                     )
                 },
                 confirmButton = {

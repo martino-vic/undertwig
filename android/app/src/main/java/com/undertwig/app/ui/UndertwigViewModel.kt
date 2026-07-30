@@ -84,8 +84,7 @@ data class EditorUiState(
     val converting: Boolean get() = busy != EditorBusy.Idle
     val editorReadOnly: Boolean
         get() = ProjectRepository.isBinaryPath(activePath) ||
-            writingRoomOccupiedMessage != null ||
-            (writingRoomAvailable && !inWritingRoom)
+            writingRoomOccupiedMessage != null
 }
 
 sealed class WritingRoomPrompt {
@@ -545,20 +544,38 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             }
             _editor.update { it.copy(writingRoomAvailable = true, inWritingRoom = false) }
             try {
-                val occupied = withDriveAccess(activity) { token ->
-                    driveSync.peekFileLock(token, projectId, projectName, path)
+                val userEmail = _auth.value.user?.email
+                val lock = withDriveAccess(activity) { token ->
+                    driveSync.readFileLockForPath(token, projectId, projectName, path)
                 }
                 if (_editor.value.activePath != path) return@launch
-                if (occupied != null) {
+                if (lock != null) {
+                    val mine =
+                        (!lock.deviceId.isNullOrBlank() && lock.deviceId == driveSync.deviceId()) ||
+                            (!userEmail.isNullOrBlank() &&
+                                lock.holderEmail?.equals(userEmail, ignoreCase = true) == true)
+                    if (mine) {
+                        heldFileLockPath = path
+                        startFileLockHeartbeat(activity, projectId, projectName, path)
+                        _editor.update {
+                            it.copy(
+                                writingRoomAvailable = true,
+                                writingRoomOccupiedMessage = null,
+                                inWritingRoom = true,
+                                status = "You are in the writing room for “$path”.",
+                            )
+                        }
+                        return@launch
+                    }
                     val message =
-                        "${occupied.holderLabel()} is in the writing room for “$path”. " +
+                        "${lock.holderLabel()} is in the writing room for “$path”. " +
                             "Live collaboration is not supported yet — the writing room has space for only one person at a time."
                     _editor.update {
                         it.copy(
                             writingRoomAvailable = true,
                             writingRoomOccupiedMessage = message,
                             inWritingRoom = false,
-                            status = "Read-only",
+                            status = "Read-only — writing room occupied",
                         )
                     }
                 } else {
@@ -705,6 +722,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         val path: String,
         val projectId: String,
         val projectName: String,
+        val holderEmail: String?,
     )
 
     private fun takeHeldWritingRoomSnapshot(): HeldWritingRoom? {
@@ -712,15 +730,16 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         val path = heldFileLockPath ?: return null
         val projectId = _editor.value.projectId
         val projectName = _editor.value.projectName
+        val holderEmail = _auth.value.user?.email
         heldFileLockPath = null
         _editor.update { it.copy(inWritingRoom = false) }
         if (projectId.isEmpty() || path.isBlank()) return null
-        return HeldWritingRoom(path, projectId, projectName)
+        return HeldWritingRoom(path, projectId, projectName, holderEmail)
     }
 
     /**
      * Trash our lock file without needing an Activity (cached Drive token).
-     * Stale heartbeat (~2 min) is the fallback if this fails (force-kill, offline, expired token).
+     * Stale heartbeat (~45s) is the fallback if this fails (force-kill, offline, expired token).
      */
     private suspend fun releaseHeldWritingRoomBestEffort() {
         val snapshot = takeHeldWritingRoomSnapshot() ?: return
@@ -730,7 +749,13 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private suspend fun trashWritingRoomLock(held: HeldWritingRoom) {
         val token = authRepo.cachedDriveAccessTokenOrNull() ?: return
         runCatching {
-            driveSync.releaseFileLock(token, held.projectId, held.projectName, held.path)
+            driveSync.releaseFileLock(
+                token,
+                held.projectId,
+                held.projectName,
+                held.path,
+                holderEmail = held.holderEmail,
+            )
         }
     }
 
@@ -1656,6 +1681,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                                 snapshot.projectId,
                                 snapshot.projectName,
                                 snapshot.path,
+                                holderEmail = snapshot.holderEmail,
                             )
                         }
                     }

@@ -831,6 +831,71 @@
         opacity: 0.9;
       }
 
+      .writing-room-banner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px 14px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+        background: #1a2836;
+      }
+
+      .writing-room-banner[hidden],
+      .writing-room-banner.hidden {
+        display: none !important;
+      }
+
+      .writing-room-banner.is-inside {
+        background: #243528;
+        border-bottom-color: #3d5a40;
+      }
+
+      .writing-room-banner.is-occupied {
+        background: #3a2424;
+        border-bottom-color: #6a3a3a;
+      }
+
+      .writing-room-banner p {
+        margin: 0;
+        flex: 1 1 16rem;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.4;
+      }
+
+      .writing-room-banner.is-occupied p {
+        color: #f0c4c4;
+      }
+
+      .writing-room-banner.is-inside p {
+        color: #d5e8d5;
+      }
+
+      .writing-room-banner button {
+        flex: 0 0 auto;
+        min-height: 36px;
+        padding: 0 14px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+
+      .writing-room-banner button:hover {
+        border-color: var(--brand);
+      }
+
+      .writing-room-banner.is-inside button {
+        background: var(--brand);
+        border-color: transparent;
+      }
+
       .convert-button {
         min-height: var(--btn-height);
         padding: 0 14px;
@@ -2883,6 +2948,10 @@
             </div>
           </div>
         </div>
+        <div class="writing-room-banner hidden" id="writingRoomBanner" hidden role="status">
+          <p id="writingRoomBannerText"></p>
+          <button type="button" id="writingRoomBannerButton">Enter writing room</button>
+        </div>
         <div class="editor-wrap">
           <div id="editor" class="code-editor-host" aria-label="LaTeX source editor"></div>
           <div class="asset-preview" id="assetPreview" aria-live="polite">
@@ -3111,7 +3180,7 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260729e"></script>
-    <script src="cloud-storage.js?v=20260730g"></script>
+    <script src="cloud-storage.js?v=20260730h"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -3987,6 +4056,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let writingRoomBusy = false;
       const FILE_LOCK_HEARTBEAT_MS = 20000;
       const writingRoomButton = document.getElementById("writingRoomButton");
+      const writingRoomBanner = document.getElementById("writingRoomBanner");
+      const writingRoomBannerText = document.getElementById("writingRoomBannerText");
+      const writingRoomBannerButton = document.getElementById("writingRoomBannerButton");
+      let writingRoomBusyTimer = null;
       let cloudStatusMode = "logged-out";
       // Declared early: boot used to call initCloudProject before this existed (TDZ), so invite sync never ran.
       let cloudInitPromise = null;
@@ -5304,6 +5377,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       document.getElementById("saveProject").addEventListener("click", saveProjectNow);
       if (writingRoomButton) {
         writingRoomButton.addEventListener("click", function () {
+          onWritingRoomButtonClick();
+        });
+      }
+      if (writingRoomBannerButton) {
+        writingRoomBannerButton.addEventListener("click", function () {
           onWritingRoomButtonClick();
         });
       }
@@ -6649,58 +6727,129 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
       }
 
+      function setWritingRoomBusy(busy) {
+        writingRoomBusy = Boolean(busy);
+        if (writingRoomBusyTimer) {
+          clearTimeout(writingRoomBusyTimer);
+          writingRoomBusyTimer = null;
+        }
+        if (writingRoomBusy) {
+          writingRoomBusyTimer = setTimeout(function () {
+            writingRoomBusy = false;
+            writingRoomBusyTimer = null;
+            updateWritingRoomUi();
+          }, 15000);
+        }
+        updateWritingRoomUi();
+      }
+
       function updateWritingRoomUi() {
         const file = state.files[state.activeFile];
         const rel = projectRelativeActivePath();
         const locksOn = fileLocksEnabled() && file && !file.binary && rel;
-        const inside =
-          Boolean(rel && fileLockHeldPath === rel);
-        const occupied =
-          Boolean(
-            fileLockOccupied &&
-              fileLockOccupied.fullPath === state.activeFile &&
-              !inside
-          );
-
-        // Drive-linked text files are read-only until you enter the writing room.
-        UndertwigEditor.setReadOnly(
-          !file || Boolean(file.binary) || (locksOn && !inside)
+        const inside = Boolean(rel && fileLockHeldPath === rel);
+        const occupied = Boolean(
+          fileLockOccupied &&
+            fileLockOccupied.fullPath === state.activeFile &&
+            !inside
         );
 
-        if (!writingRoomButton) {
-          return;
-        }
-        if (!locksOn) {
-          writingRoomButton.hidden = true;
-          writingRoomButton.classList.add("hidden");
-          return;
-        }
-        writingRoomButton.hidden = false;
-        writingRoomButton.classList.remove("hidden");
-        writingRoomButton.disabled = Boolean(writingRoomBusy);
-        writingRoomButton.classList.toggle("is-inside", inside);
-        writingRoomButton.classList.toggle("is-occupied", occupied && !inside);
-        if (inside) {
-          writingRoomButton.textContent = "Exit writing room";
-          writingRoomButton.title = "Leave the writing room and free this file for others";
-        } else if (occupied) {
-          writingRoomButton.textContent = "Room occupied";
-          writingRoomButton.title = fileLockOccupied.message || "Someone is in the writing room";
-        } else {
-          writingRoomButton.textContent = "Enter writing room";
-          writingRoomButton.title = "Enter the writing room to edit this file";
+        // Only block typing when someone else is in the room. An empty room stays
+        // editable; Drive Save still requires Enter (see saveProjectNow).
+        UndertwigEditor.setReadOnly(
+          !file || Boolean(file.binary) || (locksOn && occupied)
+        );
+
+        function setControl(el, label, title) {
+          if (!el) {
+            return;
+          }
+          el.disabled = Boolean(writingRoomBusy);
+          el.textContent = label;
+          if (title) {
+            el.title = title;
+          }
         }
 
-        if (file && !file.binary) {
+        const showControls = Boolean(locksOn);
+        if (writingRoomButton) {
+          if (!showControls) {
+            writingRoomButton.hidden = true;
+            writingRoomButton.classList.add("hidden");
+          } else {
+            writingRoomButton.hidden = false;
+            writingRoomButton.classList.remove("hidden");
+            writingRoomButton.classList.toggle("is-inside", inside);
+            writingRoomButton.classList.toggle("is-occupied", occupied);
+            if (inside) {
+              setControl(
+                writingRoomButton,
+                "Exit writing room",
+                "Leave the writing room and free this file for others"
+              );
+            } else if (occupied) {
+              setControl(
+                writingRoomButton,
+                "Room occupied",
+                fileLockOccupied.message || "Someone is in the writing room"
+              );
+            } else {
+              setControl(
+                writingRoomButton,
+                "Enter writing room",
+                "Enter the writing room before saving this file to Google Drive"
+              );
+            }
+          }
+        }
+
+        if (writingRoomBanner) {
+          if (!showControls) {
+            writingRoomBanner.hidden = true;
+            writingRoomBanner.classList.add("hidden");
+            writingRoomBanner.classList.remove("is-inside", "is-occupied");
+          } else {
+            writingRoomBanner.hidden = false;
+            writingRoomBanner.classList.remove("hidden");
+            writingRoomBanner.classList.toggle("is-inside", inside);
+            writingRoomBanner.classList.toggle("is-occupied", occupied);
+            if (writingRoomBannerText) {
+              if (inside) {
+                writingRoomBannerText.textContent =
+                  "You are in the writing room for “" +
+                  rel +
+                  "”. Exit when you are done so others can edit.";
+              } else if (occupied) {
+                writingRoomBannerText.textContent =
+                  (fileLockOccupied && fileLockOccupied.message
+                    ? fileLockOccupied.message + " "
+                    : "") +
+                  "This file is read-only until they exit (abandoned rooms free after about 45 seconds).";
+              } else {
+                writingRoomBannerText.textContent =
+                  "Live collaboration is not supported yet — the writing room has space for only one person at a time. Enter before saving this file to Google Drive.";
+              }
+            }
+            if (inside) {
+              setControl(writingRoomBannerButton, "Exit writing room");
+            } else if (occupied) {
+              setControl(writingRoomBannerButton, "What now?");
+            } else {
+              setControl(writingRoomBannerButton, "Enter writing room");
+            }
+          }
+        }
+
+        if (file && !file.binary && locksOn) {
           const size = new Blob([file.content || ""]).size;
           if (inside) {
             activeFileMeta.textContent =
               "Text file, " + formatBytes(size) + " · you are in the writing room";
           } else if (occupied) {
             activeFileMeta.textContent = "Read-only — writing room occupied";
-          } else if (locksOn) {
+          } else {
             activeFileMeta.textContent =
-              "Text file, " + formatBytes(size) + " · enter the writing room to edit";
+              "Text file, " + formatBytes(size) + " · enter writing room to save to Drive";
           }
         }
       }
@@ -6811,7 +6960,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           message.textContent =
             "Live collaboration is not supported yet. The writing room has space for only one person at a time — while you are inside, collaborators see “" +
             rel +
-            "” as read-only. Exit the writing room when you are done (or close the tab).";
+            "” as read-only for Drive saves. Enter before saving this file to Google Drive, and exit when you are done (or close the tab).";
           addButton("Cancel", "cancel");
           addButton("Enter writing room", "confirm", "modal-confirm");
         }
@@ -6838,6 +6987,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
       /**
        * Peek at lock status without entering. Releases our lock if we switched files.
+       * Resumes a lock we already hold (same device / same Google account) after reload.
        */
       async function refreshWritingRoomStatus() {
         const generation = ++fileLockStatusGeneration;
@@ -6879,6 +7029,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           if (generation !== fileLockStatusGeneration) {
             return;
           }
+          if (lock && !UndertwigCloud.isLockStale(lock) && UndertwigCloud.isLockHeldByMe(lock)) {
+            // Resume after reload / another tab of the same account.
+            fileLockHeldPath = rel;
+            fileLockHeldFileId = lock._fileId || null;
+            fileLockOccupied = null;
+            startFileLockHeartbeat(projectName, rel);
+            updateWritingRoomUi();
+            return;
+          }
           if (
             lock &&
             !UndertwigCloud.isLockStale(lock) &&
@@ -6914,8 +7073,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (choice !== "confirm") {
           return;
         }
-        writingRoomBusy = true;
-        updateWritingRoomUi();
+        setWritingRoomBusy(true);
         setStatus("Entering the writing room for “" + rel + "”…");
         try {
           const result = await UndertwigCloud.acquireFileLock(projectName, rel);
@@ -6948,8 +7106,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             true
           );
         } finally {
-          writingRoomBusy = false;
-          updateWritingRoomUi();
+          setWritingRoomBusy(false);
         }
       }
 
@@ -6966,10 +7123,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
         }
-        writingRoomBusy = true;
-        updateWritingRoomUi();
+        setWritingRoomBusy(true);
         await releaseHeldFileLock();
-        writingRoomBusy = false;
+        setWritingRoomBusy(false);
         await refreshWritingRoomStatus();
         if (rel) {
           setStatus("You left the writing room for “" + rel + "”.");

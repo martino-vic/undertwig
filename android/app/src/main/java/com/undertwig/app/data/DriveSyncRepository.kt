@@ -138,7 +138,29 @@ class DriveSyncRepository(
     private fun isHeldByThisDevice(lock: FileEditLock): Boolean =
         !lock.deviceId.isNullOrBlank() && lock.deviceId == deviceId()
 
+    private fun isHeldByMe(lock: FileEditLock, holderEmail: String?): Boolean {
+        if (isHeldByThisDevice(lock)) return true
+        val me = holderEmail?.trim()?.lowercase().orEmpty()
+        val theirs = lock.holderEmail?.trim()?.lowercase().orEmpty()
+        return me.isNotEmpty() && theirs.isNotEmpty() && me == theirs
+    }
+
     suspend fun peekFileLock(
+        accessToken: String,
+        projectId: String,
+        projectName: String,
+        relativePath: String,
+        holderEmail: String? = null,
+    ): FileEditLock? = withContext(Dispatchers.IO) {
+        val rel = relativePath.trim().trimStart('/').replace('\\', '/')
+        val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext null
+        val existing = readFileLock(accessToken, folderId, rel) ?: return@withContext null
+        if (existing.isStale() || isHeldByMe(existing, holderEmail)) return@withContext null
+        existing
+    }
+
+    /** Returns the lock even when we hold it (for resume-after-reload). */
+    suspend fun readFileLockForPath(
         accessToken: String,
         projectId: String,
         projectName: String,
@@ -147,7 +169,7 @@ class DriveSyncRepository(
         val rel = relativePath.trim().trimStart('/').replace('\\', '/')
         val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext null
         val existing = readFileLock(accessToken, folderId, rel) ?: return@withContext null
-        if (existing.isStale() || isHeldByThisDevice(existing)) return@withContext null
+        if (existing.isStale()) return@withContext null
         existing
     }
 
@@ -167,7 +189,7 @@ class DriveSyncRepository(
                 message = "Project is not linked to Google Drive yet. Save once first.",
             )
         val existing = readFileLock(accessToken, folderId, rel)
-        if (existing != null && !existing.isStale() && !isHeldByThisDevice(existing)) {
+        if (existing != null && !existing.isStale() && !isHeldByMe(existing, holderEmail)) {
             return@withContext FileLockResult(
                 ok = false,
                 lock = existing,
@@ -179,11 +201,11 @@ class DriveSyncRepository(
             rel,
             holderEmail,
             holderName,
-            since = if (existing != null && isHeldByThisDevice(existing)) existing.since else null,
+            since = if (existing != null && isHeldByMe(existing, holderEmail)) existing.since else null,
         )
         writeFileLock(accessToken, folderId, rel, payload)
         val again = readFileLock(accessToken, folderId, rel)
-        if (again != null && !again.isStale() && !isHeldByThisDevice(again)) {
+        if (again != null && !again.isStale() && !isHeldByMe(again, holderEmail)) {
             return@withContext FileLockResult(
                 ok = false,
                 lock = again,
@@ -211,7 +233,7 @@ class DriveSyncRepository(
                 accessToken, projectId, projectName, rel, holderEmail, holderName,
             )
         }
-        if (!isHeldByThisDevice(existing)) {
+        if (!isHeldByMe(existing, holderEmail)) {
             if (!existing.isStale()) {
                 return@withContext FileLockResult(
                     ok = false,
@@ -234,11 +256,12 @@ class DriveSyncRepository(
         projectId: String,
         projectName: String,
         relativePath: String,
+        holderEmail: String? = null,
     ): Boolean = withContext(Dispatchers.IO) {
         val rel = relativePath.trim().trimStart('/').replace('\\', '/')
         val folderId = resolveProjectFolderId(accessToken, projectId, projectName) ?: return@withContext false
         val existing = readFileLock(accessToken, folderId, rel) ?: return@withContext true
-        if (!isHeldByThisDevice(existing) && !existing.isStale()) return@withContext false
+        if (!isHeldByMe(existing, holderEmail) && !existing.isStale()) return@withContext false
         val fileId = existing.fileId ?: return@withContext false
         trashDriveFile(accessToken, fileId)
         true
@@ -1178,7 +1201,7 @@ class DriveSyncRepository(
         private const val CLOUD_FOLDER_NAME = "Undertwig"
         private const val INVITED_REGISTRY_NAME = "undertwig-invited-projects-v1.json"
         private const val LOCK_DIR_NAME = ".undertwig-locks"
-        private const val LOCK_STALE_MS = 2 * 60 * 1000L
+        private const val LOCK_STALE_MS = 45 * 1000L
         private const val DRIVE_API = "https://www.googleapis.com/drive/v3"
         private const val DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3"
         private const val PREFS = "undertwig_drive"
