@@ -22,9 +22,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -70,6 +70,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import com.undertwig.app.data.AuthUser
 import com.undertwig.app.data.BibToolId
 import com.undertwig.app.data.LatexEngineId
 import com.undertwig.app.data.ProjectDownloadInfo
@@ -79,6 +80,8 @@ import java.io.File
 @Composable
 fun EditorScreen(
     state: EditorUiState,
+    authUser: AuthUser?,
+    signingIn: Boolean,
     onBack: () -> Unit,
     onSelectFile: (String) -> Unit,
     onEditorChange: (String) -> Unit,
@@ -87,6 +90,8 @@ fun EditorScreen(
     onBibliography: () -> Unit,
     onCancelBusy: () -> Unit,
     onOpenPdf: () -> Unit,
+    onLogin: () -> Unit,
+    onLogout: () -> Unit,
     onSelectLatexEngine: (LatexEngineId) -> Unit,
     onSelectBibTool: (BibToolId) -> Unit,
     onPrepareDownload: () -> ProjectDownloadInfo?,
@@ -98,6 +103,7 @@ fun EditorScreen(
 ) {
     val context = LocalContext.current
     var showAdd by remember { mutableStateOf(false) }
+    var showAccount by remember { mutableStateOf(false) }
     var addIsFolder by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("notes.tex") }
     var showLog by remember { mutableStateOf(false) }
@@ -216,9 +222,19 @@ fun EditorScreen(
                     ) {
                         Icon(Icons.Default.Download, contentDescription = "Download project")
                     }
-                    if (state.pdfPath != null) {
-                        IconButton(onClick = onOpenPdf) {
-                            Icon(Icons.Default.PictureAsPdf, contentDescription = "PDF")
+                    if (authUser != null) {
+                        IconButton(onClick = { showAccount = true }) {
+                            Icon(
+                                Icons.Default.AccountCircle,
+                                contentDescription = "Account ${authUser.email}",
+                            )
+                        }
+                    } else {
+                        TextButton(
+                            onClick = onLogin,
+                            enabled = !signingIn,
+                        ) {
+                            Text(if (signingIn) "…" else "Log in")
                         }
                     }
                 },
@@ -364,6 +380,31 @@ fun EditorScreen(
                 )
             }
         }
+    }
+
+    if (showAccount && authUser != null) {
+        AlertDialog(
+            onDismissRequest = { showAccount = false },
+            title = { Text(authUser.name) },
+            text = {
+                Text(authUser.email)
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showAccount = false
+                        onLogout()
+                    },
+                ) {
+                    Text("Log out")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAccount = false }) {
+                    Text("Close")
+                }
+            },
+        )
     }
 
     if (showAdd) {

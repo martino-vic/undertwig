@@ -1,8 +1,10 @@
 package com.undertwig.app.ui
 
+import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -14,6 +16,8 @@ fun UndertwigApp(
 ) {
     val home by viewModel.home.collectAsStateWithLifecycle()
     val editor by viewModel.editor.collectAsStateWithLifecycle()
+    val auth by viewModel.auth.collectAsStateWithLifecycle()
+    val activity = LocalContext.current as ComponentActivity
     val startDestination = remember {
         if (viewModel.editor.value.projectId.isNotEmpty()) "editor" else "home"
     }
@@ -34,6 +38,8 @@ fun UndertwigApp(
         composable("editor") {
             EditorScreen(
                 state = editor,
+                authUser = auth.user,
+                signingIn = auth.signingIn,
                 onBack = { navController.popBackStack() },
                 onSelectFile = { path ->
                     if (path.endsWith(".pdf", ignoreCase = true)) {
@@ -54,6 +60,8 @@ fun UndertwigApp(
                         navController.navigate("pdf")
                     }
                 },
+                onLogin = { viewModel.signInWithGoogle(activity) },
+                onLogout = viewModel::signOut,
                 onSelectLatexEngine = viewModel::setLatexEngine,
                 onSelectBibTool = viewModel::setBibTool,
                 onPrepareDownload = viewModel::projectDownloadInfo,

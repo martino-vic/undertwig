@@ -19,17 +19,28 @@ This is **not** a Chrome Custom Tab / TWA wrapper of the website.
 - **Convert** with bundled SwiftLaTeX Wasm (needs network the first time packages are fetched from TeXlyre, same as the website)
 - View generated PDF
 - Compiler log sheet
+- Google Sign-In (editor top bar **Log in**; session stored on device)
 
 ## Not in this build yet
 
-- Google Sign-In / Drive Save–Load
+- Google Drive Save–Load
 - Collaborate / invites
-- Monaco editor / BusyTeX bibliography
-- LuaLaTeX
+- Monaco editor
+
+## Google Sign-In setup
+
+Uses the same public web OAuth client ID as the website (`auth-config.js`) via Credential Manager.
+
+In Google Cloud Console for that project, also create an **Android** OAuth client with:
+
+- Package name: `com.undertwig.app`
+- SHA-1 of your signing key (debug keystore for local runs)
+
+Without that Android client, Sign-In fails with a developer/configuration error.
 
 ## Package
 
-`com.undertwig.app` · version `0.1.0`
+`com.undertwig.app` · version `0.1.34`
 
 ## Store assets
 

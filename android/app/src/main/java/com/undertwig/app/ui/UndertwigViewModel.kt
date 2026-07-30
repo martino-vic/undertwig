@@ -1,9 +1,12 @@
 package com.undertwig.app.ui
 
+import android.app.Activity
 import android.app.Application
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.undertwig.app.data.AuthRepository
+import com.undertwig.app.data.AuthUser
 import com.undertwig.app.data.BibToolId
 import com.undertwig.app.data.EnginePrefs
 import com.undertwig.app.data.LatexEngineId
@@ -26,6 +29,11 @@ import kotlin.coroutines.coroutineContext
 
 data class HomeUiState(
     val projects: List<ProjectSummary> = emptyList(),
+)
+
+data class AuthUiState(
+    val user: AuthUser? = null,
+    val signingIn: Boolean = false,
 )
 
 enum class EditorBusy {
@@ -60,6 +68,7 @@ data class EditorUiState(
 class UndertwigViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = ProjectRepository(application)
     private val enginePrefs = EnginePrefs(application)
+    private val authRepo = AuthRepository(application)
     private val engine = LatexEngine()
     private var busyJob: Job? = null
     private var statusTickerJob: Job? = null
@@ -68,6 +77,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _home = MutableStateFlow(HomeUiState())
     val home: StateFlow<HomeUiState> = _home.asStateFlow()
+
+    private val _auth = MutableStateFlow(AuthUiState(user = authRepo.currentUser()))
+    val auth: StateFlow<AuthUiState> = _auth.asStateFlow()
 
     private val _editor = MutableStateFlow(
         EditorUiState(
@@ -85,6 +97,44 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
             openProject(openId)
         }
         // Do not create WebView here — Application context / early init crashes on many emulators.
+    }
+
+    fun signInWithGoogle(activity: Activity) {
+        if (_auth.value.signingIn) return
+        viewModelScope.launch {
+            _auth.update { it.copy(signingIn = true) }
+            try {
+                val user = authRepo.signInWithGoogle(activity)
+                _auth.update { AuthUiState(user = user, signingIn = false) }
+                _editor.update { it.copy(status = "Signed in as ${user.email}") }
+                Toast.makeText(
+                    getApplication(),
+                    "Signed in as ${user.email}",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } catch (_: AuthRepository.SignInCancelledException) {
+                _auth.update { it.copy(signingIn = false) }
+            } catch (e: CancellationException) {
+                _auth.update { it.copy(signingIn = false) }
+                throw e
+            } catch (e: Exception) {
+                _auth.update { it.copy(signingIn = false) }
+                Toast.makeText(
+                    getApplication(),
+                    e.message ?: "Google Sign-In failed.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    fun signOut() {
+        viewModelScope.launch {
+            authRepo.signOut()
+            _auth.value = AuthUiState()
+            _editor.update { it.copy(status = "Signed out") }
+            Toast.makeText(getApplication(), "Signed out", Toast.LENGTH_SHORT).show()
+        }
     }
 
     fun setLatexEngine(engineId: LatexEngineId) {
