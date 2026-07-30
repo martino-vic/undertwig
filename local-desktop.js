@@ -312,6 +312,9 @@
       button.hidden = !allowed;
       button.classList.toggle("hidden", !allowed);
     }
+    if (typeof deps.onVisibilityChange === "function") {
+      deps.onVisibilityChange(allowed);
+    }
     if (!allowed) {
       hideWarning();
       return;

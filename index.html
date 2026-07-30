@@ -1428,6 +1428,7 @@
 
       @media (max-width: 1180px) {
         #localConsoleButton,
+        #saveFile,
         .local-path-warning {
           display: none !important;
         }
@@ -2947,6 +2948,9 @@
               </svg>
               Save
             </button>
+            <button class="toolbar-button save-file-button hidden" id="saveFile" type="button" hidden title="Save only the open file in this browser and the linked local folder">
+              Save file
+            </button>
             <button class="toolbar-button console-button hidden" id="localConsoleButton" type="button" hidden title="Open your system terminal in the Work desk project folder">
               Console
             </button>
@@ -3204,8 +3208,8 @@
     <script src="auth.js?v=20260729e"></script>
     <script src="cloud-storage.js?v=20260730q"></script>
     <script src="invite.js?v=20260728q"></script>
-    <script src="local-project-fs.js?v=20260730e"></script>
-    <script src="local-desktop.js?v=20260730e"></script>
+    <script src="local-project-fs.js?v=20260730f"></script>
+    <script src="local-desktop.js?v=20260730f"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260729a"></script>
@@ -3614,6 +3618,16 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             UndertwigLocalDesktop.isFeatureAllowed &&
             UndertwigLocalDesktop.isFeatureAllowed()
         );
+      }
+
+      function refreshSaveFileButtonVisibility() {
+        const button = document.getElementById("saveFile");
+        if (!button) {
+          return;
+        }
+        const show = localDesktopAllowed();
+        button.hidden = !show;
+        button.classList.toggle("hidden", !show);
       }
 
       function setSaveButtonBusy(busy) {
@@ -4301,6 +4315,90 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             `Could not connect to Google Cloud storage: ${error && error.message ? error.message : error}`,
             true
           );
+        }
+      }
+
+      async function saveCurrentFileNow() {
+        if (!localDesktopAllowed()) {
+          return;
+        }
+        const projectName = getActiveProjectName();
+        const filePath = state.activeFile || "";
+        if (!projectName || !filePath || !state.files[filePath]) {
+          setStatus("Open a file in the Work desk project before saving.", true);
+          return;
+        }
+
+        const active = state.files[filePath];
+        if (active && !active.binary) {
+          active.content = UndertwigEditor.getValue();
+        }
+
+        let localOk = true;
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (_error) {
+          localOk = false;
+        }
+
+        let diskNote = "";
+        try {
+          const meta =
+            window.UndertwigLocalFs && UndertwigLocalFs.getProjectMeta(projectName);
+          const handleBound =
+            window.UndertwigLocalFs &&
+            (await UndertwigLocalFs.hasBoundDirectory(projectName));
+          if (handleBound && UndertwigLocalFs.saveFileToDirectory) {
+            const diskResult = await UndertwigLocalFs.saveFileToDirectory(
+              projectName,
+              filePath,
+              state.files[filePath],
+              { base64ToBytes: base64ToBytes }
+            );
+            if (diskResult && diskResult.saved) {
+              diskNote =
+                " and local folder" +
+                (diskResult.folderName ? " “" + diskResult.folderName + "”" : "");
+            }
+          } else if (
+            meta &&
+            meta.absolutePath &&
+            window.UndertwigLocalDesktop &&
+            (await UndertwigLocalDesktop.hostHealth())
+          ) {
+            const prefix = projectName + "/";
+            if (!filePath.startsWith(prefix)) {
+              throw new Error("File is not in the current project.");
+            }
+            const diskResult = await UndertwigLocalDesktop.writeProjectViaHost(
+              meta.absolutePath,
+              [
+                {
+                  relativePath: filePath.slice(prefix.length),
+                  binary: Boolean(state.files[filePath].binary),
+                  content: state.files[filePath].content || "",
+                },
+              ]
+            );
+            if (diskResult && diskResult.ok) {
+              diskNote =
+                " and local folder" +
+                (diskResult.folderName ? " “" + diskResult.folderName + "”" : "");
+            }
+          }
+        } catch (error) {
+          setStatus(
+            (error && error.message) || "Could not save the file to the local folder.",
+            true
+          );
+          return;
+        }
+
+        const shortName = filePath.split("/").pop() || filePath;
+        if (localOk) {
+          setStatus("Saved “" + shortName + "” in this browser" + diskNote + ".");
+        } else {
+          setStatusStorageFull({ force: true });
         }
       }
 
@@ -5164,6 +5262,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (window.UndertwigLocalDesktop) {
           UndertwigLocalDesktop.refreshVisibility();
         }
+        refreshSaveFileButtonVisibility();
       }
 
       collaborateButton.addEventListener("click", (event) => {
@@ -5535,6 +5634,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       document.getElementById("uploadFiles").addEventListener("click", () => fileInput.click());
       document.getElementById("downloadZip").addEventListener("click", downloadProjectZip);
       document.getElementById("saveProject").addEventListener("click", saveProjectNow);
+      const saveFileButton = document.getElementById("saveFile");
+      if (saveFileButton) {
+        saveFileButton.addEventListener("click", saveCurrentFileNow);
+      }
       if (writingRoomButton) {
         writingRoomButton.addEventListener("click", function () {
           onWritingRoomButtonClick();
@@ -10688,11 +10791,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           onBindingChanged: function () {
             restoreSaveButtonTitle();
           },
+          onVisibilityChange: function () {
+            refreshSaveFileButtonVisibility();
+          },
         });
       }
 
       // Boot after all declarations so invite sync can run (see cloudInitPromise TDZ note).
       refreshAuthUi();
+      refreshSaveFileButtonVisibility();
       initCloudProject();
     </script>
   </body>

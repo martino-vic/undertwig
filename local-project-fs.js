@@ -263,6 +263,51 @@
     };
   }
 
+  async function saveFileToDirectory(projectName, filePath, file, helpers) {
+    const name = String(projectName || "").trim();
+    const path = String(filePath || "").trim();
+    if (!name) throw new Error("No current project.");
+    if (!path || !file) {
+      return { saved: false, reason: "no-file", written: 0 };
+    }
+    const prefix = name + "/";
+    if (path !== name && !path.startsWith(prefix)) {
+      throw new Error("File is not in the current project.");
+    }
+    const rel = path === name ? "" : path.slice(prefix.length);
+    if (
+      !rel ||
+      rel.split("/").some(function (part) {
+        return SKIP_DIR_NAMES.has(part);
+      })
+    ) {
+      throw new Error("Cannot save that path to the local folder.");
+    }
+
+    const handle = await getHandle(name);
+    if (!handle) return { saved: false, reason: "no-handle", written: 0 };
+    const allowed = await ensureReadWritePermission(handle);
+    if (!allowed) {
+      throw new Error(
+        "Permission to write the local project folder was denied. Re-link the folder."
+      );
+    }
+
+    const data = file.binary
+      ? helpers.base64ToBytes(file.content || "")
+      : file.content == null
+        ? ""
+        : String(file.content);
+    await writeFileAtPath(handle, rel, data);
+    return {
+      saved: true,
+      reason: "ok",
+      written: 1,
+      folderName: handle.name || name,
+      relativePath: rel,
+    };
+  }
+
   async function hasBoundDirectory(projectName) {
     try {
       return Boolean(await getHandle(projectName));
@@ -440,6 +485,7 @@
     deleteHandle: deleteHandle,
     ensureReadWritePermission: ensureReadWritePermission,
     saveProjectToDirectory: saveProjectToDirectory,
+    saveFileToDirectory: saveFileToDirectory,
     hasBoundDirectory: hasBoundDirectory,
     getProjectMeta: getProjectMeta,
     setProjectMeta: setProjectMeta,
