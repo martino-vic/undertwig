@@ -1999,6 +1999,26 @@
     return (await undertwigInviteStatus(folderMeta, me)) === "foreign-undertwig";
   }
 
+  /** Soft check when the Undertwig parent cannot be read (invitee ACL). */
+  async function looksLikeUndertwigProject(folderId) {
+    try {
+      const children = await listChildren(folderId);
+      for (let i = 0; i < children.length; i += 1) {
+        const child = children[i];
+        const name = String((child && child.name) || "").toLowerCase();
+        if (!name) {
+          continue;
+        }
+        if (name === "main.tex" || /\.(tex|bib|sty|cls|bst)$/.test(name)) {
+          return true;
+        }
+      }
+    } catch (_error) {
+      return false;
+    }
+    return false;
+  }
+
   /**
    * List invited project folders shared with the user that live under someone else's Undertwig /
    * (or children of a shared Undertwig root). Mirrors Android DriveSyncRepository.listCloudProjects.
@@ -2110,7 +2130,9 @@
       }
     }
 
-    // Invites accepted via Undertwig (link/email). Keep unknown parents; drop confirmed non-Undertwig.
+    // Invites accepted via Undertwig (link/email).
+    // Keep unknown parents only for registry entries (opened through Undertwig).
+    // Drop confirmed non-Undertwig pollution from older builds.
     const remembered = await listRememberedInvitedProjects(me);
     const cleanRegistry = [];
     for (let r = 0; r < remembered.length; r += 1) {
@@ -2120,6 +2142,12 @@
       }
       if (entry._inviteStatus === "not-undertwig") {
         continue;
+      }
+      if (entry._inviteStatus === "unknown") {
+        // Avoid re-listing random Shared-with-me folders that older builds stored.
+        if (!(await looksLikeUndertwigProject(entry.id))) {
+          continue;
+        }
       }
       cleanRegistry.push({
         id: entry.id,
@@ -2147,9 +2175,16 @@
       // Best-effort prune of non-Undertwig registry entries.
     }
 
-    // Local invite map → only Undertwig (or unknown) projects; drop stale non-Undertwig maps.
+    // Local invite map → only folders confirmed under a foreign Undertwig.
+    // Do not trust "unknown" map entries (older builds mapped every shared folder).
     const mappedInvites = listInvitedProjects();
     const registrySeed = cleanRegistry.slice();
+    const registryIds = {};
+    cleanRegistry.forEach(function (entry) {
+      if (entry && entry.id) {
+        registryIds[String(entry.id)] = true;
+      }
+    });
     for (let m = 0; m < mappedInvites.length; m += 1) {
       const mapped = mappedInvites[m];
       if (!mapped || !mapped.id) {
@@ -2172,6 +2207,12 @@
         removeMappedProject(mapped.name);
         continue;
       }
+      if (status !== "foreign-undertwig") {
+        // unknown parent: keep only if this id was accepted via Undertwig invite registry
+        if (!registryIds[mappedId]) {
+          continue;
+        }
+      }
       if (!invitedIds[mappedId]) {
         invitedIds[mappedId] = true;
         invited.push({
@@ -2181,12 +2222,14 @@
           ownerEmail: ownerEmailFromMeta(meta) || null,
         });
       }
-      registrySeed.push({
-        id: mappedId,
-        name: String(mapped.name || meta.name || "").trim() || "Untitled",
-        ownerEmail: ownerEmailFromMeta(meta) || "",
-        updatedAt: Date.now(),
-      });
+      if (status === "foreign-undertwig") {
+        registrySeed.push({
+          id: mappedId,
+          name: String(mapped.name || meta.name || "").trim() || "Untitled",
+          ownerEmail: ownerEmailFromMeta(meta) || "",
+          updatedAt: Date.now(),
+        });
+      }
     }
     if (registrySeed.length) {
       try {
