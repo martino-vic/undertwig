@@ -1897,6 +1897,150 @@
     return projects;
   }
 
+  /** True when folderMeta has a parent folder named Undertwig that is not owned by me. */
+  async function isUnderForeignUndertwig(folderMeta, me) {
+    const want = String(me || "").toLowerCase();
+    const parents = Array.isArray(folderMeta && folderMeta.parents) ? folderMeta.parents : [];
+    for (let i = 0; i < parents.length; i += 1) {
+      const parentId = String(parents[i] || "").trim();
+      if (!parentId) {
+        continue;
+      }
+      const parent = await fetchDriveFileMeta(
+        parentId,
+        "id,name,mimeType,trashed,owners"
+      );
+      if (!isDriveFolderMeta(parent)) {
+        continue;
+      }
+      if (String(parent.name || "").toLowerCase() !== String(CLOUD_FOLDER_NAME).toLowerCase()) {
+        continue;
+      }
+      const parentOwner = ownerEmailFromMeta(parent);
+      if (!parentOwner || !want || String(parentOwner).toLowerCase() !== want) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * List invited project folders shared with the user that live under someone else's Undertwig /
+   * (or children of a shared Undertwig root). Mirrors Android DriveSyncRepository.listCloudProjects.
+   * @returns {Promise<Array<{id: string, name: string, modifiedTime: string|null, ownerEmail: string|null}>>}
+   */
+  async function listSharedUndertwigProjects(options) {
+    const opts = options || {};
+    await connect({
+      interactive: Boolean(opts.interactive),
+      forcePrompt: Boolean(opts.forcePrompt),
+      allowConsentRetry: Boolean(opts.allowConsentRetry),
+    });
+
+    const me = currentSessionEmail();
+    let rootId = null;
+    const ownedIds = {};
+    try {
+      rootId = await ensureUndertwigFolder();
+      const ownedChildren = await listChildren(rootId);
+      for (let i = 0; i < ownedChildren.length; i += 1) {
+        const child = ownedChildren[i];
+        if (child && child.id && child.mimeType === "application/vnd.google-apps.folder") {
+          ownedIds[String(child.id)] = true;
+        }
+      }
+    } catch (_error) {
+      rootId = null;
+    }
+
+    const invited = [];
+    const invitedIds = {};
+    const shared = await driveSearch(
+      "sharedWithMe = true and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+      100
+    );
+
+    for (let i = 0; i < shared.length; i += 1) {
+      const child = shared[i];
+      if (!child || !child.id) {
+        continue;
+      }
+      const id = String(child.id);
+      if (ownedIds[id] || id === rootId || invitedIds[id]) {
+        continue;
+      }
+      const name = String(child.name || "").trim() || "Untitled";
+      const owner = ownerEmailFromMeta(child);
+      if (me && owner && String(owner).toLowerCase() === me) {
+        continue;
+      }
+
+      // Whole Undertwig folder shared with us → list its project children.
+      if (name.toLowerCase() === String(CLOUD_FOLDER_NAME).toLowerCase()) {
+        let projects = [];
+        try {
+          projects = await listChildren(id);
+        } catch (_error) {
+          projects = [];
+        }
+        for (let j = 0; j < projects.length; j += 1) {
+          const project = projects[j];
+          if (
+            !project ||
+            !project.id ||
+            project.mimeType !== "application/vnd.google-apps.folder"
+          ) {
+            continue;
+          }
+          const projectId = String(project.id);
+          if (ownedIds[projectId] || invitedIds[projectId]) {
+            continue;
+          }
+          invitedIds[projectId] = true;
+          const projectName = String(project.name || "").trim() || "Untitled";
+          invited.push({
+            id: projectId,
+            name: projectName,
+            modifiedTime: project.modifiedTime || null,
+            ownerEmail: ownerEmailFromMeta(project) || owner || null,
+          });
+          if (!getMappedFolderId(projectName)) {
+            setMappedProject(projectName, projectId, "writer");
+          }
+        }
+        continue;
+      }
+
+      // Project folder shared directly → only keep if parent is someone else's Undertwig.
+      const meta =
+        (await fetchDriveFileMeta(
+          id,
+          "id,name,mimeType,modifiedTime,owners,parents,trashed"
+        )) || child;
+      if (!isDriveFolderMeta(meta)) {
+        continue;
+      }
+      if (!(await isUnderForeignUndertwig(meta, me))) {
+        continue;
+      }
+      invitedIds[id] = true;
+      invited.push({
+        id: id,
+        name: name,
+        modifiedTime: meta.modifiedTime || child.modifiedTime || null,
+        ownerEmail: ownerEmailFromMeta(meta) || owner || null,
+      });
+      if (!getMappedFolderId(name)) {
+        setMappedProject(name, id, "writer");
+      }
+    }
+
+    invited.sort(function (a, b) {
+      return a.name.localeCompare(b.name);
+    });
+    return invited;
+  }
+
   /**
    * Pull the named project's Google Drive folder into an Undertwig project snapshot.
    * Used by the file-tree Sync button (Drive → local tree).
@@ -2459,6 +2603,7 @@
     syncFromDrive,
     pullProjectFromDrive,
     listUndertwigProjects,
+    listSharedUndertwigProjects,
     shareProjectWithEmail,
     ensureProjectFolder,
     refreshProjectMeta,

@@ -294,10 +294,52 @@
         user-select: none;
       }
 
+      .tree-section-label-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-width: 0;
+        padding-right: 6px;
+      }
+
+      .tree-section-label-row .tree-section-label {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
       .tree-section-label-affix {
         text-transform: none;
         letter-spacing: 0.02em;
         font-weight: 600;
+      }
+
+      .tree-cloud-refresh {
+        flex: 0 0 auto;
+        display: inline-grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        margin: 4px 4px 0 0;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .tree-cloud-refresh:hover:not(:disabled) {
+        border-color: var(--border);
+        background: var(--panel-soft);
+        color: var(--text);
+      }
+
+      .tree-cloud-refresh:disabled {
+        opacity: 0.55;
+        cursor: default;
       }
 
       .tree-section-body {
@@ -3862,6 +3904,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let dragSourcePath = null;
       let dragSourceProject = null;
       let cloudProjectsCache = [];
+      let cloudInvitedRemoteCache = [];
       let cloudProjectsLoading = false;
       let cloudProjectsError = "";
       let cloudProjectsNeedConnect = false;
@@ -6459,6 +6502,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             }
           });
         }
+        (cloudInvitedRemoteCache || []).forEach(function (project) {
+          if (project && project.name) {
+            names.add(project.name);
+          }
+        });
         listLocalRootProjects(state).forEach(function (name) {
           if (isInvitedProjectName(name)) {
             names.add(name);
@@ -6474,6 +6522,32 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         affixEl.className = "tree-section-label-affix";
         affixEl.textContent = affix;
         labelEl.appendChild(affixEl);
+      }
+
+      function createCloudSectionHeader(title, affix, refreshTitle) {
+        const row = document.createElement("div");
+        row.className = "tree-section-label-row";
+        const label = document.createElement("div");
+        label.className = "tree-section-label";
+        appendCloudSectionLabel(label, title, affix);
+        const refreshBtn = document.createElement("button");
+        refreshBtn.type = "button";
+        refreshBtn.className = "tree-cloud-refresh";
+        refreshBtn.title = refreshTitle || "Refresh from Google Drive";
+        refreshBtn.setAttribute(
+          "aria-label",
+          refreshTitle || "Refresh " + title + " " + affix + " from Google Drive"
+        );
+        refreshBtn.textContent = cloudProjectsLoading ? "…" : "↻";
+        refreshBtn.disabled = Boolean(cloudProjectsLoading);
+        refreshBtn.addEventListener("click", function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          refreshCloudProjectsList({ interactive: true, source: affix });
+        });
+        row.appendChild(label);
+        row.appendChild(refreshBtn);
+        return row;
       }
 
       function renderTree() {
@@ -6605,10 +6679,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
           const cloudOwnSection = document.createElement("div");
           cloudOwnSection.className = "tree-section tree-section-cloud tree-section-cloud-own";
-          const cloudOwnLabel = document.createElement("div");
-          cloudOwnLabel.className = "tree-section-label";
-          appendCloudSectionLabel(cloudOwnLabel, "Cloud", "(own)");
-          cloudOwnSection.appendChild(cloudOwnLabel);
+          cloudOwnSection.appendChild(
+            createCloudSectionHeader("Cloud", "(own)", "Refresh your Undertwig projects from Google Drive")
+          );
 
           const cloudOwnBody = document.createElement("div");
           cloudOwnBody.className = "tree-section-body";
@@ -6701,13 +6774,22 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           const cloudInvitedSection = document.createElement("div");
           cloudInvitedSection.className =
             "tree-section tree-section-cloud tree-section-cloud-invited";
-          const cloudInvitedLabel = document.createElement("div");
-          cloudInvitedLabel.className = "tree-section-label";
-          appendCloudSectionLabel(cloudInvitedLabel, "Cloud", "(invited)");
-          cloudInvitedSection.appendChild(cloudInvitedLabel);
+          cloudInvitedSection.appendChild(
+            createCloudSectionHeader(
+              "Cloud",
+              "(invited)",
+              "Refresh invited Undertwig projects from Google Drive"
+            )
+          );
 
           const cloudInvitedBody = document.createElement("div");
           cloudInvitedBody.className = "tree-section-body";
+          const invitedFolderIds = {};
+          (cloudInvitedRemoteCache || []).forEach(function (project) {
+            if (project && project.name && project.id) {
+              invitedFolderIds[project.name] = project.id;
+            }
+          });
           const invitedNodes = Array.from(invitedNames)
             .filter(function (name) {
               return name && name !== currentName;
@@ -6729,12 +6811,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 children: [],
                 cloudOnly: true,
                 invited: true,
+                driveFolderId: invitedFolderIds[name] || null,
               };
             });
 
           if (!invitedNodes.length) {
             cloudInvitedBody.classList.add("is-empty");
-            cloudInvitedBody.textContent = "No invited projects yet";
+            cloudInvitedBody.textContent = cloudProjectsLoading
+              ? "Refreshing…"
+              : "No invited projects yet";
           } else {
             invitedNodes.forEach(function (node) {
               cloudInvitedBody.appendChild(
@@ -6746,6 +6831,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 })
               );
             });
+            if (cloudProjectsLoading) {
+              const loading = document.createElement("div");
+              loading.className = "tree-section-body is-empty";
+              loading.style.paddingTop = "2px";
+              loading.textContent = "Refreshing…";
+              cloudInvitedBody.appendChild(loading);
+            }
           }
           cloudInvitedSection.appendChild(cloudInvitedBody);
           tree.appendChild(cloudInvitedSection);
@@ -6768,6 +6860,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const opts = options || {};
         if (!UndertwigAuth.isLoggedIn() || !UndertwigCloud.isAvailable || !UndertwigCloud.isAvailable()) {
           cloudProjectsCache = [];
+          cloudInvitedRemoteCache = [];
           cloudProjectsLoading = false;
           cloudProjectsError = "";
           cloudProjectsNeedConnect = false;
@@ -6778,6 +6871,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         if (!UndertwigCloud.listUndertwigProjects) {
           cloudProjectsCache = [];
+          cloudInvitedRemoteCache = [];
           cloudProjectsError = "Cloud listing is unavailable. Hard-refresh the page.";
           cloudProjectsNeedConnect = false;
           if (typeof renderTree === "function") {
@@ -6787,6 +6881,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         if (!opts.interactive && !UndertwigCloud.hasAccessToken()) {
           cloudProjectsCache = [];
+          cloudInvitedRemoteCache = [];
           cloudProjectsNeedConnect = true;
           cloudProjectsError = "";
           cloudProjectsLoading = false;
@@ -6801,11 +6896,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (typeof renderTree === "function") {
           renderTree();
         }
+        const listOpts = {
+          interactive: Boolean(opts.interactive),
+          allowConsentRetry: Boolean(opts.interactive),
+        };
         try {
-          const projects = await UndertwigCloud.listUndertwigProjects({
-            interactive: Boolean(opts.interactive),
-            allowConsentRetry: Boolean(opts.interactive),
-          });
+          const projects = await UndertwigCloud.listUndertwigProjects(listOpts);
           cloudProjectsCache = Array.isArray(projects) ? projects : [];
           cloudProjectsNeedConnect = false;
           cloudProjectsError = "";
@@ -6818,11 +6914,27 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             cloudProjectsNeedConnect = false;
             cloudProjectsError = message;
           }
-        } finally {
-          cloudProjectsLoading = false;
-          if (typeof renderTree === "function") {
-            renderTree();
+        }
+
+        if (UndertwigCloud.listSharedUndertwigProjects && !cloudProjectsNeedConnect) {
+          try {
+            const invited = await UndertwigCloud.listSharedUndertwigProjects(listOpts);
+            cloudInvitedRemoteCache = Array.isArray(invited) ? invited : [];
+          } catch (error) {
+            // Keep prior invited cache if shared listing fails after owned succeeded.
+            if (!cloudInvitedRemoteCache.length) {
+              const message =
+                (error && error.message) || "Could not list invited Google Drive projects.";
+              if (!cloudProjectsError && !/connect|permission|scope|token|authoriz/i.test(message)) {
+                cloudProjectsError = message;
+              }
+            }
           }
+        }
+
+        cloudProjectsLoading = false;
+        if (typeof renderTree === "function") {
+          renderTree();
         }
       }
 
