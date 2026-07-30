@@ -323,6 +323,24 @@
         border-top: 1px solid var(--border);
       }
 
+      .tree-section-cloud .tree-section-body:not(.is-empty) {
+        background: color-mix(in srgb, #3d7ea6 8%, transparent);
+        border-radius: 6px;
+        margin: 0 6px 4px;
+        padding-bottom: 6px;
+      }
+
+      .tree-row.tree-row-cloud .tree-name {
+        color: color-mix(in srgb, var(--text) 92%, #3d7ea6);
+      }
+
+      .tree-row.tree-row-cloud.is-local-copy .tree-name::after {
+        content: " · local";
+        color: var(--muted);
+        font-weight: 500;
+        font-size: 0.92em;
+      }
+
       .tree-row[aria-expanded] .tree-icon {
         color: var(--brand-strong);
       }
@@ -3844,6 +3862,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       const cloudStatusText = document.getElementById("cloudStatusText");
       let dragSourcePath = null;
       let dragSourceProject = null;
+      let cloudProjectsCache = [];
+      let cloudProjectsLoading = false;
+      let cloudProjectsError = "";
+      let cloudProjectsNeedConnect = false;
+      let cloudOpenInFlight = false;
       let cloudSaveTimer = null;
       let cloudSaveInFlight = false;
       let cloudStatusMode = "logged-out";
@@ -4084,6 +4107,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                     "” to Google Drive (browser storage is full)." +
                     deleteNote
             );
+            if (typeof refreshCloudProjectsList === "function") {
+              refreshCloudProjectsList();
+            }
             return;
           }
 
@@ -4746,6 +4772,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         // Role suffixes on Current depend on login; refresh after login/logout.
         if (typeof renderTree === "function") {
           renderTree();
+        }
+        if (typeof refreshCloudProjectsList === "function") {
+          refreshCloudProjectsList();
         }
       }
 
@@ -6478,6 +6507,212 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         otherSection.appendChild(otherBody);
         tree.appendChild(otherSection);
+
+        if (UndertwigAuth.isLoggedIn() && UndertwigCloud.isAvailable && UndertwigCloud.isAvailable()) {
+          const cloudDivider = document.createElement("hr");
+          cloudDivider.className = "tree-section-divider";
+          cloudDivider.setAttribute("aria-hidden", "true");
+          tree.appendChild(cloudDivider);
+
+          const cloudSection = document.createElement("div");
+          cloudSection.className = "tree-section tree-section-cloud";
+          const cloudLabel = document.createElement("div");
+          cloudLabel.className = "tree-section-label";
+          cloudLabel.textContent = "Cloud";
+          cloudSection.appendChild(cloudLabel);
+
+          const cloudBody = document.createElement("div");
+          cloudBody.className = "tree-section-body";
+          const localRoots = new Set(listLocalRootProjects(state));
+
+          if (cloudProjectsLoading && !cloudProjectsCache.length) {
+            cloudBody.classList.add("is-empty");
+            cloudBody.textContent = "Loading Google Drive…";
+          } else if (cloudProjectsNeedConnect && !cloudProjectsCache.length) {
+            cloudBody.classList.add("is-empty");
+            const hint = document.createElement("div");
+            hint.textContent = "Connect Google Drive to list cloud projects.";
+            cloudBody.appendChild(hint);
+            const connectBtn = document.createElement("button");
+            connectBtn.type = "button";
+            connectBtn.className = "tree-row tree-row-cloud";
+            connectBtn.style.paddingLeft = "8px";
+            connectBtn.style.marginTop = "4px";
+            connectBtn.innerHTML =
+              '<span class="tree-icon">-</span><span class="tree-name">Connect Drive</span>';
+            connectBtn.addEventListener("click", function (event) {
+              event.preventDefault();
+              event.stopPropagation();
+              refreshCloudProjectsList({ interactive: true });
+            });
+            cloudBody.appendChild(connectBtn);
+          } else if (cloudProjectsError && !cloudProjectsCache.length) {
+            cloudBody.classList.add("is-empty");
+            cloudBody.textContent = cloudProjectsError;
+          } else if (!cloudProjectsCache.length) {
+            cloudBody.classList.add("is-empty");
+            cloudBody.textContent = "No projects in Google Drive yet";
+          } else {
+            cloudProjectsCache.forEach(function (project) {
+              const row = document.createElement("button");
+              row.type = "button";
+              row.className =
+                "tree-row tree-row-cloud" +
+                (localRoots.has(project.name) ? " is-local-copy" : "");
+              row.style.paddingLeft = "8px";
+              row.title = localRoots.has(project.name)
+                ? "Open “" + project.name + "” (already on this device)"
+                : "Open “" + project.name + "” from Google Drive";
+              row.innerHTML =
+                '<span class="tree-icon">-</span><span class="tree-name"></span>';
+              row.querySelector(".tree-name").textContent = project.name;
+              if (getActiveProjectName() === project.name) {
+                row.classList.add("active");
+              }
+              row.addEventListener("click", function () {
+                openCloudProject(project.name);
+              });
+              cloudBody.appendChild(row);
+            });
+            if (cloudProjectsLoading) {
+              const loading = document.createElement("div");
+              loading.className = "tree-section-body is-empty";
+              loading.style.paddingTop = "2px";
+              loading.textContent = "Refreshing…";
+              cloudBody.appendChild(loading);
+            }
+          }
+          cloudSection.appendChild(cloudBody);
+          tree.appendChild(cloudSection);
+        }
+      }
+
+      async function refreshCloudProjectsList(options) {
+        const opts = options || {};
+        if (!UndertwigAuth.isLoggedIn() || !UndertwigCloud.isAvailable || !UndertwigCloud.isAvailable()) {
+          cloudProjectsCache = [];
+          cloudProjectsLoading = false;
+          cloudProjectsError = "";
+          cloudProjectsNeedConnect = false;
+          if (typeof renderTree === "function") {
+            renderTree();
+          }
+          return;
+        }
+        if (!UndertwigCloud.listUndertwigProjects) {
+          cloudProjectsCache = [];
+          cloudProjectsError = "Cloud listing is unavailable. Hard-refresh the page.";
+          cloudProjectsNeedConnect = false;
+          if (typeof renderTree === "function") {
+            renderTree();
+          }
+          return;
+        }
+        if (!opts.interactive && !UndertwigCloud.hasAccessToken()) {
+          cloudProjectsCache = [];
+          cloudProjectsNeedConnect = true;
+          cloudProjectsError = "";
+          cloudProjectsLoading = false;
+          if (typeof renderTree === "function") {
+            renderTree();
+          }
+          return;
+        }
+
+        cloudProjectsLoading = true;
+        cloudProjectsError = "";
+        if (typeof renderTree === "function") {
+          renderTree();
+        }
+        try {
+          const projects = await UndertwigCloud.listUndertwigProjects({
+            interactive: Boolean(opts.interactive),
+            allowConsentRetry: Boolean(opts.interactive),
+          });
+          cloudProjectsCache = Array.isArray(projects) ? projects : [];
+          cloudProjectsNeedConnect = false;
+          cloudProjectsError = "";
+        } catch (error) {
+          const message = (error && error.message) || "Could not list Google Drive projects.";
+          if (/connect|permission|scope|token|authoriz/i.test(message)) {
+            cloudProjectsNeedConnect = true;
+            cloudProjectsError = "";
+          } else {
+            cloudProjectsNeedConnect = false;
+            cloudProjectsError = message;
+          }
+        } finally {
+          cloudProjectsLoading = false;
+          if (typeof renderTree === "function") {
+            renderTree();
+          }
+        }
+      }
+
+      async function openCloudProject(projectName) {
+        const name = String(projectName || "").trim();
+        if (!name || cloudOpenInFlight) {
+          return;
+        }
+        if (!UndertwigAuth.isLoggedIn() || !UndertwigCloud.isAvailable()) {
+          setStatus("Log in with Google to open cloud projects.", true, { offerCloudLogin: true });
+          return;
+        }
+
+        if (listLocalRootProjects(state).includes(name)) {
+          if (name === getActiveProjectName()) {
+            setStatus("“" + name + "” is already the current project.");
+            return;
+          }
+          setCurrentProject(name);
+          return;
+        }
+
+        if (!UndertwigCloud.hasAccessToken()) {
+          setStatus("Connect Google Drive first, then open the cloud project.", true);
+          try {
+            UndertwigAuth.beginGoogleDriveTokenSignIn("/", { forceConsent: true });
+          } catch (error) {
+            setStatus((error && error.message) || "Could not start Google Drive connection.", true);
+          }
+          return;
+        }
+        if (!UndertwigCloud.pullProjectFromDrive) {
+          setStatus("Cloud open is not available. Hard-refresh the page and try again.", true);
+          return;
+        }
+
+        const active = state.files[state.activeFile];
+        if (active && !active.binary && UndertwigEditor && UndertwigEditor.getValue) {
+          active.content = UndertwigEditor.getValue();
+        }
+
+        cloudOpenInFlight = true;
+        startSyncSpinner();
+        setStatus("Opening “" + name + "” from Google Drive…");
+        try {
+          const pulled = await UndertwigCloud.pullProjectFromDrive(name, {
+            onProgress: function (message) {
+              setStatus(message || "Opening from Google Drive…");
+            },
+          });
+          applyPulledProject(pulled);
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          } catch (_error) {
+            // Local cache is optional.
+          }
+          collapsedFolders.delete(name);
+          persistCollapsedFolders();
+          render();
+          setStatus("Opened “" + name + "” from Google Drive.");
+          refreshCloudProjectsList();
+        } catch (error) {
+          setStatus((error && error.message) || "Could not open cloud project.", true);
+        } finally {
+          cloudOpenInFlight = false;
+          stopSyncSpinner();
+        }
       }
 
       tree.addEventListener("dragover", (event) => {

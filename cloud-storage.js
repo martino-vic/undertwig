@@ -1820,6 +1820,45 @@
   }
 
   /**
+   * List project folders under My Drive / Undertwig / (owned cloud projects).
+   * @returns {Promise<Array<{id: string, name: string, modifiedTime: string|null}>>}
+   */
+  async function listUndertwigProjects(options) {
+    const opts = options || {};
+    await connect({
+      interactive: Boolean(opts.interactive),
+      forcePrompt: Boolean(opts.forcePrompt),
+      allowConsentRetry: Boolean(opts.allowConsentRetry),
+    });
+    const rootId = await ensureUndertwigFolder();
+    const children = await listChildren(rootId);
+    const projects = [];
+    for (let i = 0; i < children.length; i += 1) {
+      const child = children[i];
+      if (!child || child.mimeType !== "application/vnd.google-apps.folder" || !child.id) {
+        continue;
+      }
+      const name = String(child.name || "").trim();
+      if (!name) {
+        continue;
+      }
+      projects.push({
+        id: String(child.id),
+        name: name,
+        modifiedTime: child.modifiedTime || null,
+      });
+      // Keep map warm so Save/Load resolve faster.
+      if (!getMappedFolderId(name)) {
+        setMappedProject(name, child.id, "owner");
+      }
+    }
+    projects.sort(function (a, b) {
+      return a.name.localeCompare(b.name);
+    });
+    return projects;
+  }
+
+  /**
    * Pull the named project's Google Drive folder into an Undertwig project snapshot.
    * Used by the file-tree Sync button (Drive → local tree).
    */
@@ -2353,6 +2392,7 @@
     joinSharedProject,
     syncFromDrive,
     pullProjectFromDrive,
+    listUndertwigProjects,
     shareProjectWithEmail,
     ensureProjectFolder,
     refreshProjectMeta,
