@@ -525,8 +525,7 @@
       }
 
       .tree-delete,
-      .tree-rename,
-      .tree-load {
+      .tree-rename {
         display: grid;
         width: 26px;
         height: 26px;
@@ -545,9 +544,7 @@
       .tree-item:hover .tree-delete,
       .tree-item:focus-within .tree-delete,
       .tree-item:hover .tree-rename,
-      .tree-item:focus-within .tree-rename,
-      .tree-item:hover .tree-load,
-      .tree-item:focus-within .tree-load {
+      .tree-item:focus-within .tree-rename {
         opacity: 1;
       }
 
@@ -561,17 +558,6 @@
         background: color-mix(in srgb, var(--brand) 18%, transparent);
         color: var(--brand-strong);
         border-color: transparent;
-      }
-
-      .tree-load:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--brand) 18%, transparent);
-        color: var(--brand-strong);
-        border-color: transparent;
-      }
-
-      .tree-load:disabled {
-        opacity: 0.45;
-        cursor: default;
       }
 
       .tree-icon {
@@ -8162,27 +8148,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         });
 
         item.appendChild(row);
-        if (
-          !isFolder &&
-          UndertwigAuth.isLoggedIn() &&
-          UndertwigCloud.isAvailable &&
-          UndertwigCloud.isAvailable() &&
-          (opts.section === "current" ||
-            opts.section === "other" ||
-            opts.section === "cloud")
-        ) {
-          const loadButton = document.createElement("button");
-          loadButton.type = "button";
-          loadButton.className = "tree-load";
-          loadButton.title = `Load ${node.name} from Google Drive`;
-          loadButton.setAttribute("aria-label", `Load ${node.path} from Google Drive`);
-          loadButton.textContent = "↓";
-          loadButton.addEventListener("click", (event) => {
-            event.stopPropagation();
-            loadSingleFileFromDrive(node.path);
-          });
-          item.appendChild(loadButton);
-        }
         if (opts.section === "current" || opts.section === "other") {
           const renameButton = document.createElement("button");
           renameButton.type = "button";
@@ -8891,95 +8856,6 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             (imported === 1 ? "" : "s") +
             ")."
         );
-      }
-
-      async function loadSingleFileFromDrive(filePath) {
-        const path = normalizePath(filePath);
-        if (!path || path.indexOf("/") < 0) {
-          setStatus("Choose a project file to load from Google Drive.", true);
-          return;
-        }
-        if (syncAbortController || syncInFlight || cloudOpenInFlight) {
-          setStatus("Wait for the current Drive load to finish, or cancel it first.", true);
-          return;
-        }
-        if (!UndertwigAuth.isLoggedIn() || !UndertwigCloud.isAvailable()) {
-          setStatus("Log in with Google to load a file from Drive.", true, { offerCloudLogin: true });
-          return;
-        }
-        if (!UndertwigCloud.hasAccessToken()) {
-          setStatus("Connect Google Drive first, then load the file.", true);
-          try {
-            UndertwigAuth.beginGoogleDriveTokenSignIn("/", { forceConsent: true });
-          } catch (error) {
-            setStatus((error && error.message) || "Could not start Google Drive connection.", true);
-          }
-          return;
-        }
-        if (!UndertwigCloud.pullFileFromDrive) {
-          setStatus("File Load is not available. Hard-refresh the page and try again.", true);
-          return;
-        }
-
-        const projectName = path.split("/")[0];
-        const abortController = new AbortController();
-        syncAbortController = abortController;
-        syncInFlight = true;
-        startSyncSpinner();
-        setStatus("Loading “" + path + "” from Google Drive…");
-        try {
-          const pulled = await UndertwigCloud.pullFileFromDrive(projectName, path, {
-            signal: abortController.signal,
-            onProgress: function (message) {
-              if (!abortController.signal.aborted) {
-                setStatus(message || "Loading file from Google Drive…");
-              }
-            },
-          });
-          if (abortController.signal.aborted) {
-            setStatus("Load cancelled.");
-            return;
-          }
-          if (!pulled || !pulled.path) {
-            throw new Error("Google Drive did not return that file.");
-          }
-
-          // Keep unsaved editor buffer if a different file is active.
-          const active = state.files[state.activeFile];
-          if (
-            active &&
-            !active.binary &&
-            state.activeFile !== pulled.path &&
-            UndertwigEditor &&
-            UndertwigEditor.getValue
-          ) {
-            active.content = UndertwigEditor.getValue();
-          }
-
-          state.files[pulled.path] = {
-            name: pulled.name,
-            content: pulled.content,
-            binary: Boolean(pulled.binary),
-          };
-          if (state.activeFile === pulled.path || !state.activeFile) {
-            state.activeFile = pulled.path;
-          }
-          persistProject({ skipCloud: true });
-          render();
-          setStatus("Loaded “" + pulled.path + "” from Google Drive.");
-        } catch (error) {
-          if (error && (error.name === "AbortError" || abortController.signal.aborted)) {
-            setStatus("Load cancelled.");
-            return;
-          }
-          setStatus((error && error.message) || "Could not load that file from Google Drive.", true);
-        } finally {
-          if (syncAbortController === abortController) {
-            syncAbortController = null;
-          }
-          syncInFlight = false;
-          stopSyncSpinner();
-        }
       }
 
       async function syncCurrentProjectFromDrive() {
