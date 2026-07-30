@@ -197,6 +197,27 @@
 
       .save-button[aria-busy="true"] {
         cursor: pointer;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.02em;
+        min-width: 7.5rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .writing-room-button[aria-busy="true"] {
+        cursor: wait;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.02em;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        max-width: 14rem;
+      }
+
+      .writing-room-countdown {
+        display: block;
+        margin-top: 0.65rem;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.95em;
       }
 
       /* Phone + tablet: tuck file-tree actions behind Options */
@@ -3097,7 +3118,7 @@
 
     <script src="auth-config.js?v=20260728q"></script>
     <script src="auth.js?v=20260729e"></script>
-    <script src="cloud-storage.js?v=20260730p"></script>
+    <script src="cloud-storage.js?v=20260730q"></script>
     <script src="invite.js?v=20260728q"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
@@ -3454,6 +3475,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let syncAbortController = null;
       let saveAbortController = null;
       let saveButtonDefaultHtml = null;
+      let saveSpinnerTimer = null;
+      let saveSpinnerFrame = 0;
+      let writingRoomSpinnerTimer = null;
+      let writingRoomSpinnerFrame = 0;
+      let writingRoomIdleCountdownTimer = null;
+      /** Auto-exit countdown once the inactivity dialog is open. */
+      const WRITING_ROOM_IDLE_AUTO_EXIT_MS = 2 * 60 * 1000;
 
       function rememberSaveButtonHtml() {
         const saveButton = document.getElementById("saveProject");
@@ -3485,11 +3513,22 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
         rememberSaveButtonHtml();
+        if (saveSpinnerTimer) {
+          clearInterval(saveSpinnerTimer);
+          saveSpinnerTimer = null;
+        }
         if (busy) {
           saveButton.setAttribute("aria-busy", "true");
           saveButton.disabled = false;
-          saveButton.textContent = ABORT_BUTTON_LABEL;
-          saveButton.title = "Cancel the current save";
+          saveSpinnerFrame = 0;
+          saveButton.textContent =
+            ABORT_BUTTON_LABEL + " " + CONVERT_SPINNER_FRAMES[0];
+          saveButton.title = "Cancel saving to Google Drive";
+          saveSpinnerTimer = setInterval(function () {
+            saveSpinnerFrame = (saveSpinnerFrame + 1) % CONVERT_SPINNER_FRAMES.length;
+            saveButton.textContent =
+              ABORT_BUTTON_LABEL + " " + CONVERT_SPINNER_FRAMES[saveSpinnerFrame];
+          }, 100);
         } else {
           saveButton.removeAttribute("aria-busy");
           saveButton.disabled = false;
@@ -3977,6 +4016,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       const WRITING_ROOM_IDLE_MINUTES = Math.round(WRITING_ROOM_IDLE_MS / 60000);
       const writingRoomButton = document.getElementById("writingRoomButton");
       let writingRoomBusyTimer = null;
+      let writingRoomBusyMode = null; // "enter" | "exit" | null
       let writingRoomDialogMode = null;
       let writingRoomGateDismissedKey = null; // project or "occupied:project" after view-only / OK
       let writingRoomGatePromise = null;
@@ -4023,22 +4063,32 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           cloudStatusText.appendChild(document.createTextNode(label));
           const link = document.createElement("a");
           const currentName = getActiveProjectName();
-          const shared =
-            UndertwigCloud.isCurrentProjectShared &&
-            UndertwigCloud.isCurrentProjectShared(currentName);
+          // Always open the Work desk project's Drive folder — never a stale/other id.
+          const mappedId =
+            currentName && UndertwigCloud.getMappedFolderId
+              ? UndertwigCloud.getMappedFolderId(currentName)
+              : null;
           const initialId =
-            fileId ||
+            mappedId ||
             (UndertwigCloud.setActiveProjectByName && currentName
               ? UndertwigCloud.setActiveProjectByName(currentName)
               : null) ||
-            UndertwigCloud.getProjectFileId();
-          link.href = driveProjectUrl(initialId);
+            fileId ||
+            null;
+          link.href = currentName
+            ? driveProjectUrl(initialId)
+            : "https://drive.google.com/drive/my-drive";
           link.target = "_blank";
           link.rel = "noopener";
           link.textContent = "Open in Google Drive";
+          link.title = currentName
+            ? "Open “" + currentName + "” on Google Drive"
+            : "Open Google Drive";
           cloudStatusText.appendChild(link);
-          if (UndertwigCloud.getOpenInDriveUrl) {
-            UndertwigCloud.getOpenInDriveUrl(initialId, { projectName: currentName || undefined })
+          if (currentName && UndertwigCloud.getOpenInDriveUrl) {
+            UndertwigCloud.getOpenInDriveUrl(initialId, {
+              projectName: currentName,
+            })
               .then((url) => {
                 if (url && cloudStatusMode === "connected" && link.isConnected) {
                   link.href = url;
@@ -6140,7 +6190,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         if (previous && previous !== name) {
           setStatus(
-            "Current project is now “" +
+            "Work desk is now “" +
               name +
               "”. “" +
               previous +
@@ -6149,7 +6199,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               "."
           );
         } else {
-          setStatus("Current project is “" + name + "”.");
+          setStatus("Work desk project is “" + name + "”.");
         }
         return true;
       }
@@ -6637,12 +6687,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         writingRoomIdlePromptOpen = true;
         const minutes = WRITING_ROOM_IDLE_MINUTES;
-        const choice = await showWritingRoomDialog("idle", { minutes: minutes });
+        const choice = await showWritingRoomDialog("idle", {
+          minutes: minutes,
+          autoExitMs: WRITING_ROOM_IDLE_AUTO_EXIT_MS,
+        });
         writingRoomIdlePromptOpen = false;
         if (choice === "confirm") {
           await exitWritingRoom({ skipConfirm: true });
           setStatus(
-            "Left the writing room after " + minutes + " minute" + (minutes === 1 ? "" : "s") + " of inactivity."
+            "Left the writing room after inactivity so others can edit again."
           );
         } else if (fileLockHeldProject) {
           resetWritingRoomIdleWatch();
@@ -6710,18 +6763,45 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
       }
 
-      function setWritingRoomBusy(busy) {
+      function setWritingRoomBusy(busy, mode) {
         writingRoomBusy = Boolean(busy);
+        writingRoomBusyMode = writingRoomBusy ? (mode || "enter") : null;
         if (writingRoomBusyTimer) {
           clearTimeout(writingRoomBusyTimer);
           writingRoomBusyTimer = null;
         }
+        if (writingRoomSpinnerTimer) {
+          clearInterval(writingRoomSpinnerTimer);
+          writingRoomSpinnerTimer = null;
+        }
         if (writingRoomBusy) {
           writingRoomBusyTimer = setTimeout(function () {
             writingRoomBusy = false;
+            writingRoomBusyMode = null;
             writingRoomBusyTimer = null;
+            if (writingRoomSpinnerTimer) {
+              clearInterval(writingRoomSpinnerTimer);
+              writingRoomSpinnerTimer = null;
+            }
+            if (writingRoomButton) {
+              writingRoomButton.removeAttribute("aria-busy");
+            }
             updateWritingRoomUi();
           }, 15000);
+          writingRoomSpinnerFrame = 0;
+          writingRoomSpinnerTimer = setInterval(function () {
+            writingRoomSpinnerFrame =
+              (writingRoomSpinnerFrame + 1) % CONVERT_SPINNER_FRAMES.length;
+            if (writingRoomButton && writingRoomBusy) {
+              writingRoomButton.setAttribute("aria-busy", "true");
+              const leaving = writingRoomBusyMode === "exit";
+              writingRoomButton.textContent =
+                (leaving ? "Leaving " : "Entering ") +
+                CONVERT_SPINNER_FRAMES[writingRoomSpinnerFrame];
+            }
+          }, 100);
+        } else if (writingRoomButton) {
+          writingRoomButton.removeAttribute("aria-busy");
         }
         updateWritingRoomUi();
       }
@@ -6747,6 +6827,18 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
           el.disabled = Boolean(writingRoomBusy);
+          if (writingRoomBusy && el === writingRoomButton) {
+            el.setAttribute("aria-busy", "true");
+            const leaving = writingRoomBusyMode === "exit";
+            el.textContent =
+              (leaving ? "Leaving " : "Entering ") +
+              CONVERT_SPINNER_FRAMES[writingRoomSpinnerFrame || 0];
+            el.title = leaving
+              ? "Leaving the writing room…"
+              : "Entering the writing room…";
+            return;
+          }
+          el.removeAttribute("aria-busy");
           el.textContent = label;
           if (title) {
             el.title = title;
@@ -6842,6 +6934,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       function closeWritingRoomDialog(result) {
+        if (writingRoomIdleCountdownTimer) {
+          clearInterval(writingRoomIdleCountdownTimer);
+          writingRoomIdleCountdownTimer = null;
+        }
         if (!writingRoomDialog) {
           return;
         }
@@ -6920,17 +7016,56 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             1,
             Number(dialogOpts.minutes) || WRITING_ROOM_IDLE_MINUTES
           );
+          const autoExitMs = Math.max(
+            30 * 1000,
+            Number(dialogOpts.autoExitMs) || WRITING_ROOM_IDLE_AUTO_EXIT_MS
+          );
+          let remainingMs = autoExitMs;
           title.textContent = "Still in the writing room?";
-          message.textContent =
-            "You've been inactive for " +
-            minutes +
-            " minute" +
-            (minutes === 1 ? "" : "s") +
-            ". Would you like to exit the writing room so others can edit “" +
-            projectName +
-            "”?";
+          function formatCountdown(ms) {
+            const totalSec = Math.max(0, Math.ceil(ms / 1000));
+            const mins = Math.floor(totalSec / 60);
+            const secs = totalSec % 60;
+            return mins + ":" + String(secs).padStart(2, "0");
+          }
+          function renderIdleMessage() {
+            message.replaceChildren();
+            message.appendChild(
+              document.createTextNode(
+                "You've been inactive for " +
+                  minutes +
+                  " minute" +
+                  (minutes === 1 ? "" : "s") +
+                  ". Would you like to exit the writing room so others can edit “" +
+                  projectName +
+                  "”?"
+              )
+            );
+            const countdown = document.createElement("span");
+            countdown.className = "writing-room-countdown";
+            countdown.setAttribute("aria-live", "polite");
+            countdown.textContent =
+              "Leaving automatically in " +
+              formatCountdown(remainingMs) +
+              " if you don’t respond.";
+            message.appendChild(countdown);
+          }
+          renderIdleMessage();
           addButton("Stay", "cancel");
           addButton("Exit writing room", "confirm", "modal-confirm");
+          if (writingRoomIdleCountdownTimer) {
+            clearInterval(writingRoomIdleCountdownTimer);
+          }
+          writingRoomIdleCountdownTimer = setInterval(function () {
+            remainingMs -= 1000;
+            if (remainingMs <= 0) {
+              clearInterval(writingRoomIdleCountdownTimer);
+              writingRoomIdleCountdownTimer = null;
+              closeWritingRoomDialog("confirm");
+              return;
+            }
+            renderIdleMessage();
+          }, 1000);
         } else {
           title.textContent = "Enter writing room";
           message.textContent =
@@ -7109,7 +7244,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
         }
         writingRoomGateDismissedKey = null;
-        setWritingRoomBusy(true);
+        setWritingRoomBusy(true, "enter");
         setStatus("Entering the writing room for “" + projectName + "”…");
         try {
           const result = await UndertwigCloud.acquireFileLock(projectName);
@@ -7162,7 +7297,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             return;
           }
         }
-        setWritingRoomBusy(true);
+        setWritingRoomBusy(true, "exit");
         await releaseHeldFileLock();
         writingRoomGateDismissedKey = null;
         setWritingRoomBusy(false);
@@ -7392,19 +7527,19 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return names;
       }
 
-      /** Where a project lands after leaving Current. */
+      /** Where a project lands after leaving Work desk. */
       function sectionLabelForProject(projectName) {
         if (!UndertwigAuth.isLoggedIn()) {
-          return "Other";
+          return "Drawer (local)";
         }
         const invitedNames = invitedProjectNames();
         if (invitedNames.has(projectName) || isInvitedProjectName(projectName)) {
-          return "Cloud (invited)";
+          return "Cloud";
         }
         if (isOwnCloudProjectName(projectName, invitedNames)) {
-          return "Cloud (own)";
+          return "Cloud";
         }
-        return "Other";
+        return "Drawer (local)";
       }
 
       function readDraggedProjectName(event) {
@@ -7519,10 +7654,22 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const currentNode = currentName
           ? root.children.find((node) => node.type === "folder" && node.path === currentName)
           : null;
-        // Locals always stay under Other (even when the same name is also listed in Cloud).
-        const otherNodes = root.children.filter(
-          (node) => node.type === "folder" && node.path !== currentName
-        );
+        // Drawer: local-only projects. Cloud own/invited belong under Cloud, not here.
+        const otherNodes = root.children.filter(function (node) {
+          if (node.type !== "folder" || node.path === currentName) {
+            return false;
+          }
+          if (!showCloudSection) {
+            return true;
+          }
+          if (cloudOwnNames.has(node.path) || invitedNames.has(node.path)) {
+            return false;
+          }
+          if (isInvitedProjectName(node.path)) {
+            return false;
+          }
+          return true;
+        });
 
         const currentSection = document.createElement("div");
         currentSection.className = "tree-section tree-section-current";
@@ -7540,14 +7687,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             : sharedCurrent || role === "writer" || role === "reader"
               ? " (invitee)"
               : " (owner)";
-        currentLabel.textContent = "Current" + currentSuffix;
+        currentLabel.textContent = "Work desk" + currentSuffix;
         currentSection.appendChild(currentLabel);
 
         const currentHint = document.createElement("div");
         currentHint.className = "tree-section-hint";
         currentHint.textContent = showCloudSection
-          ? "Drag a project here from Cloud or Other"
-          : "Drag a project here from Other";
+          ? "Drag a project here from Cloud or Drawer"
+          : "Drag a project here from Drawer";
         currentSection.appendChild(currentHint);
 
         const currentBody = document.createElement("div");
@@ -7564,7 +7711,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           );
         } else {
           currentBody.classList.add("is-empty");
-          currentBody.textContent = "No current project";
+          currentBody.textContent = "No project on the work desk";
         }
         currentSection.appendChild(currentBody);
 
@@ -7758,7 +7905,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         otherSection.className = "tree-section tree-section-other";
         const otherLabel = document.createElement("div");
         otherLabel.className = "tree-section-label";
-        otherLabel.textContent = showCloudSection ? "Other (on this device)" : "Other";
+        otherLabel.textContent = "Drawer (local)";
         otherSection.appendChild(otherLabel);
 
         const otherBody = document.createElement("div");
@@ -7779,7 +7926,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             });
         } else {
           otherBody.classList.add("is-empty");
-          otherBody.textContent = "No other projects yet";
+          otherBody.textContent = "No local projects in the drawer";
         }
         otherSection.appendChild(otherBody);
         tree.appendChild(otherSection);
@@ -8010,14 +8157,28 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         moveFile(dragSourcePath, "");
       });
 
+      function isHiddenLockPath(path) {
+        return String(path || "")
+          .split("/")
+          .some(function (part) {
+            return part === ".undertwig-locks";
+          });
+      }
+
       function buildTree() {
         const root = { name: "", path: "", type: "folder", children: new Map() };
 
         state.folders.forEach((folderPath) => {
+          if (isHiddenLockPath(folderPath)) {
+            return;
+          }
           addPath(root, folderPath, "folder");
         });
 
         Object.keys(state.files).forEach((filePath) => {
+          if (isHiddenLockPath(filePath)) {
+            return;
+          }
           addPath(root, filePath, "file");
         });
 
@@ -8074,8 +8235,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
         if (projectDraggable) {
           row.title = cloudOnly
-            ? "Drag to Current to download from Google Drive and open"
-            : "Drag to Current to make this the active project";
+            ? "Drag to Work desk to download from Google Drive and open"
+            : "Drag to Work desk to make this the active project";
           row.draggable = true;
         }
         row.innerHTML = `<span class="tree-icon">${isFolder ? (isCollapsed ? ">" : "v") : "-"}</span><span class="tree-name"></span>`;
@@ -8121,7 +8282,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 setStatus(
                   "Drag “" +
                     (rootName || "this project") +
-                    "” to Current to download it from Google Drive first.",
+                    "” to Work desk to download it from Google Drive first.",
                   true
                 );
                 return;
@@ -8617,7 +8778,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           });
 
         if (!entries.length) {
-          setStatus("Current project “" + project + "” has nothing to download yet.", true);
+          setStatus("Work desk project “" + project + "” has nothing to download yet.", true);
           return;
         }
 

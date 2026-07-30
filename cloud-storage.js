@@ -3101,8 +3101,14 @@
           return "https://drive.google.com/drive/folders/" + encodeURIComponent(meta.id);
         }
       } catch (_error) {
-        // Fall through to Undertwig root.
+        // Prefer mapped id over opening the Undertwig root.
       }
+      const mappedOnly = getMappedFolderId(projectName);
+      if (mappedOnly) {
+        return "https://drive.google.com/drive/folders/" + encodeURIComponent(mappedOnly);
+      }
+      // Do not open Undertwig root as a stand-in for the work-desk project.
+      return "https://drive.google.com/drive/my-drive";
     }
 
     const rootId = await ensureUndertwigFolder();
