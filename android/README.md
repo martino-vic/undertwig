@@ -19,13 +19,13 @@ This is **not** a Chrome Custom Tab / TWA wrapper of the website.
 - **Convert** with bundled SwiftLaTeX Wasm (needs network the first time packages are fetched from TeXlyre, same as the website)
 - View generated PDF
 - Compiler log sheet
-- Google Sign-In (editor top bar **Log in**; session stored on device)
+- Google Sign-In on home and editor (session stored on device)
 - When logged in, **Save** writes locally and syncs the project to Google Drive (`Undertwig/<project>/`)
+- Home list shows on-device projects, Drive-owned Undertwig folders (cool tint), and shared/invited folders (warm tint)
 
 ## Not in this build yet
 
-- Google Drive load / open from Drive
-- Collaborate / invites
+- Invite collaborators from the Android app
 - Monaco editor
 
 ## Google Sign-In setup
@@ -39,11 +39,11 @@ In Google Cloud Console for that project, also create an **Android** OAuth clien
 
 Without that Android client, Sign-In fails with a developer/configuration error.
 
-Drive Save requests the same Drive scope as the website (`https://www.googleapis.com/auth/drive`) after login / on first Save.
+Drive Save/list requests the same Drive scope as the website (`https://www.googleapis.com/auth/drive`) after login / on first Save.
 
 ## Package
 
-`com.undertwig.app` · version `0.1.36`
+`com.undertwig.app` · version `0.1.37`
 
 ## Store assets
 

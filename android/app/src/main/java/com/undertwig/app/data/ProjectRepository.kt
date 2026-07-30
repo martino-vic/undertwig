@@ -14,6 +14,50 @@ data class ProjectSummary(
     val id: String,
     val name: String,
     val updatedAt: Long,
+    val driveFolderId: String? = null,
+    val driveRole: String? = null,
+    val ownerEmail: String? = null,
+)
+
+enum class ProjectOrigin {
+    Local,
+    Drive,
+    Invited,
+}
+
+data class HomeProjectItem(
+    val key: String,
+    val name: String,
+    val updatedAt: Long,
+    val origin: ProjectOrigin,
+    val localId: String? = null,
+    val driveFolderId: String? = null,
+    val ownerEmail: String? = null,
+) {
+    val canDelete: Boolean get() = localId != null
+    val detailLabel: String
+        get() = when (origin) {
+            ProjectOrigin.Local -> "On this device"
+            ProjectOrigin.Drive -> "Google Drive"
+            ProjectOrigin.Invited ->
+                ownerEmail?.takeIf { it.isNotBlank() }?.let { "Shared · $it" } ?: "Shared with you"
+        }
+}
+
+data class DriveRemoteProject(
+    val folderId: String,
+    val name: String,
+    val modifiedTimeMs: Long,
+    val ownerEmail: String?,
+    val ownedByMe: Boolean,
+)
+
+data class DriveTreeEntry(
+    val path: String,
+    val name: String,
+    val id: String,
+    val mimeType: String,
+    val isFolder: Boolean,
 )
 
 data class ProjectFile(
@@ -68,10 +112,90 @@ class ProjectRepository(context: Context) {
                     id = dir.name,
                     name = meta.optString("name", dir.name),
                     updatedAt = meta.optLong("updatedAt", dir.lastModified()),
+                    driveFolderId = meta.optString("driveFolderId").takeIf { it.isNotBlank() },
+                    driveRole = meta.optString("driveRole").takeIf { it.isNotBlank() },
+                    ownerEmail = meta.optString("ownerEmail").takeIf { it.isNotBlank() },
                 )
             }
             ?.sortedByDescending { it.updatedAt }
             .orEmpty()
+    }
+
+    fun findByDriveFolderId(folderId: String): ProjectSummary? {
+        val want = folderId.trim()
+        if (want.isEmpty()) return null
+        return listProjects().firstOrNull { it.driveFolderId == want }
+    }
+
+    fun setDriveLink(
+        projectId: String,
+        folderId: String,
+        role: String,
+        ownerEmail: String? = null,
+    ) {
+        val dir = projectDir(projectId)
+        val meta = readMeta(dir) ?: JSONObject().put("name", projectId)
+        meta.put("driveFolderId", folderId)
+        meta.put("driveRole", role)
+        if (!ownerEmail.isNullOrBlank()) {
+            meta.put("ownerEmail", ownerEmail)
+        }
+        meta.put("updatedAt", System.currentTimeMillis())
+        File(dir, META_FILE).writeText(meta.toString())
+    }
+
+    /**
+     * Create or refresh a local project mirror of a Drive folder.
+     * @return local project id
+     */
+    fun importDriveMirror(
+        name: String,
+        driveFolderId: String,
+        role: String,
+        ownerEmail: String?,
+        folders: List<String>,
+        files: Map<String, ByteArray>,
+    ): String {
+        val existing = findByDriveFolderId(driveFolderId)
+        val id = existing?.id ?: UUID.randomUUID().toString()
+        val dir = File(root, id).also { it.mkdirs() }
+        if (existing == null) {
+            // Fresh import: clear anything unexpected.
+            dir.listFiles()?.forEach { child ->
+                if (child.name != META_FILE) child.deleteRecursively()
+            }
+        } else {
+            // Refresh: remove old content files/folders, keep meta briefly.
+            dir.listFiles()?.forEach { child ->
+                if (child.name != META_FILE) child.deleteRecursively()
+            }
+        }
+
+        for (folder in folders) {
+            val clean = normalizePath(folder)
+            if (clean.isNotEmpty()) {
+                File(dir, clean).mkdirs()
+            }
+        }
+        for ((relativePath, bytes) in files) {
+            val clean = normalizePath(relativePath)
+            if (clean.isEmpty()) continue
+            val out = File(dir, clean)
+            out.parentFile?.mkdirs()
+            out.writeBytes(bytes)
+        }
+
+        val safeName = name.trim().ifEmpty { "Untitled" }
+        val meta = JSONObject()
+            .put("name", safeName)
+            .put("updatedAt", System.currentTimeMillis())
+            .put("driveFolderId", driveFolderId)
+            .put("driveRole", role)
+        if (!ownerEmail.isNullOrBlank()) {
+            meta.put("ownerEmail", ownerEmail)
+        }
+        File(dir, META_FILE).writeText(meta.toString())
+        return id
     }
 
     /**

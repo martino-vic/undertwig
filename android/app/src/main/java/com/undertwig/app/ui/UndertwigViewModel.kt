@@ -10,9 +10,11 @@ import com.undertwig.app.data.AuthUser
 import com.undertwig.app.data.BibToolId
 import com.undertwig.app.data.DriveSyncRepository
 import com.undertwig.app.data.EnginePrefs
+import com.undertwig.app.data.HomeProjectItem
 import com.undertwig.app.data.LatexEngineId
 import com.undertwig.app.data.ProjectDownloadInfo
 import com.undertwig.app.data.ProjectFile
+import com.undertwig.app.data.ProjectOrigin
 import com.undertwig.app.data.ProjectRepository
 import com.undertwig.app.data.ProjectSummary
 import com.undertwig.app.engine.LatexEngine
@@ -29,7 +31,10 @@ import java.io.File
 import kotlin.coroutines.coroutineContext
 
 data class HomeUiState(
-    val projects: List<ProjectSummary> = emptyList(),
+    val projects: List<HomeProjectItem> = emptyList(),
+    val cloudLoading: Boolean = false,
+    val openingKey: String? = null,
+    val cloudError: String? = null,
 )
 
 data class AuthUiState(
@@ -76,8 +81,12 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     private var statusTickerJob: Job? = null
     private var statusFlashJob: Job? = null
     private var saveJob: Job? = null
+    private var cloudJob: Job? = null
+    private var openCloudJob: Job? = null
     @Volatile private var latestBusyStatus: String? = null
     @Volatile private var busyStatusStartedAtMs: Long = 0L
+    private var cachedDriveOwned: List<com.undertwig.app.data.DriveRemoteProject> = emptyList()
+    private var cachedDriveInvited: List<com.undertwig.app.data.DriveRemoteProject> = emptyList()
 
     private val _home = MutableStateFlow(HomeUiState())
     val home: StateFlow<HomeUiState> = _home.asStateFlow()
@@ -116,6 +125,7 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
                     "Signed in as ${user.email}",
                     Toast.LENGTH_SHORT,
                 ).show()
+                refreshCloudProjects(activity)
             } catch (_: AuthRepository.SignInCancelledException) {
                 _auth.update { it.copy(signingIn = false) }
             } catch (e: CancellationException) {
@@ -136,6 +146,9 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             authRepo.signOut()
             _auth.value = AuthUiState()
+            cachedDriveOwned = emptyList()
+            cachedDriveInvited = emptyList()
+            refreshProjects()
             _editor.update { it.copy(status = "Signed out") }
             Toast.makeText(getApplication(), "Signed out", Toast.LENGTH_SHORT).show()
         }
@@ -166,7 +179,172 @@ class UndertwigViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun refreshProjects() {
-        _home.update { it.copy(projects = repo.listProjects()) }
+        _home.update {
+            it.copy(
+                projects = buildHomeProjects(),
+                cloudError = if (_auth.value.user == null) null else it.cloudError,
+            )
+        }
+    }
+
+    fun refreshCloudProjects(activity: Activity) {
+        if (_auth.value.user == null) {
+            cachedDriveOwned = emptyList()
+            cachedDriveInvited = emptyList()
+            refreshProjects()
+            return
+        }
+        if (cloudJob?.isActive == true) return
+        cloudJob = viewModelScope.launch {
+            _home.update { it.copy(cloudLoading = true, cloudError = null) }
+            try {
+                val token = authRepo.ensureDriveAccessToken(activity)
+                val email = _auth.value.user?.email
+                val (owned, invited) = driveSync.listCloudProjects(token, email)
+                cachedDriveOwned = owned
+                cachedDriveInvited = invited
+                _home.update {
+                    it.copy(
+                        projects = buildHomeProjects(),
+                        cloudLoading = false,
+                        cloudError = null,
+                    )
+                }
+            } catch (e: AuthRepository.SignInCancelledException) {
+                _home.update {
+                    it.copy(
+                        cloudLoading = false,
+                        projects = buildHomeProjects(),
+                    )
+                }
+            } catch (e: CancellationException) {
+                _home.update { it.copy(cloudLoading = false) }
+                throw e
+            } catch (e: Exception) {
+                authRepo.clearDriveToken()
+                _home.update {
+                    it.copy(
+                        cloudLoading = false,
+                        cloudError = e.message ?: "Could not load Google Drive projects.",
+                        projects = buildHomeProjects(),
+                    )
+                }
+            }
+        }
+    }
+
+    fun openHomeProject(item: HomeProjectItem, activity: Activity, onOpened: () -> Unit) {
+        val localId = item.localId
+        if (localId != null) {
+            openProject(localId)
+            onOpened()
+            return
+        }
+
+        val folderId = item.driveFolderId
+        if (folderId.isNullOrBlank()) return
+        if (openCloudJob?.isActive == true) return
+        openCloudJob = viewModelScope.launch {
+            _home.update { it.copy(openingKey = item.key) }
+            try {
+                val token = authRepo.ensureDriveAccessToken(activity)
+                val role = when (item.origin) {
+                    ProjectOrigin.Invited -> "writer"
+                    ProjectOrigin.Drive, ProjectOrigin.Local -> "owner"
+                }
+                val id = driveSync.pullProject(
+                    accessToken = token,
+                    folderId = folderId,
+                    projectName = item.name,
+                    role = role,
+                    ownerEmail = item.ownerEmail,
+                )
+                openProject(id)
+                refreshCloudProjects(activity)
+                _home.update { it.copy(openingKey = null) }
+                onOpened()
+            } catch (e: AuthRepository.SignInCancelledException) {
+                _home.update { it.copy(openingKey = null) }
+                Toast.makeText(
+                    getApplication(),
+                    "Drive permission was cancelled.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            } catch (e: CancellationException) {
+                _home.update { it.copy(openingKey = null) }
+                throw e
+            } catch (e: Exception) {
+                authRepo.clearDriveToken()
+                _home.update { it.copy(openingKey = null) }
+                Toast.makeText(
+                    getApplication(),
+                    e.message ?: "Could not open Drive project.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    private fun buildHomeProjects(): List<HomeProjectItem> {
+        val local = repo.listProjects()
+        val items = mutableListOf<HomeProjectItem>()
+        val localFolderIds = local.mapNotNull { it.driveFolderId }.toSet()
+        val localNamesLower = local.map { it.name.trim().lowercase() }.toSet()
+
+        for (project in local) {
+            val role = project.driveRole?.lowercase()
+            val origin = when {
+                role == "writer" || role == "reader" -> ProjectOrigin.Invited
+                else -> ProjectOrigin.Local
+            }
+            items += HomeProjectItem(
+                key = "local:${project.id}",
+                name = project.name,
+                updatedAt = project.updatedAt,
+                origin = origin,
+                localId = project.id,
+                driveFolderId = project.driveFolderId,
+                ownerEmail = project.ownerEmail,
+            )
+        }
+
+        for (remote in cachedDriveOwned) {
+            if (remote.folderId in localFolderIds) continue
+            if (remote.name.trim().lowercase() in localNamesLower) continue
+            items += HomeProjectItem(
+                key = "drive:${remote.folderId}",
+                name = remote.name,
+                updatedAt = remote.modifiedTimeMs,
+                origin = ProjectOrigin.Drive,
+                localId = null,
+                driveFolderId = remote.folderId,
+                ownerEmail = remote.ownerEmail,
+            )
+        }
+
+        for (remote in cachedDriveInvited) {
+            if (remote.folderId in localFolderIds) continue
+            // Already shown as local invited mirror.
+            if (items.any {
+                    it.origin == ProjectOrigin.Invited &&
+                        (it.driveFolderId == remote.folderId ||
+                            it.name.trim().equals(remote.name.trim(), ignoreCase = true))
+                }
+            ) {
+                continue
+            }
+            items += HomeProjectItem(
+                key = "invite:${remote.folderId}",
+                name = remote.name,
+                updatedAt = remote.modifiedTimeMs,
+                origin = ProjectOrigin.Invited,
+                localId = null,
+                driveFolderId = remote.folderId,
+                ownerEmail = remote.ownerEmail,
+            )
+        }
+
+        return items.sortedByDescending { it.updatedAt }
     }
 
     fun createProject(name: String) {

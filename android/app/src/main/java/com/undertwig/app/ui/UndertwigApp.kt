@@ -27,12 +27,21 @@ fun UndertwigApp(
         composable("home") {
             HomeScreen(
                 projects = home.projects,
-                onOpen = { id ->
-                    viewModel.openProject(id)
-                    navController.navigate("editor")
+                authUser = auth.user,
+                signingIn = auth.signingIn,
+                cloudLoading = home.cloudLoading,
+                openingKey = home.openingKey,
+                cloudError = home.cloudError,
+                onOpen = { item ->
+                    viewModel.openHomeProject(item, activity) {
+                        navController.navigate("editor")
+                    }
                 },
                 onCreate = { name -> viewModel.createProject(name) },
                 onDelete = { id -> viewModel.deleteProject(id) },
+                onLogin = { viewModel.signInWithGoogle(activity) },
+                onLogout = viewModel::signOut,
+                onRefreshCloud = { viewModel.refreshCloudProjects(activity) },
             )
         }
         composable("editor") {

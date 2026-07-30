@@ -36,6 +36,7 @@ class DriveSyncRepository(
 
         val rootId = ensureUndertwigFolder(accessToken)
         val projectFolderId = ensureChildFolder(accessToken, rootId, name)
+        projects.setDriveLink(projectId, projectFolderId, role = "owner")
 
         for (folder in projects.listFolders(projectId)) {
             ensurePathFolders(accessToken, projectFolderId, folder)
@@ -60,6 +61,196 @@ class DriveSyncRepository(
                 existingId = existing?.optString("id")?.takeIf { it.isNotBlank() },
             )
         }
+    }
+
+    /**
+     * Owned projects under My Drive / Undertwig /, plus folders shared with the user.
+     */
+    suspend fun listCloudProjects(
+        accessToken: String,
+        userEmail: String?,
+    ): Pair<List<DriveRemoteProject>, List<DriveRemoteProject>> = withContext(Dispatchers.IO) {
+        val me = userEmail?.trim()?.lowercase().orEmpty()
+        val owned = mutableListOf<DriveRemoteProject>()
+        val invited = mutableListOf<DriveRemoteProject>()
+
+        val rootId = runCatching { ensureUndertwigFolder(accessToken) }.getOrNull()
+        val ownedIds = mutableSetOf<String>()
+        if (rootId != null) {
+            for (child in listChildren(accessToken, rootId)) {
+                if (child.optString("mimeType") != "application/vnd.google-apps.folder") continue
+                val id = child.optString("id").takeIf { it.isNotBlank() } ?: continue
+                val name = child.optString("name").ifBlank { "Untitled" }
+                ownedIds += id
+                owned += DriveRemoteProject(
+                    folderId = id,
+                    name = name,
+                    modifiedTimeMs = parseDriveTime(child.optString("modifiedTime")),
+                    ownerEmail = firstOwnerEmail(child) ?: me.takeIf { it.isNotEmpty() },
+                    ownedByMe = true,
+                )
+            }
+        }
+
+        val shared = driveSearch(
+            accessToken,
+            "sharedWithMe = true and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+            pageSize = 100,
+        )
+        for (i in 0 until shared.length()) {
+            val child = shared.getJSONObject(i)
+            val id = child.optString("id").takeIf { it.isNotBlank() } ?: continue
+            if (id in ownedIds || id == rootId) continue
+            val name = child.optString("name").ifBlank { "Untitled" }
+            if (name.equals(CLOUD_FOLDER_NAME, ignoreCase = true)) continue
+            val owner = firstOwnerEmail(child)
+            val ownedByMe = !me.isEmpty() && owner?.equals(me, ignoreCase = true) == true
+            if (ownedByMe) continue
+            invited += DriveRemoteProject(
+                folderId = id,
+                name = name,
+                modifiedTimeMs = parseDriveTime(child.optString("modifiedTime")),
+                ownerEmail = owner,
+                ownedByMe = false,
+            )
+        }
+
+        owned.sortedByDescending { it.modifiedTimeMs } to
+            invited.sortedByDescending { it.modifiedTimeMs }
+    }
+
+    /**
+     * Download a Drive project folder into a local mirror and return the local project id.
+     */
+    suspend fun pullProject(
+        accessToken: String,
+        folderId: String,
+        projectName: String,
+        role: String,
+        ownerEmail: String?,
+    ): String = withContext(Dispatchers.IO) {
+        val meta = getJson(
+            accessToken,
+            "$DRIVE_API/files/${Uri.encode(folderId)}" +
+                "?supportsAllDrives=true&fields=id,name,mimeType,trashed,owners",
+        )
+        if (meta.optBoolean("trashed", false)) {
+            error("That Google Drive folder was trashed.")
+        }
+        val name = projectName.trim().ifEmpty { meta.optString("name").ifBlank { "Untitled" } }
+        val owner = ownerEmail ?: firstOwnerEmail(meta)
+
+        val entries = listFolderTree(accessToken, folderId, "")
+        val folders = entries.filter { it.isFolder }.map { it.path }
+        val fileEntries = entries.filter { !it.isFolder }
+        if (fileEntries.isEmpty()) {
+            error(
+                "“$name” has no downloadable files yet. Open it in Undertwig on the web and Save, then try again.",
+            )
+        }
+
+        val files = linkedMapOf<String, ByteArray>()
+        for (entry in fileEntries) {
+            files[entry.path] = downloadDriveFile(accessToken, entry.id)
+        }
+
+        projects.importDriveMirror(
+            name = name,
+            driveFolderId = folderId,
+            role = role,
+            ownerEmail = owner,
+            folders = folders,
+            files = files,
+        )
+    }
+
+    private fun listChildren(accessToken: String, folderId: String): List<JSONObject> {
+        val all = mutableListOf<JSONObject>()
+        var pageToken = ""
+        val query = "'${escapeQuery(folderId)}' in parents and trashed = false"
+        do {
+            var url =
+                "$DRIVE_API/files?supportsAllDrives=true&includeItemsFromAllDrives=true" +
+                    "&pageSize=100" +
+                    "&fields=" + URLEncoder.encode(
+                        "nextPageToken,files(id,name,mimeType,modifiedTime,owners)",
+                        "UTF-8",
+                    ) +
+                    "&q=" + URLEncoder.encode(query, "UTF-8")
+            if (pageToken.isNotEmpty()) {
+                url += "&pageToken=" + URLEncoder.encode(pageToken, "UTF-8")
+            }
+            val payload = getJson(accessToken, url)
+            val files = payload.optJSONArray("files") ?: JSONArray()
+            for (i in 0 until files.length()) {
+                all += files.getJSONObject(i)
+            }
+            pageToken = payload.optString("nextPageToken")
+        } while (pageToken.isNotBlank())
+        return all
+    }
+
+    private fun listFolderTree(
+        accessToken: String,
+        folderId: String,
+        prefix: String,
+    ): List<DriveTreeEntry> {
+        val out = mutableListOf<DriveTreeEntry>()
+        for (child in listChildren(accessToken, folderId)) {
+            val id = child.optString("id").takeIf { it.isNotBlank() } ?: continue
+            val name = child.optString("name").takeIf { it.isNotBlank() } ?: continue
+            val mime = child.optString("mimeType")
+            val path = if (prefix.isEmpty()) name else "$prefix/$name"
+            // Skip Google Docs/Sheets/etc. — Undertwig stores plain project files.
+            if (mime.startsWith("application/vnd.google-apps.") &&
+                mime != "application/vnd.google-apps.folder"
+            ) {
+                continue
+            }
+            if (mime == "application/vnd.google-apps.folder") {
+                out += DriveTreeEntry(path = path, name = name, id = id, mimeType = mime, isFolder = true)
+                out += listFolderTree(accessToken, id, path)
+            } else {
+                out += DriveTreeEntry(path = path, name = name, id = id, mimeType = mime, isFolder = false)
+            }
+        }
+        return out
+    }
+
+    private fun downloadDriveFile(accessToken: String, fileId: String): ByteArray {
+        val url =
+            "$DRIVE_API/files/${Uri.encode(fileId)}?alt=media&supportsAllDrives=true"
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 30_000
+            readTimeout = 120_000
+            setRequestProperty("Authorization", "Bearer $accessToken")
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                throw IllegalStateException(readError(connection, "Could not download a Drive file."))
+            }
+            return connection.inputStream.use { it.readBytes() }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun firstOwnerEmail(meta: JSONObject): String? {
+        val owners = meta.optJSONArray("owners") ?: return null
+        for (i in 0 until owners.length()) {
+            val email = owners.optJSONObject(i)?.optString("emailAddress")?.trim()
+            if (!email.isNullOrBlank()) return email
+        }
+        return null
+    }
+
+    private fun parseDriveTime(value: String?): Long {
+        if (value.isNullOrBlank()) return 0L
+        return runCatching {
+            java.time.Instant.parse(value).toEpochMilli()
+        }.getOrDefault(0L)
     }
 
     private fun ensureUndertwigFolder(accessToken: String): String {
@@ -154,7 +345,7 @@ class DriveSyncRepository(
     private fun driveSearch(accessToken: String, query: String, pageSize: Int): JSONArray {
         val url =
             "$DRIVE_API/files?supportsAllDrives=true&includeItemsFromAllDrives=true" +
-                "&fields=files(id,name,mimeType)" +
+                "&fields=files(id,name,mimeType,modifiedTime,owners)" +
                 "&q=${URLEncoder.encode(query, "UTF-8")}" +
                 "&pageSize=$pageSize"
         val payload = getJson(accessToken, url)
