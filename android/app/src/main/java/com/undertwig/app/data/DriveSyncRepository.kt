@@ -603,8 +603,8 @@ class DriveSyncRepository(
     }
 
     /**
-     * Persist an accepted invite so the Android home screen can list it even when Drive
-     * does not put link-shared folders into sharedWithMe.
+     * Persist an accepted invite under Drive/Undertwig so the Android home screen can
+     * list it after a desktop open + refresh (appDataFolder is per OAuth client).
      */
     suspend fun rememberInvitedProject(
         accessToken: String,
@@ -667,17 +667,46 @@ class DriveSyncRepository(
     }
 
     private fun readInvitedRegistry(accessToken: String): List<JSONObject> {
-        val fileId = findAppDataFileId(accessToken, INVITED_REGISTRY_NAME) ?: return emptyList()
+        val fromUndertwig = readUndertwigRegistry(accessToken)
+        if (fromUndertwig.isNotEmpty()) {
+            return fromUndertwig
+        }
+        val legacy = readLegacyAppDataRegistry(accessToken)
+        if (legacy.isNotEmpty()) {
+            // One-time migrate so both OAuth clients share the same list.
+            runCatching { writeInvitedRegistry(accessToken, legacy) }
+        }
+        return legacy
+    }
+
+    private fun readUndertwigRegistry(accessToken: String): List<JSONObject> {
+        val rootId = runCatching { ensureUndertwigFolder(accessToken) }.getOrNull() ?: return emptyList()
+        val remote = findNamedChild(accessToken, rootId, INVITED_REGISTRY_NAME, mimeType = null)
+            ?: return emptyList()
+        if (remote.optString("mimeType") == "application/vnd.google-apps.folder") {
+            return emptyList()
+        }
+        val fileId = remote.optString("id").takeIf { it.isNotBlank() } ?: return emptyList()
         return runCatching {
-            val bytes = downloadAppDataFile(accessToken, fileId)
-            val payload = JSONObject(String(bytes, StandardCharsets.UTF_8))
-            val arr = payload.optJSONArray("projects") ?: return emptyList()
-            buildList {
-                for (i in 0 until arr.length()) {
-                    arr.optJSONObject(i)?.let { add(it) }
-                }
-            }
+            parseRegistryBytes(downloadDriveFile(accessToken, fileId))
         }.getOrDefault(emptyList())
+    }
+
+    private fun readLegacyAppDataRegistry(accessToken: String): List<JSONObject> {
+        val fileId = findAppDataFileId(accessToken, LEGACY_APPDATA_REGISTRY_NAME) ?: return emptyList()
+        return runCatching {
+            parseRegistryBytes(downloadAppDataFile(accessToken, fileId))
+        }.getOrDefault(emptyList())
+    }
+
+    private fun parseRegistryBytes(bytes: ByteArray): List<JSONObject> {
+        val payload = JSONObject(String(bytes, StandardCharsets.UTF_8))
+        val arr = payload.optJSONArray("projects") ?: return emptyList()
+        return buildList {
+            for (i in 0 until arr.length()) {
+                arr.optJSONObject(i)?.let { add(it) }
+            }
+        }
     }
 
     private fun downloadAppDataFile(accessToken: String, fileId: String): ByteArray {
@@ -706,8 +735,25 @@ class DriveSyncRepository(
             JSONArray().also { arr -> projects.forEach { arr.put(it) } },
         )
         val bytes = payload.toString().toByteArray(StandardCharsets.UTF_8)
-        val existingId = findAppDataFileId(accessToken, INVITED_REGISTRY_NAME)
-        uploadAppDataJson(accessToken, INVITED_REGISTRY_NAME, bytes, existingId)
+        val rootId = ensureUndertwigFolder(accessToken)
+        val existing = findNamedChild(accessToken, rootId, INVITED_REGISTRY_NAME, mimeType = null)
+        val existingId = existing
+            ?.takeUnless { it.optString("mimeType") == "application/vnd.google-apps.folder" }
+            ?.optString("id")
+            ?.takeIf { it.isNotBlank() }
+        val tmp = File.createTempFile("undertwig-invites-", ".json")
+        try {
+            tmp.writeBytes(bytes)
+            uploadFile(
+                accessToken = accessToken,
+                parentId = rootId,
+                fileName = INVITED_REGISTRY_NAME,
+                file = tmp,
+                existingId = existingId,
+            )
+        } finally {
+            tmp.delete()
+        }
     }
 
     private fun findAppDataFileId(accessToken: String, fileName: String): String? {
@@ -727,51 +773,6 @@ class DriveSyncRepository(
             }
         }
         return null
-    }
-
-    private fun uploadAppDataJson(
-        accessToken: String,
-        fileName: String,
-        bytes: ByteArray,
-        existingId: String?,
-    ) {
-        val metadata = JSONObject()
-            .put("name", fileName)
-            .put("mimeType", "application/json")
-        if (existingId.isNullOrBlank()) {
-            metadata.put("parents", JSONArray().put("appDataFolder"))
-        }
-        val boundary = "undertwig_${System.currentTimeMillis()}"
-        val body = ByteArrayOutputStream()
-        DataOutputStream(body).use { out ->
-            out.writeBytes("--$boundary\r\n")
-            out.writeBytes("Content-Type: application/json; charset=UTF-8\r\n\r\n")
-            out.write(metadata.toString().toByteArray(StandardCharsets.UTF_8))
-            out.writeBytes("\r\n--$boundary\r\n")
-            out.writeBytes("Content-Type: application/json\r\n\r\n")
-            out.write(bytes)
-            out.writeBytes("\r\n--$boundary--\r\n")
-        }
-        val url = if (existingId.isNullOrBlank()) {
-            "$DRIVE_UPLOAD/files?uploadType=multipart&spaces=appDataFolder&fields=id"
-        } else {
-            "$DRIVE_UPLOAD/files/${Uri.encode(existingId)}?uploadType=multipart&fields=id"
-        }
-        val method = if (existingId.isNullOrBlank()) "POST" else "PATCH"
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            doOutput = true
-            setRequestProperty("Authorization", "Bearer $accessToken")
-            setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
-            connectTimeout = 30_000
-            readTimeout = 60_000
-        }
-        connection.outputStream.use { it.write(body.toByteArray()) }
-        val code = connection.responseCode
-        if (code !in 200..299) {
-            throwDriveHttpError(code, connection, "Could not save invited project list.")
-        }
-        connection.disconnect()
     }
 
     /**
@@ -1226,7 +1227,9 @@ class DriveSyncRepository(
 
     companion object {
         private const val CLOUD_FOLDER_NAME = "Undertwig"
-        private const val INVITED_REGISTRY_NAME = "undertwig-invited-projects-v1.json"
+        // Lives under Drive/Undertwig so web + Android share it (appData is per OAuth client).
+        private const val INVITED_REGISTRY_NAME = ".undertwig-invited-projects-v1.json"
+        private const val LEGACY_APPDATA_REGISTRY_NAME = "undertwig-invited-projects-v1.json"
         private const val LOCK_DIR_NAME = ".undertwig-locks"
         private const val PROJECT_LOCK_FILE = "project.json"
         private const val LOCK_STALE_MS = 45 * 1000L

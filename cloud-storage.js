@@ -2371,7 +2371,10 @@
     return invited;
   }
 
-  const INVITED_REGISTRY_NAME = "undertwig-invited-projects-v1.json";
+  // Shared across web + Android (full Drive scope). appDataFolder is per OAuth client
+  // and cannot sync invites from desktop to the phone.
+  const INVITED_REGISTRY_NAME = ".undertwig-invited-projects-v1.json";
+  const LEGACY_APPDATA_REGISTRY_NAME = "undertwig-invited-projects-v1.json";
 
   async function findAppDataFileId(fileName) {
     const response = await driveFetch(
@@ -2393,8 +2396,32 @@
     return null;
   }
 
-  async function readInvitedRegistry() {
-    const fileId = await findAppDataFileId(INVITED_REGISTRY_NAME);
+  async function findUndertwigRegistryFileId() {
+    try {
+      const rootId = await ensureUndertwigFolder();
+      const existing = await findNamedChild(rootId, INVITED_REGISTRY_NAME, null);
+      return existing && existing.id ? String(existing.id) : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  async function parseRegistryPayload(payload) {
+    if (!payload) {
+      return [];
+    }
+    if (typeof payload === "string") {
+      try {
+        payload = JSON.parse(payload);
+      } catch (_error) {
+        return [];
+      }
+    }
+    return Array.isArray(payload.projects) ? payload.projects : [];
+  }
+
+  async function readLegacyAppDataRegistry() {
+    const fileId = await findAppDataFileId(LEGACY_APPDATA_REGISTRY_NAME);
     if (!fileId) {
       return [];
     }
@@ -2406,22 +2433,52 @@
       if (!response.ok) {
         return [];
       }
-      const payload = await response.json();
-      return Array.isArray(payload && payload.projects) ? payload.projects : [];
+      return parseRegistryPayload(await response.json());
     } catch (_error) {
       return [];
     }
   }
 
+  async function readInvitedRegistry() {
+    try {
+      const fileId = await findUndertwigRegistryFileId();
+      if (fileId) {
+        const response = await driveFetch(
+          DRIVE_API + "/files/" + encodeURIComponent(fileId) + "?alt=media&supportsAllDrives=true",
+          { method: "GET" }
+        );
+        if (response.ok) {
+          const projects = await parseRegistryPayload(await response.json());
+          if (projects.length) {
+            return projects;
+          }
+        }
+      }
+    } catch (_error) {
+      // Fall through to legacy appData.
+    }
+    const legacy = await readLegacyAppDataRegistry();
+    if (legacy.length) {
+      // One-time migrate so Android (different OAuth client) can see desktop invites.
+      try {
+        await writeInvitedRegistry(legacy);
+      } catch (_error) {
+        // Best-effort.
+      }
+    }
+    return legacy;
+  }
+
   async function writeInvitedRegistry(projects) {
     const body = JSON.stringify({ projects: projects || [] });
-    const existingId = await findAppDataFileId(INVITED_REGISTRY_NAME);
+    const rootId = await ensureUndertwigFolder();
+    const existingId = await findUndertwigRegistryFileId();
     const metadata = {
       name: INVITED_REGISTRY_NAME,
       mimeType: "application/json",
     };
     if (!existingId) {
-      metadata.parents = ["appDataFolder"];
+      metadata.parents = [rootId];
     }
     const boundary = "undertwig_" + Date.now();
     const multipart =
@@ -2440,8 +2497,8 @@
       ? DRIVE_UPLOAD +
         "/files/" +
         encodeURIComponent(existingId) +
-        "?uploadType=multipart&fields=id"
-      : DRIVE_UPLOAD + "/files?uploadType=multipart&spaces=appDataFolder&fields=id";
+        "?uploadType=multipart&supportsAllDrives=true&fields=id"
+      : DRIVE_UPLOAD + "/files?uploadType=multipart&supportsAllDrives=true&fields=id";
     const response = await driveFetch(url, {
       method: existingId ? "PATCH" : "POST",
       headers: {
@@ -2454,7 +2511,7 @@
     }
   }
 
-  /** Remember an accepted invite in Drive appData so Android home can list it. */
+  /** Remember an accepted invite in Drive/Undertwig so Android home can list it after refresh. */
   async function rememberInvitedProject(folderId, projectName, ownerEmail) {
     const id = String(folderId || "").trim();
     if (!id) {
