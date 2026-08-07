@@ -9,6 +9,8 @@
   const MONACO_VER = "0.52.2";
   const MONACO_BASE =
     "https://cdn.jsdelivr.net/npm/monaco-editor@" + MONACO_VER + "/min";
+  /** Docs at/above this size use a lighter editor profile (wrap/fold/highlight off). */
+  const LARGE_DOC_CHARS = 48000;
 
   let hostEl = null;
   let onChange = null;
@@ -23,6 +25,27 @@
   let suppressChange = false;
   let resizeObserver = null;
   let latexLanguageRegistered = false;
+  let changeEmitTimer = null;
+  let largeDocMode = false;
+
+  function isLargeDocument(text) {
+    return String(text == null ? "" : text).length >= LARGE_DOC_CHARS;
+  }
+
+  function clearChangeEmitTimer() {
+    if (changeEmitTimer) {
+      clearTimeout(changeEmitTimer);
+      changeEmitTimer = null;
+    }
+  }
+
+  function monacoLanguageForPath(path) {
+    const id = languageForPath(path);
+    if (id === "latex") return "latex";
+    if (id === "markdown") return "markdown";
+    if (id === "json") return "json";
+    return "plaintext";
+  }
 
   function runSaveShortcut() {
     if (typeof onSaveShortcut === "function") {
@@ -195,7 +218,25 @@
     if (suppressChange || typeof onChange !== "function") {
       return;
     }
-    onChange(getValue());
+    // Do not pull the full document string on every keystroke. Notify dirty;
+    // the host debounces getValue() + workspace persist.
+    clearChangeEmitTimer();
+    const delay = largeDocMode ? 120 : 0;
+    if (delay === 0) {
+      onChange(null);
+      return;
+    }
+    changeEmitTimer = setTimeout(function () {
+      changeEmitTimer = null;
+      if (!suppressChange && typeof onChange === "function") {
+        onChange(null);
+      }
+    }, delay);
+  }
+
+  /** Drop a pending debounced dirty ping (host is about to read getValue itself). */
+  function flushPendingChange() {
+    clearChangeEmitTimer();
   }
 
   function loadScript(src) {
@@ -305,10 +346,12 @@
           },
         });
 
-        const initialLang = languageForPath(pendingPath);
+        const initialLang = monacoLanguageForPath(pendingPath);
+        largeDocMode = isLargeDocument(pendingValue);
         const editor = monaco.editor.create(hostEl, {
           value: pendingValue,
-          language: initialLang === "latex" ? "latex" : initialLang,
+          // Keep LaTeX highlighting even on large docs; other opts stay light.
+          language: initialLang,
           theme: "undertwig-dark",
           automaticLayout: false,
           fontFamily:
@@ -317,12 +360,21 @@
           lineHeight: 22,
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
-          wordWrap: "on",
+          wordWrap: largeDocMode ? "off" : "on",
           padding: { top: 18, bottom: 18 },
           tabSize: 2,
-          renderLineHighlight: "line",
+          renderLineHighlight: largeDocMode ? "none" : "line",
           overviewRulerLanes: 0,
-          folding: true,
+          folding: !largeDocMode,
+          matchBrackets: largeDocMode ? "never" : "always",
+          occurrencesHighlight: largeDocMode ? "off" : "singleFile",
+          selectionHighlight: !largeDocMode,
+          links: !largeDocMode,
+          colorDecorators: false,
+          stickyScroll: { enabled: false },
+          unicodeHighlight: { ambiguousCharacters: false },
+          // Cap per-line work on huge/minified lines; normal .tex lines stay highlighted.
+          maxTokenizationLineLength: largeDocMode ? 5000 : 20000,
           readOnly: pendingReadOnly,
           ariaLabel: "LaTeX source editor",
           // No predictive / ghost / word-based suggestions while typing.
@@ -339,6 +391,28 @@
             preview: false,
           },
         });
+
+        function applyDocumentPerfMode(text) {
+          const nextLarge = isLargeDocument(text);
+          const lang = monacoLanguageForPath(pendingPath);
+          if (nextLarge !== largeDocMode) {
+            largeDocMode = nextLarge;
+            editor.updateOptions({
+              wordWrap: largeDocMode ? "off" : "on",
+              folding: !largeDocMode,
+              renderLineHighlight: largeDocMode ? "none" : "line",
+              matchBrackets: largeDocMode ? "never" : "always",
+              occurrencesHighlight: largeDocMode ? "off" : "singleFile",
+              selectionHighlight: !largeDocMode,
+              links: !largeDocMode,
+              maxTokenizationLineLength: largeDocMode ? 5000 : 20000,
+            });
+          }
+          const model = editor.getModel();
+          if (model && model.getLanguageId() !== lang) {
+            monaco.editor.setModelLanguage(model, lang);
+          }
+        }
 
         editor.onDidChangeModelContent(function () {
           emitChange();
@@ -390,13 +464,27 @@
           getValue: function () {
             return editor.getValue();
           },
+          getValueLength: function () {
+            const model = editor.getModel();
+            return model ? model.getValueLength() : 0;
+          },
           setValue: function (text, force) {
             const next = text == null ? "" : String(text);
-            if (force || editor.getValue() !== next) {
-              suppressChange = true;
-              editor.setValue(next);
-              suppressChange = false;
+            if (!force) {
+              const model = editor.getModel();
+              if (
+                model &&
+                model.getValueLength() === next.length &&
+                editor.getValue() === next
+              ) {
+                applyDocumentPerfMode(next);
+                return;
+              }
             }
+            suppressChange = true;
+            editor.setValue(next);
+            suppressChange = false;
+            applyDocumentPerfMode(next);
           },
           setReadOnly: function (readOnly) {
             editor.updateOptions({ readOnly: Boolean(readOnly) });
@@ -412,19 +500,12 @@
             if (!model) {
               return;
             }
-            const id = languageForPath(path);
-            const lang =
-              id === "latex"
-                ? "latex"
-                : id === "markdown"
-                  ? "markdown"
-                  : id === "json"
-                    ? "json"
-                    : "plaintext";
+            const lang = monacoLanguageForPath(path);
             if (model.getLanguageId() !== lang) {
               monaco.editor.setModelLanguage(model, lang);
             }
           },
+          applyDocumentPerfMode: applyDocumentPerfMode,
           layout: function () {
             editor.layout();
           },
@@ -557,11 +638,25 @@
         if (languageForPath(pendingPath) !== "latex") {
           return builder.finish();
         }
-        // Full-doc tokenize: visibleRanges is often empty on first paint.
         const doc = view.state.doc;
-        for (let n = 1; n <= doc.lines; n += 1) {
-          const line = doc.line(n);
-          tokenizeLatexLine(line.text, line.from, builder);
+        largeDocMode = doc.length >= LARGE_DOC_CHARS;
+        // Always highlight, but only visible lines (keeps large mobile docs smooth).
+        const ranges =
+          view.visibleRanges && view.visibleRanges.length
+            ? view.visibleRanges
+            : [{ from: 0, to: doc.length }];
+        for (let r = 0; r < ranges.length; r += 1) {
+          const from = ranges[r].from;
+          const to = ranges[r].to;
+          const startLine = doc.lineAt(from).number;
+          const endLine = doc.lineAt(Math.max(from, to - 1)).number;
+          for (let n = startLine; n <= endLine; n += 1) {
+            const line = doc.line(n);
+            if (largeDocMode && line.text.length > 5000) {
+              continue;
+            }
+            tokenizeLatexLine(line.text, line.from, builder);
+          }
         }
         return builder.finish();
       }
@@ -685,9 +780,13 @@
         getValue: function () {
           return view.state.doc.toString();
         },
+        getValueLength: function () {
+          return view.state.doc.length;
+        },
         setValue: function (text, force) {
           const next = text == null ? "" : String(text);
           if (!force && view.state.doc.toString() === next) {
+            largeDocMode = isLargeDocument(next);
             return;
           }
           suppressChange = true;
@@ -695,6 +794,7 @@
             changes: { from: 0, to: view.state.doc.length, insert: next },
           });
           suppressChange = false;
+          largeDocMode = isLargeDocument(next);
         },
         setReadOnly: function (readOnly) {
           view.dispatch({
@@ -730,10 +830,12 @@
   }
 
   function setValue(text, path, options) {
+    clearChangeEmitTimer();
     pendingValue = text == null ? "" : String(text);
     if (path != null) {
       pendingPath = String(path || "");
     }
+    largeDocMode = isLargeDocument(pendingValue);
     const force = Boolean(options && options.force);
     if (!impl) {
       return;
@@ -765,6 +867,17 @@
     if (impl && impl.layout) {
       impl.layout();
     }
+  }
+
+  function getValueLength() {
+    if (impl && impl.getValueLength) {
+      return impl.getValueLength();
+    }
+    return String(pendingValue || "").length;
+  }
+
+  function isLargeDoc() {
+    return largeDocMode || isLargeDocument(pendingValue);
   }
 
   function init(host, options) {
@@ -822,10 +935,13 @@
   const api = {
     init: init,
     getValue: getValue,
+    getValueLength: getValueLength,
+    isLargeDoc: isLargeDoc,
     setValue: setValue,
     setReadOnly: setReadOnly,
     setVisible: setVisible,
     layout: layout,
+    flushPendingChange: flushPendingChange,
     prefersMobileEditor: prefersMobileEditor,
   };
 
