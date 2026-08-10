@@ -44,8 +44,15 @@
         box-sizing: border-box;
       }
 
+      html {
+        height: 100%;
+        max-height: 100dvh;
+      }
+
       body {
-        min-height: 100vh;
+        height: 100%;
+        max-height: 100%;
+        min-height: 0;
         margin: 0;
         overflow: hidden;
         background: var(--bg);
@@ -90,13 +97,17 @@
 
       .app {
         display: grid;
-        grid-template-columns: 286px minmax(360px, 1fr) minmax(360px, 1fr);
-        height: 100vh;
+        grid-template-columns: minmax(240px, 286px) minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+        height: 100%;
+        max-height: 100%;
+        min-height: 0;
+        overflow: hidden;
         transition: grid-template-columns 220ms ease;
       }
 
       .app.explorer-collapsed {
-        grid-template-columns: 48px minmax(360px, 1fr) minmax(360px, 1fr);
+        grid-template-columns: 48px minmax(0, 1fr) minmax(0, 1fr);
       }
 
       .app.preview-collapsed {
@@ -112,6 +123,7 @@
         min-width: 0;
         min-height: 0;
         flex-direction: column;
+        overflow: hidden;
         border-right: 1px solid var(--border);
         background: #121b24;
       }
@@ -120,6 +132,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
+        flex: 0 0 auto;
         min-height: 54px;
         padding: 0 12px;
         border-bottom: 1px solid var(--border);
@@ -161,6 +174,7 @@
 
       .sidebar-actions {
         display: flex;
+        flex: 0 0 auto;
         flex-direction: column;
         gap: 8px;
         padding: 12px;
@@ -263,6 +277,42 @@
         .sidebar-actions.is-options-open > .sidebar-options-panel {
           display: grid !important;
         }
+      }
+
+      .tree-panel {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      .tree-search {
+        flex: 0 0 auto;
+        padding: 8px 8px 6px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .tree-search input {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 30px;
+        padding: 0 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel-soft);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        outline: none;
+      }
+
+      .tree-search input::placeholder {
+        color: var(--muted);
+      }
+
+      .tree-search input:focus {
+        border-color: #4a6278;
       }
 
       .tree {
@@ -437,6 +487,7 @@
 
       .cloud-status {
         display: flex;
+        flex: 0 0 auto;
         align-items: flex-start;
         gap: 8px;
         padding: 10px 12px;
@@ -493,6 +544,8 @@
 
       .legal-links {
         display: flex;
+        flex: 0 0 auto;
+        flex-wrap: wrap;
         gap: 10px;
         padding: 10px 12px;
         border-top: 1px solid var(--border);
@@ -623,7 +676,7 @@
 
       .app.explorer-collapsed .brand,
       .app.explorer-collapsed .sidebar-actions,
-      .app.explorer-collapsed .tree,
+      .app.explorer-collapsed .tree-panel,
       .app.explorer-collapsed .cloud-status,
       .app.explorer-collapsed .legal-links {
         display: none;
@@ -702,7 +755,9 @@
       .preview {
         display: flex;
         min-width: 0;
+        min-height: 0;
         flex-direction: column;
+        overflow: hidden;
         background: var(--panel);
       }
 
@@ -714,6 +769,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
+        flex: 0 0 auto;
         min-height: 54px;
         gap: 16px;
         padding: 0 16px;
@@ -1083,12 +1139,130 @@
         position: relative;
         flex: 1;
         min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .editor-file-bar {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        min-height: 40px;
+        padding: 6px 12px;
+        border-bottom: 1px solid var(--border);
+        background: #121a22;
+      }
+
+      .editor-file-bar.hidden,
+      .editor-file-bar[hidden] {
+        display: none !important;
+      }
+
+      .editor-file-bar-label {
+        margin: 0;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .editor-file-bar-actions {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 10px 14px;
+        margin-left: auto;
+      }
+
+      .editor-file-save {
+        min-height: 30px;
+        padding: 0 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--btn-radius);
+        background: var(--panel-soft);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .editor-file-save:hover {
+        border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+      }
+
+      .autosave-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .autosave-switch input {
+        position: absolute;
+        opacity: 0;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+      }
+
+      .autosave-switch-track {
+        position: relative;
+        display: inline-block;
+        width: 36px;
+        height: 20px;
+        border-radius: 999px;
+        background: #2a3542;
+        border: 1px solid var(--border);
+        transition: background 0.15s ease, border-color 0.15s ease;
+        flex: 0 0 auto;
+      }
+
+      .autosave-switch-thumb {
+        position: absolute;
+        top: 1px;
+        left: 1px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #c5d0dc;
+        transition: transform 0.15s ease, background 0.15s ease;
+      }
+
+      .autosave-switch input:focus-visible + .autosave-switch-track {
+        outline: 2px solid color-mix(in srgb, var(--brand) 70%, white);
+        outline-offset: 2px;
+      }
+
+      .autosave-switch input:checked + .autosave-switch-track {
+        background: color-mix(in srgb, var(--brand) 55%, #1a2430);
+        border-color: color-mix(in srgb, var(--brand) 50%, var(--border));
+      }
+
+      .autosave-switch input:checked + .autosave-switch-track .autosave-switch-thumb {
+        transform: translateX(16px);
+        background: #fff;
+      }
+
+      .autosave-switch input:checked ~ .autosave-switch-text {
+        color: var(--text);
       }
 
       #editor,
       .code-editor-host {
         width: 100%;
-        height: 100%;
+        flex: 1 1 auto;
+        height: auto;
         min-height: 0;
         border: 0;
         outline: none;
@@ -1122,7 +1296,9 @@
       .asset-preview {
         display: none;
         width: 100%;
-        height: 100%;
+        flex: 1 1 auto;
+        height: auto;
+        min-height: 0;
         flex-direction: column;
         align-items: center;
         justify-content: center;
@@ -1160,6 +1336,7 @@
       }
 
       .statusbar {
+        flex: 0 0 auto;
         min-height: 28px;
         max-height: none;
         padding: 6px 16px;
@@ -1219,20 +1396,25 @@
       .log {
         display: flex;
         flex-direction: column;
-        flex: 0 0 auto;
-        max-height: 280px;
+        flex: 0 1 auto;
+        min-height: 0;
+        max-height: min(280px, 42dvh);
+        overflow: hidden;
         border-top: 1px solid var(--border);
         background: #0f151c;
       }
 
       .log.is-collapsed {
+        flex: 0 0 auto;
         max-height: none;
+        overflow: visible;
       }
 
       .log-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
+        flex: 0 0 auto;
         gap: 12px;
         min-height: 36px;
         padding: 0 10px 0 16px;
@@ -1277,7 +1459,10 @@
       .log pre {
         margin: 0;
         padding: 14px 16px 16px;
+        flex: 1 1 auto;
+        min-height: 0;
         overflow: auto;
+        overscroll-behavior: contain;
         color: #c7d1dc;
         font: 12px/1.5 "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
         white-space: pre-wrap;
@@ -1372,7 +1557,7 @@
       }
 
       @media (max-width: 1180px) {
-        #saveFile {
+        #editorFileBar {
           display: none !important;
         }
       }
@@ -1627,7 +1812,14 @@
       }
 
       @media (max-width: 920px) {
+        html {
+          height: auto;
+          max-height: none;
+        }
+
         body {
+          height: auto;
+          max-height: none;
           overflow: auto;
         }
 
@@ -1638,8 +1830,10 @@
           grid-template-columns: none;
           grid-template-rows: none;
           height: auto;
+          max-height: none;
           min-height: 100vh;
           min-height: 100dvh;
+          overflow: visible;
         }
 
         /* Flatten panels so we can reorder: actions → editor → files → preview */
@@ -1852,14 +2046,14 @@
           display: grid !important;
         }
 
-        .tree {
+        .tree-panel {
           order: 6;
           max-height: min(52vh, 480px);
           border-bottom: 1px solid var(--border);
           background: #121b24;
         }
 
-        .sidebar-actions.is-options-open ~ .tree {
+        .sidebar-actions.is-options-open ~ .tree-panel {
           max-height: min(36vh, 320px);
         }
 
@@ -1928,7 +2122,7 @@
         }
 
         .app.explorer-collapsed .sidebar-actions,
-        .app.explorer-collapsed .tree,
+        .app.explorer-collapsed .tree-panel,
         .app.explorer-collapsed .brand,
         .app.explorer-collapsed .cloud-status,
         .app.explorer-collapsed .legal-links {
@@ -1940,8 +2134,8 @@
           flex-direction: column;
         }
 
-        .app.explorer-collapsed .tree {
-          display: block;
+        .app.explorer-collapsed .tree-panel {
+          display: flex;
         }
 
         .app.explorer-collapsed .cloud-status {
@@ -2102,7 +2296,7 @@
         }
 
         .app.explorer-collapsed .sidebar-actions,
-        .app.explorer-collapsed .tree {
+        .app.explorer-collapsed .tree-panel {
           display: none !important;
         }
 
@@ -2131,10 +2325,21 @@
           font-size: 13px;
         }
 
+        .tree-panel {
+          display: flex !important;
+          flex: 1 1 auto;
+          flex-direction: column;
+          order: unset !important;
+          min-height: 0;
+          max-height: none !important;
+          height: auto;
+          border-bottom: 0;
+          background: #121b24;
+        }
+
         .tree {
           display: block !important;
           flex: 1 1 auto;
-          order: unset !important;
           min-height: 0;
           max-height: none !important;
           height: auto;
@@ -2828,7 +3033,19 @@
           <button class="wide hidden" id="syncProject" type="button" title="Load the current project from Google Drive into the file tree" hidden>Load</button>
           </div>
         </div>
-        <div class="tree" id="tree"></div>
+        <div class="tree-panel" id="treePanel">
+          <div class="tree-search">
+            <input
+              type="search"
+              id="treeSearch"
+              placeholder="Find files…"
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="Find files in the file tree"
+            />
+          </div>
+          <div class="tree" id="tree"></div>
+        </div>
         <div class="cloud-status is-logged-out" id="cloudStatus" role="status" aria-live="polite">
           <span class="cloud-status-dot" id="cloudStatusDot" aria-hidden="true"></span>
           <span class="cloud-status-text" id="cloudStatusText"><a href="login.html?next=/">Log in</a> to connect to Google Drive (free)</span>
@@ -2891,9 +3108,6 @@
               </svg>
               Save
             </button>
-            <button class="toolbar-button save-file-button hidden" id="saveFile" type="button" hidden title="Save only the open file in this browser and on disk">
-              Save file
-            </button>
             </div>
             <div class="topbar-convert-cluster">
               <button class="convert-button" id="convert" type="button">Convert</button>
@@ -2919,6 +3133,21 @@
           </div>
         </div>
         <div class="editor-wrap">
+          <div class="editor-file-bar hidden" id="editorFileBar" hidden>
+            <p class="editor-file-bar-label">This file</p>
+            <div class="editor-file-bar-actions">
+              <button class="editor-file-save" id="saveFile" type="button" title="Save only this open file in this browser and on disk">
+                Save file
+              </button>
+              <label class="autosave-switch" title="Autosave this file to the browser every 10 seconds">
+                <input type="checkbox" id="autosaveToggle" role="switch" />
+                <span class="autosave-switch-track" aria-hidden="true">
+                  <span class="autosave-switch-thumb"></span>
+                </span>
+                <span class="autosave-switch-text">Autosave to Browser (10s)</span>
+              </label>
+            </div>
+          </div>
           <div id="editor" class="code-editor-host" aria-label="LaTeX source editor"></div>
           <div class="asset-preview" id="assetPreview" aria-live="polite">
             <img id="assetPreviewImage" alt="">
@@ -3150,11 +3379,11 @@
     <script src="invite.js?v=20260728q"></script>
     <script src="local-project-fs.js?v=20260730j"></script>
     <script src="local-desktop.js?v=20260730i"></script>
-    <script src="workspace-storage.js?v=20260730a"></script>
+    <script src="workspace-storage.js?v=20260807c"></script>
     <script src="https://accounts.google.com/gsi/client" data-undertwig-gsi="1" async defer></script>
     <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>
     <script src="latex-engines.js?v=20260729a"></script>
-    <script src="latex-editor.js?v=20260730a"></script>
+    <script src="latex-editor.js?v=20260807c"></script>
     <script>
 
       const DEMO_FIGURE_PNG_BASE64 =
@@ -3486,11 +3715,30 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       let workspacePersistFailed = false;
       let storageFullStatusAt = 0;
       const STORAGE_FULL_STATUS_COOLDOWN_MS = 60 * 1000;
+      let editorContentSyncTimer = null;
+      let editorContentDirty = false;
+      /** Path currently loaded in the editor widget (may differ from state.activeFile mid-switch). */
+      let editorBoundPath = "";
+      let cachedWorkspaceBytes = 0;
+      let cachedWorkspaceBytesValid = false;
+      const dirtyFilePaths = new Set();
+      const deletedFilePaths = new Set();
+      let metaDirty = false;
+      let dirtyPersistTimer = null;
+      let dirtyPersistInFlight = null;
+      let dirtyPersistQueued = false;
+      const DIRTY_PERSIST_SHORT_MS = 400;
+      const AUTOSAVE_INTERVAL_MS = 10 * 1000;
+      const AUTOSAVE_PREF_KEY = "undertwig-autosave-v1";
+      let autosaveEnabled = false;
+      let autosaveIntervalTimer = null;
       let engine = null;
       let pdfUrl = null;
 
       const app = document.getElementById("app");
       const tree = document.getElementById("tree");
+      const treeSearchInput = document.getElementById("treeSearch");
+      let treeSearchQuery = "";
       const editorHost = document.getElementById("editor");
       const assetPreview = document.getElementById("assetPreview");
       const assetPreviewImage = document.getElementById("assetPreviewImage");
@@ -3582,16 +3830,106 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       function refreshSaveFileButtonVisibility() {
+        const bar = document.getElementById("editorFileBar");
         const button = document.getElementById("saveFile");
-        if (!button) {
+        const show = localDesktopAllowed();
+        if (bar) {
+          bar.hidden = !show;
+          bar.classList.toggle("hidden", !show);
+        }
+        if (button && show) {
+          button.title =
+            "Save only this open file in this browser and on disk";
+        }
+        if (show && window.UndertwigEditor && UndertwigEditor.layout) {
+          window.setTimeout(function () {
+            UndertwigEditor.layout();
+          }, 0);
+        }
+      }
+
+      function readAutosavePref() {
+        try {
+          return localStorage.getItem(AUTOSAVE_PREF_KEY) === "1";
+        } catch (_error) {
+          return false;
+        }
+      }
+
+      function writeAutosavePref(enabled) {
+        try {
+          localStorage.setItem(AUTOSAVE_PREF_KEY, enabled ? "1" : "0");
+        } catch (_error) {
+          // Ignore quota / private mode.
+        }
+      }
+
+      function syncAutosaveToggleUi() {
+        const input = document.getElementById("autosaveToggle");
+        if (!input) {
           return;
         }
-        const show = localDesktopAllowed();
-        button.hidden = !show;
-        button.classList.toggle("hidden", !show);
-        if (show) {
-          button.title =
-            "Save only the open editor file in this browser and on disk";
+        input.checked = Boolean(autosaveEnabled);
+        input.setAttribute("aria-checked", autosaveEnabled ? "true" : "false");
+        const label = input.closest(".autosave-switch");
+        if (label) {
+          label.title = autosaveEnabled
+            ? "Autosave on — this file is written to the browser every 10 seconds"
+            : "Autosave off — use Save file or Ctrl+S to keep this file";
+        }
+      }
+
+      function stopAutosaveInterval() {
+        if (autosaveIntervalTimer) {
+          clearInterval(autosaveIntervalTimer);
+          autosaveIntervalTimer = null;
+        }
+      }
+
+      function startAutosaveInterval() {
+        stopAutosaveInterval();
+        if (!autosaveEnabled) {
+          return;
+        }
+        autosaveIntervalTimer = setInterval(function () {
+          if (!autosaveEnabled) {
+            return;
+          }
+          flushEditorToState();
+          if (editorBoundPath) {
+            markFileDirty(editorBoundPath);
+          }
+          if (
+            dirtyFilePaths.size ||
+            deletedFilePaths.size ||
+            metaDirty ||
+            editorContentDirty
+          ) {
+            flushDirtyPersist();
+          }
+        }, AUTOSAVE_INTERVAL_MS);
+      }
+
+      function setAutosaveEnabled(enabled, options) {
+        const next = Boolean(enabled);
+        const announce = !options || options.announce !== false;
+        autosaveEnabled = next;
+        writeAutosavePref(next);
+        syncAutosaveToggleUi();
+        if (next) {
+          startAutosaveInterval();
+          if (announce) {
+            setStatus("Autosave on — browser copy updates every 10 seconds.");
+          }
+        } else {
+          stopAutosaveInterval();
+          if (dirtyPersistTimer) {
+            clearTimeout(dirtyPersistTimer);
+            dirtyPersistTimer = null;
+          }
+          if (announce) {
+            setStatus("Autosave off — save with Save file or Ctrl+S.");
+          }
         }
       }
 
@@ -4519,6 +4857,11 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           if (active && !active.binary) {
             active.content = UndertwigEditor.getValue();
           }
+          if (editorBoundPath !== filePath && active && !active.binary) {
+            editorBoundPath = filePath;
+          }
+          markFileDirty(filePath);
+          markMetaDirty();
 
           // Disk first — folder/file pickers require the click user gesture.
           let diskResult = { saved: false, reason: "unbound", folderName: "" };
@@ -4533,9 +4876,10 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             };
           }
 
+          // Always await a single-file IndexedDB put so reload restores this edit.
           let localOk = true;
           try {
-            localOk = await persistWorkspaceNow();
+            localOk = await persistFileToBrowserNow(filePath);
           } catch (_error) {
             localOk = false;
           }
@@ -4561,7 +4905,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             }
           } else if (diskResult && diskResult.saved) {
             setStatus(
-              "Saved “" + shortName + "” to disk (browser storage is full)."
+              "Saved “" + shortName + "” to disk (browser storage write failed)."
             );
           } else {
             setStatusStorageFull({ force: true });
@@ -5658,6 +6002,29 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }, 230);
       });
 
+      if (treeSearchInput) {
+        treeSearchInput.addEventListener("input", function () {
+          treeSearchQuery = treeSearchInput.value;
+          if (typeof renderTree === "function") {
+            renderTree();
+          }
+        });
+        treeSearchInput.addEventListener("keydown", function (event) {
+          if (event.key !== "Escape") {
+            return;
+          }
+          if (!treeSearchInput.value) {
+            return;
+          }
+          event.preventDefault();
+          treeSearchInput.value = "";
+          treeSearchQuery = "";
+          if (typeof renderTree === "function") {
+            renderTree();
+          }
+        });
+      }
+
       const collapsedRail = document.querySelector(".collapsed-rail");
       if (collapsedRail) {
         collapsedRail.style.cursor = "pointer";
@@ -5826,6 +6193,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       const saveFileButton = document.getElementById("saveFile");
       if (saveFileButton) {
         saveFileButton.addEventListener("click", saveCurrentFileNow);
+      }
+      const autosaveToggleInput = document.getElementById("autosaveToggle");
+      if (autosaveToggleInput) {
+        autosaveToggleInput.addEventListener("change", function () {
+          setAutosaveEnabled(Boolean(autosaveToggleInput.checked));
+        });
       }
       if (writingRoomButton) {
         writingRoomButton.addEventListener("click", function () {
@@ -6109,6 +6482,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         state.activeFile = normalized.activeFile;
         state.folders = normalized.folders;
         state.files = normalized.files;
+        invalidateWorkspaceByteCache();
         return normalized;
       }
 
@@ -6154,19 +6528,32 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             console.warn("IndexedDB workspace load failed:", error);
           }
         }
-        if (fromIdb && fromIdb.files) {
+        const idbFiles =
+          fromIdb && fromIdb.files && typeof fromIdb.files === "object"
+            ? fromIdb.files
+            : null;
+        const idbFileCount = idbFiles ? Object.keys(idbFiles).length : 0;
+        // Empty {} is truthy — do not treat a meta-only/corrupt store as a real project.
+        if (fromIdb && idbFiles && idbFileCount > 0) {
           const normalized = normalizeWorkspace(fromIdb);
-          // Drop any leftover localStorage copy so quota is free for other prefs.
           clearLegacyLocalStorageWorkspace();
           return normalized;
         }
 
         const fromLs = readWorkspaceFromLocalStorage();
         if (fromLs) {
-          // Migrate off the 5MB localStorage ceiling.
+          // Migrate off the 5MB localStorage ceiling into per-file IDB.
           try {
-            if (window.UndertwigWorkspaceStorage && UndertwigWorkspaceStorage.save) {
-              await UndertwigWorkspaceStorage.save(fromLs);
+            if (
+              window.UndertwigWorkspaceStorage &&
+              (UndertwigWorkspaceStorage.replaceAll ||
+                UndertwigWorkspaceStorage.save)
+            ) {
+              if (UndertwigWorkspaceStorage.replaceAll) {
+                await UndertwigWorkspaceStorage.replaceAll(fromLs);
+              } else {
+                await UndertwigWorkspaceStorage.save(fromLs);
+              }
               clearLegacyLocalStorageWorkspace();
             }
           } catch (error) {
@@ -6178,40 +6565,336 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return createDefaultProject();
       }
 
-      function estimateWorkspaceBytes(workspace) {
-        try {
-          return JSON.stringify(workspace || state).length;
-        } catch (_error) {
-          return 0;
-        }
+      function markFileDirty(path) {
+        const key = String(path || "").trim();
+        if (!key) return;
+        dirtyFilePaths.add(key);
+        deletedFilePaths.delete(key);
       }
 
-      function scheduleWorkspacePersist() {
-        if (workspacePersistTimer) {
-          clearTimeout(workspacePersistTimer);
+      function markFileDeleted(path) {
+        const key = String(path || "").trim();
+        if (!key) return;
+        dirtyFilePaths.delete(key);
+        deletedFilePaths.add(key);
+        invalidateWorkspaceByteCache();
+      }
+
+      function markMetaDirty() {
+        metaDirty = true;
+      }
+
+      function markAllFilesDirty() {
+        Object.keys(state.files || {}).forEach(function (path) {
+          dirtyFilePaths.add(path);
+        });
+        deletedFilePaths.clear();
+        markMetaDirty();
+        invalidateWorkspaceByteCache();
+      }
+
+      function invalidateWorkspaceByteCache() {
+        cachedWorkspaceBytesValid = false;
+      }
+
+      /** Cheap size estimate — never JSON.stringify the whole thesis on a keystroke. */
+      function estimateWorkspaceBytes(workspace) {
+        const ws = workspace || state;
+        if (!workspace && cachedWorkspaceBytesValid) {
+          return cachedWorkspaceBytes;
         }
-        const bytes = estimateWorkspaceBytes(state);
-        const delay = bytes > 1.5 * 1024 * 1024 ? 1200 : 350;
-        workspacePersistTimer = setTimeout(function () {
-          workspacePersistTimer = null;
-          flushWorkspacePersist();
+        let n = 512;
+        const files = (ws && ws.files) || {};
+        const paths = Object.keys(files);
+        for (let i = 0; i < paths.length; i += 1) {
+          const path = paths[i];
+          const file = files[path];
+          n += path.length + 48;
+          if (file && typeof file.content === "string") {
+            n += file.content.length;
+          }
+        }
+        const folders = (ws && ws.folders) || [];
+        n += folders.length * 24;
+        if (!workspace) {
+          cachedWorkspaceBytes = n;
+          cachedWorkspaceBytesValid = true;
+        }
+        return n;
+      }
+
+      function adjustWorkspaceByteCache(delta) {
+        if (!cachedWorkspaceBytesValid) {
+          return;
+        }
+        cachedWorkspaceBytes = Math.max(0, cachedWorkspaceBytes + delta);
+      }
+
+      /**
+       * Pull the open editor buffer into state.files for the path the editor is
+       * actually showing — never into a newly selected activeFile (that wiped
+       * large files like results.tex on click).
+       */
+      function flushEditorToState() {
+        if (window.UndertwigEditor && UndertwigEditor.flushPendingChange) {
+          UndertwigEditor.flushPendingChange();
+        }
+        if (editorContentSyncTimer) {
+          clearTimeout(editorContentSyncTimer);
+          editorContentSyncTimer = null;
+        }
+        if (!window.UndertwigEditor || !UndertwigEditor.getValue) {
+          editorContentDirty = false;
+          return;
+        }
+        const path = editorBoundPath;
+        if (!path) {
+          editorContentDirty = false;
+          return;
+        }
+        const file = state.files[path];
+        if (!file || file.binary) {
+          editorContentDirty = false;
+          return;
+        }
+        const next = UndertwigEditor.getValue();
+        const prev = typeof file.content === "string" ? file.content : "";
+        if (next !== prev) {
+          adjustWorkspaceByteCache(next.length - prev.length);
+          file.content = next;
+          markFileDirty(path);
+        }
+        editorContentDirty = false;
+      }
+
+      function scheduleEditorContentSync(options) {
+        const skipCloud = Boolean(options && options.skipCloud);
+        editorContentDirty = true;
+        if (
+          fileLockHeldProject &&
+          fileLockHeldProject === getActiveProjectName()
+        ) {
+          writingRoomSessionDirty = true;
+        }
+        if (editorContentSyncTimer) {
+          clearTimeout(editorContentSyncTimer);
+        }
+        const len =
+          window.UndertwigEditor && UndertwigEditor.getValueLength
+            ? UndertwigEditor.getValueLength()
+            : estimateActiveFileChars();
+        // Sync memory soon; IndexedDB only via Autosave interval or explicit Save.
+        const delay = len >= 48000 ? 400 : 180;
+        editorContentSyncTimer = setTimeout(function () {
+          editorContentSyncTimer = null;
+          flushEditorToState();
+          if (editorBoundPath) {
+            markFileDirty(editorBoundPath);
+          }
+          if (
+            !skipCloud &&
+            UndertwigCloud.isAvailable() &&
+            (cloudStatusMode === "connected" || UndertwigCloud.hasAccessToken())
+          ) {
+            scheduleCloudSave(false);
+          }
+          updateMeta();
         }, delay);
       }
 
-      function flushWorkspacePersist() {
+      function estimateActiveFileChars() {
+        const file = state.files[state.activeFile];
+        if (!file || typeof file.content !== "string") {
+          return 0;
+        }
+        return file.content.length;
+      }
+
+      function scheduleDirtyPersist(delayMs) {
+        if (dirtyPersistTimer) {
+          clearTimeout(dirtyPersistTimer);
+        }
+        const delay =
+          typeof delayMs === "number" ? delayMs : DIRTY_PERSIST_SHORT_MS;
+        dirtyPersistTimer = setTimeout(function () {
+          dirtyPersistTimer = null;
+          flushDirtyPersist();
+        }, delay);
+      }
+
+      /** Explicit structural saves (not typing autosave). */
+      function scheduleWorkspacePersist() {
+        flushEditorToState();
+        if (editorBoundPath) {
+          markFileDirty(editorBoundPath);
+        }
+        markMetaDirty();
+        scheduleDirtyPersist(DIRTY_PERSIST_SHORT_MS);
+      }
+
+      function flushDirtyPersist() {
+        flushEditorToState();
+        if (editorBoundPath) {
+          markFileDirty(editorBoundPath);
+        }
+
+        if (dirtyPersistInFlight) {
+          dirtyPersistQueued = true;
+          return dirtyPersistInFlight;
+        }
+        if (dirtyPersistTimer) {
+          clearTimeout(dirtyPersistTimer);
+          dirtyPersistTimer = null;
+        }
+
+        const paths = Array.from(dirtyFilePaths);
+        const deleted = Array.from(deletedFilePaths);
+        const needMeta = metaDirty;
+        if (!paths.length && !deleted.length && !needMeta) {
+          return Promise.resolve(true);
+        }
+
+        dirtyFilePaths.clear();
+        deletedFilePaths.clear();
+        metaDirty = false;
+
+        const fileMap = {};
+        for (let i = 0; i < paths.length; i += 1) {
+          const path = paths[i];
+          if (state.files[path]) {
+            fileMap[path] = state.files[path];
+          } else {
+            deleted.push(path);
+          }
+        }
+
+        dirtyPersistInFlight = (async function () {
+          const storage = window.UndertwigWorkspaceStorage;
+          if (!storage) {
+            workspacePersistFailed = true;
+            return false;
+          }
+          try {
+            if (needMeta && storage.saveMeta) {
+              await storage.saveMeta(state);
+            }
+            if (Object.keys(fileMap).length && storage.saveFiles) {
+              await storage.saveFiles(fileMap);
+            }
+            if (deleted.length && storage.deleteFiles) {
+              await storage.deleteFiles(deleted);
+            }
+            workspacePersistFailed = false;
+            storageFullStatusAt = 0;
+            clearLegacyLocalStorageWorkspace();
+            return true;
+          } catch (error) {
+            console.warn("IndexedDB dirty persist failed:", error);
+            // Re-queue so we do not lose edits.
+            paths.forEach(function (path) {
+              dirtyFilePaths.add(path);
+            });
+            deleted.forEach(function (path) {
+              deletedFilePaths.add(path);
+            });
+            if (needMeta) {
+              metaDirty = true;
+            }
+            workspacePersistFailed = true;
+            return false;
+          }
+        })()
+          .finally(function () {
+            dirtyPersistInFlight = null;
+            if (dirtyPersistQueued) {
+              dirtyPersistQueued = false;
+              flushDirtyPersist();
+            }
+          });
+
+        return dirtyPersistInFlight;
+      }
+
+      /**
+       * Await a single-file IndexedDB write (plus meta). Used by Ctrl+S / Save file
+       * so browser restore matches the download without cloning the whole thesis.
+       */
+      async function persistFileToBrowserNow(filePath) {
+        flushEditorToState();
+        const path = String(filePath || editorBoundPath || state.activeFile || "").trim();
+        const file = state.files[path];
+        if (!path || !file) {
+          return false;
+        }
+        markFileDirty(path);
+        markMetaDirty();
+        const storage = window.UndertwigWorkspaceStorage;
+        if (!storage || !storage.saveFiles) {
+          workspacePersistFailed = true;
+          return false;
+        }
+        try {
+          if (storage.saveMeta) {
+            await storage.saveMeta(state);
+          }
+          await storage.saveFiles({ [path]: file });
+          dirtyFilePaths.delete(path);
+          metaDirty = false;
+          workspacePersistFailed = false;
+          storageFullStatusAt = 0;
+          clearLegacyLocalStorageWorkspace();
+          return true;
+        } catch (error) {
+          console.warn("IndexedDB single-file save failed:", error);
+          markFileDirty(path);
+          markMetaDirty();
+          workspacePersistFailed = true;
+          return false;
+        }
+      }
+
+      function flushWorkspacePersist(options) {
+        const forceFull = Boolean(options && options.fullReplace);
+        flushEditorToState();
+        if (dirtyPersistTimer) {
+          clearTimeout(dirtyPersistTimer);
+          dirtyPersistTimer = null;
+        }
+        if (editorBoundPath) {
+          markFileDirty(editorBoundPath);
+        }
+        if (state.activeFile) {
+          markFileDirty(state.activeFile);
+        }
+        markMetaDirty();
+
         if (workspacePersistInFlight) {
           workspacePersistQueued = true;
           return workspacePersistInFlight;
         }
-        if (workspacePersistTimer) {
-          clearTimeout(workspacePersistTimer);
-          workspacePersistTimer = null;
-        }
 
         workspacePersistInFlight = (async function () {
-          if (window.UndertwigWorkspaceStorage && UndertwigWorkspaceStorage.save) {
+          const storage = window.UndertwigWorkspaceStorage;
+          const dirtyCount = dirtyFilePaths.size + deletedFilePaths.size;
+
+          // Prefer per-file puts — never clear-the-store unless explicitly replacing.
+          if (!forceFull && storage && storage.saveFiles && dirtyCount > 0) {
+            const ok = await flushDirtyPersist();
+            if (ok) {
+              return true;
+            }
+          }
+
+          if (forceFull && storage && (storage.replaceAll || storage.save)) {
             try {
-              await UndertwigWorkspaceStorage.save(state);
+              if (storage.replaceAll) {
+                await storage.replaceAll(state);
+              } else {
+                await storage.save(state);
+              }
+              dirtyFilePaths.clear();
+              deletedFilePaths.clear();
+              metaDirty = false;
               workspacePersistFailed = false;
               storageFullStatusAt = 0;
               clearLegacyLocalStorageWorkspace();
@@ -6221,7 +6904,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             }
           }
 
-          // Fallback for browsers without IDB / rare IDB failures: only if it fits.
+          if (!forceFull && storage && storage.saveFiles) {
+            // Last resort: mark every in-memory file dirty and put in chunks.
+            markAllFilesDirty();
+            const ok = await flushDirtyPersist();
+            if (ok) {
+              return true;
+            }
+          }
+
           try {
             const payload = JSON.stringify(state);
             if (payload.length > 4 * 1024 * 1024) {
@@ -6241,15 +6932,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             workspacePersistInFlight = null;
             if (workspacePersistQueued) {
               workspacePersistQueued = false;
-              flushWorkspacePersist();
+              flushWorkspacePersist(options);
             }
           });
 
         return workspacePersistInFlight;
       }
 
-      async function persistWorkspaceNow() {
-        const ok = await flushWorkspacePersist();
+      async function persistWorkspaceNow(options) {
+        const ok = await flushWorkspacePersist(options);
         if (!ok) {
           setStatusStorageFull({ force: true });
         }
@@ -6612,12 +7303,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const prefix = name + "/";
         Object.keys(state.files || {}).forEach((path) => {
           if (path === name || path.startsWith(prefix)) {
+            markFileDeleted(path);
             delete state.files[path];
           }
         });
         state.folders = (state.folders || []).filter(
           (path) => path !== name && !path.startsWith(prefix)
         );
+        markMetaDirty();
         if (state.activeFile === name || (state.activeFile || "").startsWith(prefix)) {
           state.activeFile = "";
         }
@@ -7115,11 +7808,23 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const immediateCloud = Boolean(options && options.immediateCloud);
         const skipCloud = Boolean(options && options.skipCloud);
         const awaitLocal = Boolean(options && options.awaitLocal);
+        const fullReplace = Boolean(options && options.fullReplace);
 
-        // Primary local persistence is IndexedDB (large projects fit). Never block
-        // typing on a synchronous localStorage stringify of the whole tree.
-        if (awaitLocal) {
-          return persistWorkspaceNow().then(function (localSaved) {
+        flushEditorToState();
+        if (editorBoundPath) {
+          markFileDirty(editorBoundPath);
+        }
+        markMetaDirty();
+
+        // Primary local persistence is IndexedDB. Typing only dirties the open
+        // file; full tree rewrite is reserved for import / explicit awaitLocal.
+        if (awaitLocal || fullReplace) {
+          if (fullReplace) {
+            markAllFilesDirty();
+          }
+          return persistWorkspaceNow(
+            fullReplace ? { fullReplace: true } : undefined
+          ).then(function (localSaved) {
             if (
               !skipCloud &&
               UndertwigCloud.isAvailable() &&
@@ -7132,7 +7837,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           });
         }
 
-        scheduleWorkspacePersist();
+        scheduleDirtyPersist(DIRTY_PERSIST_SHORT_MS);
 
         if (
           !skipCloud &&
@@ -8419,6 +9124,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
       }
 
       function render() {
+        flushEditorToState();
         renderTree();
         const path = state.activeFile;
         let file = state.files[path];
@@ -8430,10 +9136,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
         }
         activeFileName.textContent = path || "No file selected";
-        UndertwigEditor.setValue(
-          file && !file.binary ? file.content : "",
-          path || ""
-        );
+        const text =
+          file && !file.binary
+            ? file.content == null
+              ? ""
+              : String(file.content)
+            : "";
+        UndertwigEditor.setValue(text, path || "");
+        editorBoundPath = file && !file.binary && path ? path : "";
         renderAssetPreview(file, path);
         updateMeta();
         // Writing-room rules (read-only until Enter) applied after peeking Drive locks.
@@ -8625,6 +9335,57 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         return 0;
       }
 
+      function getTreeSearchNeedle() {
+        return String(treeSearchQuery || "").trim().toLowerCase();
+      }
+
+      function pathMatchesSearch(path, name, needle) {
+        if (!needle) {
+          return true;
+        }
+        return (
+          String(name || "")
+            .toLowerCase()
+            .includes(needle) ||
+          String(path || "")
+            .toLowerCase()
+            .includes(needle)
+        );
+      }
+
+      function filterTreeNode(node, needle) {
+        if (!needle || !node) {
+          return node;
+        }
+        const selfMatch = pathMatchesSearch(node.path, node.name, needle);
+        if (node.type === "file") {
+          return selfMatch ? node : null;
+        }
+        const kids = Array.isArray(node.children) ? node.children : [];
+        if (selfMatch) {
+          return node;
+        }
+        const filtered = [];
+        kids.forEach(function (child) {
+          const next = filterTreeNode(child, needle);
+          if (next) {
+            filtered.push(next);
+          }
+        });
+        if (!filtered.length) {
+          return null;
+        }
+        return {
+          name: node.name,
+          path: node.path,
+          type: node.type,
+          children: filtered,
+          cloudOnly: node.cloudOnly,
+          invited: node.invited,
+          driveFolderId: node.driveFolderId,
+        };
+      }
+
       function wrapProjectCard(nodeEl, kind) {
         const card = document.createElement("div");
         card.className = "tree-project-card tree-project-card-" + kind;
@@ -8641,6 +9402,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         treeRenderDeferred = false;
         tree.textContent = "";
         const root = buildTree();
+        const searchNeedle = getTreeSearchNeedle();
         const currentName = getActiveProjectName();
         const showCloudSection =
           UndertwigAuth.isLoggedIn() &&
@@ -8650,11 +9412,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         const cloudOwnNames = showCloudSection
           ? ownedCloudProjectNames(invitedNames)
           : new Set();
-        const currentNode = currentName
+        let currentNode = currentName
           ? root.children.find((node) => node.type === "folder" && node.path === currentName)
           : null;
+        if (currentNode && searchNeedle) {
+          currentNode = filterTreeNode(currentNode, searchNeedle);
+        }
         // Drawer: local-only projects. Cloud own/invited belong under Cloud, not here.
-        const otherNodes = root.children.filter(function (node) {
+        let otherNodes = root.children.filter(function (node) {
           if (node.type !== "folder" || node.path === currentName) {
             return false;
           }
@@ -8669,6 +9434,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           }
           return true;
         });
+        if (searchNeedle) {
+          otherNodes = otherNodes
+            .map(function (node) {
+              return filterTreeNode(node, searchNeedle);
+            })
+            .filter(Boolean);
+        }
 
         const currentSection = document.createElement("div");
         currentSection.className = "tree-section tree-section-current";
@@ -8710,7 +9482,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           );
         } else {
           currentBody.classList.add("is-empty");
-          currentBody.textContent = "No project on the work desk";
+          currentBody.textContent = searchNeedle
+            ? "No matching files on the work desk"
+            : "No project on the work desk";
         }
         currentSection.appendChild(currentBody);
 
@@ -8846,6 +9620,21 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                   driveFolderId: invitedFolderIds[name] || null,
                 });
               });
+            if (searchNeedle) {
+              for (let i = cloudEntries.length - 1; i >= 0; i -= 1) {
+                const entry = cloudEntries[i];
+                const localNode = root.children.find(
+                  (node) => node.type === "folder" && node.path === entry.name
+                );
+                if (localNode) {
+                  if (!filterTreeNode(localNode, searchNeedle)) {
+                    cloudEntries.splice(i, 1);
+                  }
+                } else if (!pathMatchesSearch(entry.name, entry.name, searchNeedle)) {
+                  cloudEntries.splice(i, 1);
+                }
+              }
+            }
             cloudEntries.sort(function (a, b) {
               if (b.modifiedMs !== a.modifiedMs) {
                 return b.modifiedMs - a.modifiedMs;
@@ -8857,13 +9646,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
               cloudBody.classList.add("is-empty");
               cloudBody.textContent = cloudProjectsLoading
                 ? "Refreshing…"
-                : "No cloud projects yet";
+                : searchNeedle
+                  ? "No matching cloud projects"
+                  : "No cloud projects yet";
             } else {
               cloudEntries.forEach(function (entry) {
                 const localNode = root.children.find(
                   (node) => node.type === "folder" && node.path === entry.name
                 );
-                const node = localNode || {
+                let node = localNode || {
                   name: entry.name,
                   path: entry.name,
                   type: "folder",
@@ -8872,6 +9663,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                   invited: entry.invited,
                   driveFolderId: entry.driveFolderId,
                 };
+                if (localNode && searchNeedle) {
+                  node = filterTreeNode(localNode, searchNeedle) || node;
+                }
                 const rendered = renderNode(node, 0, {
                   section: "cloud",
                   projectDraggable: true,
@@ -8925,7 +9719,9 @@ writing your own material, or import DummyHippo if you want a tougher compile.
             });
         } else {
           otherBody.classList.add("is-empty");
-          otherBody.textContent = "No local projects in the drawer";
+          otherBody.textContent = searchNeedle
+            ? "No matching local projects"
+            : "No local projects in the drawer";
         }
         otherSection.appendChild(otherBody);
         tree.appendChild(otherSection);
@@ -9217,7 +10013,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         item.className = "tree-item";
 
         const isFolder = node.type === "folder";
-        const isCollapsed = isFolder && collapsedFolders.has(node.path);
+        const searching = Boolean(getTreeSearchNeedle());
+        const isCollapsed = isFolder && !searching && collapsedFolders.has(node.path);
         const isRootProject = isFolder && !node.path.includes("/");
         const projectDraggable = Boolean(opts.projectDraggable && isRootProject);
         const cloudOnly = Boolean(opts.cloudOnly && isRootProject);
@@ -9286,11 +10083,13 @@ writing your own material, or import DummyHippo if you want a tougher compile.
                 );
                 return;
               }
+              flushEditorToState();
               state.activeFile = node.path;
               persistProject();
               render();
               return;
             }
+            flushEditorToState();
             state.activeFile = node.path;
             persistProject({ immediateCloud: true });
             render();
@@ -9465,6 +10264,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           content: file.content,
           binary: Boolean(file.binary)
         };
+        markFileDirty(destination);
+        markFileDeleted(sourcePath);
         delete state.files[sourcePath];
 
         if (targetFolder) {
@@ -9473,6 +10274,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         if (state.activeFile === sourcePath) {
           state.activeFile = destination;
+          markMetaDirty();
         }
 
         persistProject({ immediateCloud: true });
@@ -9538,6 +10340,8 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           content: file.content,
           binary: Boolean(file.binary)
         };
+        markFileDirty(destination);
+        markFileDeleted(path);
         delete state.files[path];
 
         if (state.activeFile === path) {
@@ -9652,10 +10456,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
+        markFileDeleted(path);
         delete state.files[path];
 
         if (state.activeFile === path) {
           state.activeFile = pickFallbackActiveFile(path.split("/")[0]);
+          markMetaDirty();
         }
 
         persistProject({ immediateCloud: true });
@@ -9679,12 +10485,14 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         if (!nestedFiles.length && !hasFolderEntry) return;
 
         nestedFiles.forEach((filePath) => {
+          markFileDeleted(filePath);
           delete state.files[filePath];
         });
 
         state.folders = (state.folders || []).filter(
           (folderPath) => folderPath !== path && !folderPath.startsWith(prefix)
         );
+        markMetaDirty();
 
         [...collapsedFolders].forEach((folderPath) => {
           if (folderPath === path || folderPath.startsWith(prefix)) {
@@ -9982,7 +10790,12 @@ writing your own material, or import DummyHippo if you want a tougher compile.
         }
 
         // Flush IndexedDB now so a large import is durable before the status message.
-        const saved = await persistWorkspaceNow();
+        markAllFilesDirty();
+        const saved = await persistProject({
+          skipCloud: true,
+          awaitLocal: true,
+          fullReplace: true,
+        });
         if (!saved) {
           render();
           return;
@@ -10583,6 +11396,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
+        flushEditorToState();
         const { project, prefix, projectFiles } = collectActiveProjectFiles();
         if (!project) {
           setStatus("Set a current project before converting.", true);
@@ -10691,6 +11505,7 @@ writing your own material, or import DummyHippo if you want a tougher compile.
           return;
         }
 
+        flushEditorToState();
         const { project, prefix, projectFiles } = collectActiveProjectFiles();
         if (!project) {
           setStatus("Set a current project before running bibliography.", true);
@@ -10986,20 +11801,15 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         try {
           await UndertwigEditor.init(editorHost, {
-            onChange: function (value) {
+            onChange: function () {
               const file = state.files[state.activeFile];
               if (!file || file.binary) return;
-              file.content = value;
-              if (fileLockHeldProject && fileLockHeldProject === getActiveProjectName()) {
-                writingRoomSessionDirty = true;
-                // Local only while in the writing room. Cloud autosave would make
-                // Discard impossible (Load would just pull the edits already uploaded).
-                persistProject({ skipCloud: true });
-              } else {
-                persistProject();
-              }
+              const skipCloud = Boolean(
+                fileLockHeldProject &&
+                  fileLockHeldProject === getActiveProjectName()
+              );
+              scheduleEditorContentSync({ skipCloud: skipCloud });
               noteWritingRoomActivity();
-              updateMeta();
             },
             onSave: function () {
               if (localDesktopAllowed()) {
@@ -11024,15 +11834,25 @@ writing your own material, or import DummyHippo if you want a tougher compile.
 
         refreshAuthUi();
         refreshSaveFileButtonVisibility();
+        setAutosaveEnabled(readAutosavePref(), { announce: false });
         initCloudProject();
       })();
 
       window.addEventListener("pagehide", function () {
-        flushWorkspacePersist();
+        flushEditorToState();
+        if (editorBoundPath) {
+          markFileDirty(editorBoundPath);
+        }
+        // Kick off IDB writes immediately; do not await (page is closing).
+        flushDirtyPersist();
       });
       document.addEventListener("visibilitychange", function () {
         if (document.visibilityState === "hidden") {
-          flushWorkspacePersist();
+          flushEditorToState();
+          if (editorBoundPath) {
+            markFileDirty(editorBoundPath);
+          }
+          flushDirtyPersist();
         }
       });
     </script>

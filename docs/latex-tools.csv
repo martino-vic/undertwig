@@ -1,0 +1,117 @@
+name,url,year,month,AI,WASM,Privacy,Users
+8gwifi Online LaTeX Editor,https://8gwifi.org/editor,,,v,X,X,
+AUCTeX,https://www.gnu.org/software/auctex/,1991,,X,X,X,
+Authorea,https://www.authorea.com/,2013,,X,X,X,
+Auto-LaTeX Equations (Google Docs),https://workspace.google.com/marketplace/app/auto-latex_equations/848437649689,,,X,X,X,30000000
+Bibby AI LaTeX compiler,https://www.trybibby.com/latex-compiler,2025,,v,X,X,
+Biber,https://ctan.org/pkg/biber,2009,,X,X,X,387
+BibTeX,https://ctan.org/pkg/bibtex,1985,,X,X,X,
+BlueLaTeX (publications.li; archived),https://github.com/BlueLaTeX,2015,,X,X,X,
+BusyTeX,https://github.com/busytex/busytex,2020,,X,v,X,74
+CLSI (Overleaf compile service),https://github.com/overleaf/clsi,2014,,X,X,X,209
+CoCalc,https://cocalc.com/features/latex-editor,2016,,v,X,X,300000
+CodeCogs Equation Editor,https://latex.codecogs.com/,2007,,X,X,X,
+CollabTeX,https://github.com/JaedenRotondo/CollabTeX,2025,6,X,X,X,
+ConTeXt,https://wiki.contextgarden.net/,1996,,X,X,X,
+ConTeXt on Web (COW),https://live.contextgarden.net/,,,X,X,X,
+Crixet (now Prism),https://crixet.com/,2024,,v,v,X,
+Detexify,https://detexify.kirelabs.org/,2010,,v,X,X,842
+Detexify classify,https://detexify.kirelabs.org/classify.html,2010,,v,X,X,
+Docx2Latex,https://www.docx2latex.com/,,,X,X,X,
+DynamicDocs API,https://www.dynamicdocs.online/,,,X,X,X,
+ExactPDF LaTeX to PDF,https://exactpdf.com/tools/latex-to-pdf,,,X,X,X,
+faster-latex demo,https://faster-latex-demo.pages.dev/,2026,7,X,v,X,3
+FastLaTeX / WasmTeX (corca-ai),https://github.com/corca-ai/wasmtex,2026,7,X,v,X,3
+FlowTex,https://github.com/stolucc/flowtex,2026,3,v,X,v,
+FormaTeX,https://formatex.io,2025,9,v,X,X,
+GNOME LaTeX,https://gitlab.gnome.org/swilmet/gnome-latex,2010,,X,X,X,
+Gummi,https://github.com/alexandervdm/gummi,2009,,X,X,X,799
+Hamline Physics LaTeX Equation Editor,https://www.hamline.edu/personal/arundquist/equationeditor/,,,X,X,X,
+inscrive.io,https://inscrive.io,2024,,v,X,X,
+InvizCrypt,https://invizcrypt.com/,2026,5,X,v,v,
+KaTeX,https://katex.org,2014,,X,X,X,20292
+Kile,https://kile.sourceforge.io/,2003,,X,X,X,105
+Kroki,https://kroki.io,2019,,X,X,X,4276
+LaTeX 4 Technics,https://www.latex4technics.com/,,,X,X,X,
+LaTeX Lab,http://docs.latexlab.org/,2010,,X,X,X,
+LaTeX on HTTP,https://github.com/YtoTech/latex-on-http,2017,,X,X,X,81
+LaTeX online-compiler (Halle),http://latex.informatik.uni-halle.de/,,,X,X,X,
+LaTeX Workshop,https://github.com/James-Yu/LaTeX-Workshop,2016,,X,X,X,5447642
+LaTeX.Online,https://latexonline.cc/,2012,,X,X,X,605
+latex.to,https://latex.to,2024,,X,X,X,
+latex2png (thomasahle),https://thomasahle.com/latex2png/,,,X,X,X,47
+latex2png.com,https://latex2png.com/,,,X,X,X,
+latexmk,https://ctan.org/pkg/latexmk,1998,,X,X,X,
+LearnLaTeX.org,https://www.learnlatex.org/,2020,,X,X,X,
+LetX,https://letx.app/,2026,1,v,X,v,1300
+LuaLaTeX,https://www.luatex.org/,2007,,X,X,X,
+LuaTeX,https://www.luatex.org/,2007,,X,X,X,
+LyX,https://www.lyx.org/,1995,,X,X,X,
+MacTeX,https://www.tug.org/mactex/,2007,,X,X,X,
+MathJax,https://www.mathjax.org,2010,,X,X,X,10894
+MathLive,https://mathlive.io/,2017,,X,X,X,2127
+Mathpix,https://mathpix.com/,2017,,v,X,X,
+mathurl,http://mathurl.com/,,,X,X,X,
+MiKTeX,https://miktex.org/,1996,,X,X,X,967
+MiTeX,https://github.com/mitex-rs/mitex,2023,,X,X,X,601
+Murfy,https://www.murfy.ai/en,2024,,v,X,X,180000
+Octree LaTeX tools,https://github.com/octree-labs/tools,2025,9,v,X,X,12
+Oleafly,https://oleafly.com/,2026,7,v,X,v,11
+OpenPrism (OpenDCAI),https://github.com/OpenDCAI/OpenPrism,2026,2,v,X,v,331
+Overleaf,https://www.overleaf.com,2014,,v,X,X,20000000
+Overleaf Community Edition,https://github.com/overleaf/overleaf,2014,,X,X,v,
+Pandoc,https://pandoc.org,2006,,X,X,X,45771
+Papeeria,https://papeeria.com/,2013,,X,X,X,
+pdfLaTeX,https://www.tug.org/applications/pdftex/,1997,,X,X,X,
+pdfTeX,https://www.tug.org/applications/pdftex/,1996,,X,X,X,
+pLaTeX,https://ctan.org/pkg/platex,1995,,X,X,X,
+Poiesis,https://github.com/tygopoodt/poiesis,2026,8,v,X,v,
+Prism (OpenAI),https://prism.openai.com/,2026,1,v,X,X,
+Roger's Online Equation Editor,http://rogercortesi.com/eqn/,,,X,X,X,
+ScienceSoft LaTeX servlet,http://sciencesoft.at/latex/index?lang=en,,,X,X,X,
+Scientific WorkPlace,https://www.sciword.co.uk/,1992,,X,X,X,
+Scribe,https://github.com/sunnyallana/Scribe,2026,5,v,X,v,2
+ScribTeX (historical; became ShareLaTeX),https://www.scribtex.com/,2011,,X,X,X,
+ShareLaTeX (merged into Overleaf),https://www.sharelatex.com/,2012,,X,X,X,1000000
+Siglum,https://github.com/SiglumProject/siglum,2025,12,X,v,X,5
+SimpleLaTeX,http://simplelatex.com/,,,X,X,X,
+SonnetPulse,https://www.ntxm.org/products/sonnetpulse/,2026,5,X,X,v,
+SwiftLaTeX,https://www.swiftlatex.com,2019,,X,v,X,2316
+Tables Generator,https://www.tablesgenerator.com/,2012,,X,X,X,
+Tectonic,https://tectonic-typesetting.github.io/,2016,,X,X,X,5014
+TeX,https://tug.org/,1978,,X,X,X,
+TeX Live,https://www.tug.org/texlive/,1996,,X,X,X,
+TeX Live.net,https://texlive.net/,2020,,X,X,X,
+TeXbrain,https://tex.swimmingbrain.dev/,2026,3,X,v,X,37
+TeXlyre,https://texlyre.github.io/texlyre/,2025,7,X,v,v,914
+TeXlyre BusyTeX demo,https://texlyre.github.io/texlyre-busytex/,2026,1,X,v,X,26
+TeXmacs,https://www.texmacs.org/,1998,,X,X,X,655
+Texmaker,https://www.xm1math.net/texmaker/,2003,,X,X,X,
+TeXnicCenter,https://www.texniccenter.org/,1999,,X,X,X,
+Texpad,https://www.texpad.com/,2011,,X,X,X,
+TeXPage,https://www.texpage.com/,,,v,X,X,
+Texpile,https://desktop.texpile.com/,2026,7,X,X,v,107
+TexSandbox,https://www.texsandbox.com/,2024,,v,X,X,
+TeXShop,https://pages.uoregon.edu/koch/texshop/,2000,,X,X,X,
+TeXstudio,https://www.texstudio.org/,2009,,X,X,X,3557
+TeXworks,https://tug.org/texworks/,2009,,X,X,X,773
+Thetapad,https://www.thetapad.com/,2025,12,v,v,v,
+TikZJax,https://tikzjax.com,2022,,X,v,X,3
+Tinyleaf,https://github.com/Oaklight/tinyleaf,2026,4,X,X,v,1
+Troy Henderson LaTeX previewer,http://www.tlhiv.org/ltxpreview/,2012,,X,X,X,
+Troy Henderson MetaPost previewer,http://www.tlhiv.org/mppreview/,2012,,X,X,X,
+TutorialsPoint Online LaTeX Editor,https://www.tutorialspoint.com/online_latex_editor.php,,,X,X,X,
+Tylax,https://github.com/scipenai/tylax,2026,1,X,X,X,464
+Tylax (WASM demo),https://convert.silkyai.cn,2026,1,X,v,X,
+TypeTeX,https://www.typetex.app/,2026,1,v,v,v,
+Typst,https://typst.app,2023,,X,v,X,55346
+Undertwig,https://www.undertwig.com,2026,7,X,v,v,
+upLaTeX,https://ctan.org/pkg/uplatex,2011,,X,X,X,
+Verbosus / VerbTeX / iVerbTeX,https://verbosus.com/,2009,,X,X,X,500000
+VimTeX,https://github.com/lervag/vimtex,2013,,X,X,X,6335
+WasmTeX (jere-mie),https://github.com/jere-mie/wasmtex,2026,3,X,v,v,1
+WebLaTeX,https://github.com/sanjib-sen/WebLaTex,2022,,v,X,X,1738
+WinEdt,https://www.winedt.com/,1993,,X,X,X,
+WinShell,https://www.winshell.org/,1998,,X,X,X,
+XeLaTeX,https://tug.org/xetex/,2007,,X,X,X,
+XeTeX,https://tug.org/xetex/,2004,,X,X,X,

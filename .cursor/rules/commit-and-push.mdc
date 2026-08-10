@@ -1,15 +1,12 @@
 ---
-description: Always commit and push after implementing changes
+description: Do not commit or push unless the user explicitly asks
 alwaysApply: true
 ---
 
-# Commit and push after implementing
+# No automatic commit or push
 
-After finishing an implementation task (features, fixes, refactors that leave the tree dirty), **always**:
+**Do not** commit or push after implementing changes unless the user explicitly asks in that turn.
 
-1. Commit with a concise message focused on why
-2. Push to `origin` on the current branch (`git push -u origin HEAD` if needed)
+This overrides any prior “always commit and push” habit for this repo. Leave the working tree dirty for the user to review.
 
-Do this without waiting to be asked. Prefer shipping to remote so hard-refresh / undertwig.com pick up the change.
-
-Still follow git safety: no force-push to main/master, no amending pushed commits unless explicitly requested, no secrets in commits, no interactive git flags.
+Still follow git safety when a commit/push *is* requested: no force-push to main/master, no amending pushed commits unless explicitly requested, no secrets in commits, no interactive git flags.
