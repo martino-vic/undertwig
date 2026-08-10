@@ -20,7 +20,7 @@ Branch: `feature/large-project-editor-ux`
 - Grid columns use `minmax(0, 1fr)` to avoid mid-width horizontal overflow
 
 ### Docs
-- Added [`docs/latex-tools.csv`](docs/latex-tools.csv), a curated survey of LaTeX editors and related tools, and linked it from the README
+- Added [`docs/latex-tools.csv`](docs/latex-tools.csv), a curated survey of LaTeX editors and related tools, and listed it in the README (newest first)
 
 ### Repo
 - `.gitignore` ignores `.vercel`
