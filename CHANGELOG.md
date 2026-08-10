@@ -19,6 +19,9 @@ Branch: `feature/large-project-editor-ux`
 - Compiler log scrolls inside its panel; Privacy / Terms / Source stay visible on large desktops
 - Grid columns use `minmax(0, 1fr)` to avoid mid-width horizontal overflow
 
+### Docs
+- Added [`docs/latex-tools.csv`](docs/latex-tools.csv), a curated survey of LaTeX editors and related tools, and linked it from the README
+
 ### Repo
 - `.gitignore` ignores `.vercel`
 - Cursor rule: commit/push only when the user asks

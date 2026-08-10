@@ -26,6 +26,21 @@ Use the live site: [www.undertwig.com](https://www.undertwig.com).
 
 Convert writes the current project into the SwiftLaTeX in-browser PdfTeX engine and renders the returned PDF in the preview pane. Compilation happens on the user's device. Package resolution may fetch TeX Live resources from the configured on-demand endpoint when needed.
 
+## Landscape
+
+A snapshot of the broader LaTeX tooling landscape is in [`docs/latex-tools.csv`](docs/latex-tools.csv). It is a curated survey of editors, compilers, engines, and related services — from long-standing desktop and cloud products to the recent wave of in-browser, WebAssembly, and AI-assisted tools.
+
+Columns:
+
+- **name**, **url** — product or project
+- **year**, **month** — first public appearance, when known
+- **AI** — uses AI-assisted writing or compilation (`v` / `X`)
+- **WASM** — compiles or previews in the browser via WebAssembly (`v` / `X`)
+- **Privacy** — local-first or offline-capable posture (`v` / `X`)
+- **Users** — approximate public user, install, or star counts when available
+
+Figures are indicative and not independently audited. Inclusion is not an endorsement.
+
 ## Performance
 
 Undertwig was measured against the [Uni Stuttgart / ITP3 LaTeX Benchmark](https://web.itp3.uni-stuttgart.de/latex-benchmark/) (QFT lecture-notes workload). On an AMD Ryzen 5 PRO 6650U, warm in-browser pdfLaTeX averaged **15.1 s** versus **14.4 s** for native TeX Live on the same machine. Full hardware notes, method, caveats, and raw timings: [`docs/benchmarks/latex-benchmark.md`](docs/benchmarks/latex-benchmark.md). Re-run via Actions → **LaTeX Benchmark** (manual workflow; green check means Wasm compile succeeded).
@@ -71,6 +86,7 @@ Signed-in session details are stored in the browser under `undertwig-auth-v2`.
 - `THIRD_PARTY_NOTICES.md` — third-party dependency notes
 - `COMPLIANCE.md` — release checklist
 - `docs/benchmarks/latex-benchmark.md` — Uni Stuttgart LaTeX Benchmark results
+- `docs/latex-tools.csv` — curated survey of LaTeX editors and related tools
 
 ## Source
 
