@@ -1,13 +1,16 @@
 name,url,year,month,AI,WASM,Privacy,Users
 8gwifi Online LaTeX Editor,https://8gwifi.org/editor,,,v,X,X,
+A2R2 Img2LaTeX visual refinement,https://arxiv.org/abs/2507.20890,2025,,v,X,X,
 AUCTeX,https://www.gnu.org/software/auctex/,1991,,X,X,X,
 Authorea,https://www.authorea.com/,2013,,X,X,X,
+agentic-pdf-reconstructor,https://github.com/Ivkalu/agentic-pdf-reconstructor,2026,,v,X,X,
 Auto-LaTeX Equations (Google Docs),https://workspace.google.com/marketplace/app/auto-latex_equations/848437649689,,,X,X,X,30000000
-Bibby AI LaTeX compiler,https://www.trybibby.com/latex-compiler,2025,,v,X,X,
+Bibby AI (trybibby),https://www.trybibby.com/,2026,2,v,v,X,
 Biber,https://ctan.org/pkg/biber,2009,,X,X,X,387
 BibTeX,https://ctan.org/pkg/bibtex,1985,,X,X,X,
 BlueLaTeX (publications.li; archived),https://github.com/BlueLaTeX,2015,,X,X,X,
 BusyTeX,https://github.com/busytex/busytex,2020,,X,v,X,74
+deepagents-printshop,https://github.com/kormco/deepagents-printshop,2026,,v,X,X,
 CLSI (Overleaf compile service),https://github.com/overleaf/clsi,2014,,X,X,X,209
 CoCalc,https://cocalc.com/features/latex-editor,2016,,v,X,X,300000
 CodeCogs Equation Editor,https://latex.codecogs.com/,2007,,X,X,X,
@@ -17,6 +20,7 @@ ConTeXt on Web (COW),https://live.contextgarden.net/,,,X,X,X,
 Crixet (now Prism),https://crixet.com/,2024,,v,v,X,
 Detexify,https://detexify.kirelabs.org/,2010,,v,X,X,842
 Detexify classify,https://detexify.kirelabs.org/classify.html,2010,,v,X,X,
+figura (TikZ vision loop),https://github.com/chrischoy/figura,2026,,v,X,X,
 Docx2Latex,https://www.docx2latex.com/,,,X,X,X,
 DynamicDocs API,https://www.dynamicdocs.online/,,,X,X,X,
 ExactPDF LaTeX to PDF,https://exactpdf.com/tools/latex-to-pdf,,,X,X,X,
@@ -34,11 +38,13 @@ Kile,https://kile.sourceforge.io/,2003,,X,X,X,105
 Kroki,https://kroki.io,2019,,X,X,X,4276
 LaTeX 4 Technics,https://www.latex4technics.com/,,,X,X,X,
 LaTeX Lab,http://docs.latexlab.org/,2010,,X,X,X,
+LATTE LaTeX iterative refinement,https://arxiv.org/abs/2409.14201,2024,,v,X,X,
 LaTeX on HTTP,https://github.com/YtoTech/latex-on-http,2017,,X,X,X,81
 LaTeX online-compiler (Halle),http://latex.informatik.uni-halle.de/,,,X,X,X,
 LaTeX Workshop,https://github.com/James-Yu/LaTeX-Workshop,2016,,X,X,X,5447642
 LaTeX.Online,https://latexonline.cc/,2012,,X,X,X,605
 latex.to,https://latex.to,2024,,X,X,X,
+latex-mcp,https://github.com/san-rat/latex-mcp,2026,,v,X,X,
 latex2png (thomasahle),https://thomasahle.com/latex2png/,,,X,X,X,47
 latex2png.com,https://latex2png.com/,,,X,X,X,
 latexmk,https://ctan.org/pkg/latexmk,1998,,X,X,X,
@@ -47,6 +53,7 @@ LetX,https://letx.app/,2026,1,v,X,v,1300
 LuaLaTeX,https://www.luatex.org/,2007,,X,X,X,
 LuaTeX,https://www.luatex.org/,2007,,X,X,X,
 LyX,https://www.lyx.org/,1995,,X,X,X,
+MagicTeX MCP,https://github.com/ZoeLinUTS/MagicTeX-mcp,2026,,v,X,X,
 MacTeX,https://www.tug.org/mactex/,2007,,X,X,X,
 MathJax,https://www.mathjax.org,2010,,X,X,X,10894
 MathLive,https://mathlive.io/,2017,,X,X,X,2127
@@ -55,6 +62,9 @@ mathurl,http://mathurl.com/,,,X,X,X,
 MiKTeX,https://miktex.org/,1996,,X,X,X,967
 MiTeX,https://github.com/mitex-rs/mitex,2023,,X,X,X,601
 Murfy,https://www.murfy.ai/en,2024,,v,X,X,180000
+OverleafCopilot,https://arxiv.org/abs/2403.09733,2024,,v,X,X,
+PaperDebugger,https://arxiv.org/abs/2512.02589,2025,,v,X,X,
+PaperFit vision typesetting agent,https://arxiv.org/abs/2605.10341,2026,5,v,X,X,
 Octree LaTeX tools,https://github.com/octree-labs/tools,2025,9,v,X,X,12
 Oleafly,https://oleafly.com/,2026,7,v,X,v,11
 OpenPrism (OpenDCAI),https://github.com/OpenDCAI/OpenPrism,2026,2,v,X,v,331
@@ -83,6 +93,8 @@ TeX,https://tug.org/,1978,,X,X,X,
 TeX Live,https://www.tug.org/texlive/,1996,,X,X,X,
 TeX Live.net,https://texlive.net/,2020,,X,X,X,
 TeXbrain,https://tex.swimmingbrain.dev/,2026,3,X,v,X,37
+TeXRA,https://texra.ai,2025,,v,X,X,
+TexGuardian,https://github.com/latexstudio/TexGuardian,2026,,v,X,X,
 TeXlyre,https://texlyre.github.io/texlyre/,2025,7,X,v,v,914
 TeXlyre BusyTeX demo,https://texlyre.github.io/texlyre-busytex/,2026,1,X,v,X,26
 TeXmacs,https://www.texmacs.org/,1998,,X,X,X,655
