@@ -113,12 +113,14 @@ Sorted by year, then month, newest first. Entries without a known date are liste
 | [Texpile](https://desktop.texpile.com/) | 2026 | 7 | X | X | v | 107 |
 | [Undertwig](https://www.undertwig.com) | 2026 | 7 | X | v | v |  |
 | [InvizCrypt](https://invizcrypt.com/) | 2026 | 5 | X | v | v |  |
+| [PaperFit vision typesetting agent](https://arxiv.org/abs/2605.10341) | 2026 | 5 | v | X | X |  |
 | [Scribe](https://github.com/sunnyallana/Scribe) | 2026 | 5 | v | X | v | 2 |
 | [SonnetPulse](https://www.ntxm.org/products/sonnetpulse/) | 2026 | 5 | X | X | v |  |
 | [Tinyleaf](https://github.com/Oaklight/tinyleaf) | 2026 | 4 | X | X | v | 1 |
 | [FlowTex](https://github.com/stolucc/flowtex) | 2026 | 3 | v | X | v |  |
 | [TeXbrain](https://tex.swimmingbrain.dev/) | 2026 | 3 | X | v | X | 37 |
 | [WasmTeX (jere-mie)](https://github.com/jere-mie/wasmtex) | 2026 | 3 | X | v | v | 1 |
+| [Bibby AI (trybibby)](https://www.trybibby.com/) | 2026 | 2 | v | v | X |  |
 | [OpenPrism (OpenDCAI)](https://github.com/OpenDCAI/OpenPrism) | 2026 | 2 | v | X | v | 331 |
 | [LetX](https://letx.app/) | 2026 | 1 | v | X | v | 1,300 |
 | [Prism (OpenAI)](https://prism.openai.com/) | 2026 | 1 | v | X | X |  |
@@ -126,17 +128,27 @@ Sorted by year, then month, newest first. Entries without a known date are liste
 | [Tylax](https://github.com/scipenai/tylax) | 2026 | 1 | X | X | X | 464 |
 | [Tylax (WASM demo)](https://convert.silkyai.cn) | 2026 | 1 | X | v | X |  |
 | [TypeTeX](https://www.typetex.app/) | 2026 | 1 | v | v | v |  |
+| [agentic-pdf-reconstructor](https://github.com/Ivkalu/agentic-pdf-reconstructor) | 2026 |  | v | X | X |  |
+| [deepagents-printshop](https://github.com/kormco/deepagents-printshop) | 2026 |  | v | X | X |  |
+| [figura (TikZ vision loop)](https://github.com/chrischoy/figura) | 2026 |  | v | X | X |  |
+| [latex-mcp](https://github.com/san-rat/latex-mcp) | 2026 |  | v | X | X |  |
+| [MagicTeX MCP](https://github.com/ZoeLinUTS/MagicTeX-mcp) | 2026 |  | v | X | X |  |
+| [TexGuardian](https://github.com/latexstudio/TexGuardian) | 2026 |  | v | X | X |  |
 | [Siglum](https://github.com/SiglumProject/siglum) | 2025 | 12 | X | v | X | 5 |
 | [Thetapad](https://www.thetapad.com/) | 2025 | 12 | v | v | v |  |
 | [FormaTeX](https://formatex.io) | 2025 | 9 | v | X | X |  |
 | [Octree LaTeX tools](https://github.com/octree-labs/tools) | 2025 | 9 | v | X | X | 12 |
 | [TeXlyre](https://texlyre.github.io/texlyre/) | 2025 | 7 | X | v | v | 914 |
 | [CollabTeX](https://github.com/JaedenRotondo/CollabTeX) | 2025 | 6 | X | X | X |  |
-| [Bibby AI LaTeX compiler](https://www.trybibby.com/latex-compiler) | 2025 |  | v | X | X |  |
+| [A2R2 Img2LaTeX visual refinement](https://arxiv.org/abs/2507.20890) | 2025 |  | v | X | X |  |
+| [PaperDebugger](https://arxiv.org/abs/2512.02589) | 2025 |  | v | X | X |  |
+| [TeXRA](https://texra.ai) | 2025 |  | v | X | X |  |
 | [Crixet (now Prism)](https://crixet.com/) | 2024 |  | v | v | X |  |
 | [inscrive.io](https://inscrive.io) | 2024 |  | v | X | X |  |
 | [latex.to](https://latex.to) | 2024 |  | X | X | X |  |
+| [LATTE LaTeX iterative refinement](https://arxiv.org/abs/2409.14201) | 2024 |  | v | X | X |  |
 | [Murfy](https://www.murfy.ai/en) | 2024 |  | v | X | X | 180,000 |
+| [OverleafCopilot](https://arxiv.org/abs/2403.09733) | 2024 |  | v | X | X |  |
 | [TexSandbox](https://www.texsandbox.com/) | 2024 |  | v | X | X |  |
 | [MiTeX](https://github.com/mitex-rs/mitex) | 2023 |  | X | X | X | 601 |
 | [Typst](https://typst.app) | 2023 |  | X | v | X | 55,346 |
